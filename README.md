@@ -1,4 +1,10 @@
-# Pi Web
+# Pi Web — Codex Style
+
+> Special thanks to [@agegr](https://github.com/agegr/pi-web), the author of Pi Web, for the excellent original project.
+>
+> This is a Codex-style UI optimization based on Pi Web. Functionality is unchanged — only the visual style and UX were adjusted to match Codex aesthetics.
+>
+> 感谢 [Pi Web 作者 @agegr](https://github.com/agegr/pi-web) 的优秀开源项目。本项目是基于 Pi Web 做的 Codex 风格 UI 优化，功能没有改变，仅调整了视觉样式与交互体验。
 
 [中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
 
