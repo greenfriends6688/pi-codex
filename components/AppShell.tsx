@@ -68,7 +68,7 @@ type AutoNameStatus =
   | { kind: "success" }
   | { kind: "error"; message: string };
 
-const TOP_BAR_ICON_BUTTON_SIZE = 36;
+const TOP_BAR_ICON_BUTTON_SIZE = 32;
 const LANGUAGE_MENU_WIDTH = 176;
 const AGENT_PANEL_WIDTH = 420;
 
@@ -1210,8 +1210,8 @@ export function AppShell() {
       aria-label={translate(themeLabelKey)}
       style={{
         display: "flex", alignItems: "center", justifyContent: "center",
-        width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-        background: "none", border: "none", borderRight: "1px solid var(--border)",
+        width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, borderRadius: "var(--radius-md)",
+        background: "none", border: "none",
         color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
       }}
       onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
@@ -1252,9 +1252,9 @@ export function AppShell() {
       aria-pressed={activeTopPanel === "language"}
       style={{
         display: "flex", alignItems: "center", justifyContent: "center",
-        width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+        width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, borderRadius: "var(--radius-md)",
         background: activeTopPanel === "language" ? "var(--bg-selected)" : "none",
-        border: "none", borderRight: "1px solid var(--border)",
+        border: "none",
         color: activeTopPanel === "language" ? "var(--text)" : "var(--text-muted)",
         cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
       }}
@@ -1303,11 +1303,14 @@ export function AppShell() {
           gap: 6,
           width: mobileBanner ? "100%" : undefined,
           minHeight: mobileBanner ? 32 : undefined,
-          height: mobileBanner ? undefined : "100%",
-          padding: mobileBanner ? "6px 12px" : "0 12px",
-          background: mobileBanner ? "color-mix(in srgb, #d97706 8%, var(--bg-panel))" : "none",
+          height: mobileBanner ? undefined : 32,
+          alignSelf: "center",
+          borderRadius: "var(--radius-md)",
+          margin: "0 2px",
+          padding: mobileBanner ? "6px 12px" : "0 10px",
+          background: mobileBanner ? "color-mix(in srgb, #d97706 8%, var(--bg-panel))" : "color-mix(in srgb, var(--warning) 10%, transparent)",
           border: "none",
-          borderRight: mobileBanner ? "none" : "1px solid var(--border)",
+          borderRight: "none",
           borderBottom: mobileBanner ? "1px solid var(--border)" : "none",
           color: "var(--warning)",
           cursor: "pointer",
@@ -1358,12 +1361,14 @@ export function AppShell() {
             justifyContent: "center",
             gap: 6,
             width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-            height: "100%",
-            padding: mobile ? 0 : "0 12px",
+            height: 32,
+            alignSelf: "center",
+            borderRadius: "var(--radius-md)",
+            margin: "0 2px",
+            padding: mobile ? 0 : "0 10px",
             background: "none",
             border: "none",
-            borderTop: "2px solid transparent",
-            borderRight: "1px solid var(--border)",
+
             color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
             cursor: selectedSession ? "pointer" : "not-allowed",
             opacity: selectedSession ? 1 : 0.45,
@@ -1441,10 +1446,9 @@ export function AppShell() {
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-                height: "100%", padding: mobile ? 0 : "0 12px",
+                height: 32, alignSelf: "center", borderRadius: "var(--radius-md)", margin: "0 2px", padding: mobile ? 0 : "0 10px",
                 background: "none", border: "none",
-                borderTop: "2px solid transparent",
-                borderRight: "1px solid var(--border)",
+
                 color: isError ? "var(--danger)" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
                 cursor: disabled ? "not-allowed" : "pointer",
                 opacity: disabled && autoNameStatus.kind !== "naming" ? 0.45 : 1,
@@ -1493,11 +1497,10 @@ export function AppShell() {
               position: "relative",
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
               width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-              height: "100%", padding: mobile ? 0 : "0 12px",
+              height: 32, alignSelf: "center", borderRadius: "var(--radius-md)", margin: "0 2px", padding: mobile ? 0 : "0 10px",
               background: activeTopPanel === "agents" ? "var(--bg-selected)" : "none",
               border: "none",
-              borderTop: activeTopPanel === "agents" ? "2px solid var(--accent)" : "2px solid transparent",
-              borderRight: "1px solid var(--border)",
+
               color: activeTopPanel === "agents" ? "var(--text)" : "var(--text-muted)",
               cursor: "pointer", flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
               transition: "color 0.1s, background 0.1s",
@@ -1533,8 +1536,7 @@ export function AppShell() {
               width: TOP_BAR_ICON_BUTTON_SIZE, height: "100%", padding: 0,
               background: activeTopPanel === "branches" ? "var(--bg-selected)" : "none",
               border: "none",
-              borderTop: activeTopPanel === "branches" ? "2px solid var(--accent)" : "2px solid transparent",
-              borderRight: "1px solid var(--border)",
+
               color: activeTopPanel === "branches" ? "var(--text)" : "var(--text-muted)",
               cursor: "pointer", flexShrink: 0,
             }}
@@ -1570,11 +1572,10 @@ export function AppShell() {
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
             width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-            height: "100%", padding: mobile ? 0 : "0 12px",
+            height: 32, alignSelf: "center", borderRadius: "var(--radius-md)", margin: "0 2px", padding: mobile ? 0 : "0 10px",
             background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
             border: "none",
-            borderTop: activeTopPanel === "system" ? "2px solid var(--accent)" : "2px solid transparent",
-            borderRight: "1px solid var(--border)",
+
             cursor: mobile && !showChat ? "not-allowed" : "pointer",
             color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
             opacity: mobile && !showChat ? 0.45 : 1,
@@ -1607,11 +1608,10 @@ export function AppShell() {
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
             width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-            height: "100%", padding: mobile ? 0 : "0 12px",
+            height: 32, alignSelf: "center", borderRadius: "var(--radius-md)", margin: "0 2px", padding: mobile ? 0 : "0 10px",
             background: activeTopPanel === "tools" ? "var(--bg-selected)" : "none",
             border: "none",
-            borderTop: activeTopPanel === "tools" ? "2px solid var(--accent)" : "2px solid transparent",
-            borderRight: "1px solid var(--border)",
+
             cursor: mobile && !showChat ? "not-allowed" : "pointer",
             color: activeTopPanel === "tools" ? "var(--text)" : "var(--text-muted)",
             opacity: mobile && !showChat ? 0.45 : 1,
@@ -1708,7 +1708,6 @@ export function AppShell() {
           pointerEvents: covered ? "none" : "auto",
           background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
           border: "none",
-          borderTop: activeTopPanel === "session" ? "2px solid var(--accent)" : "2px solid transparent",
           fontSize: 11, color: "var(--text-muted)",
           whiteSpace: "nowrap", cursor: showChat ? "pointer" : "default",
           fontVariantNumeric: "tabular-nums",
@@ -1817,7 +1816,7 @@ export function AppShell() {
         style={{
           marginLeft: !mobile && !sessionStats && !contextUsage ? "auto" : 0,
           display: "flex", alignItems: "center", justifyContent: "center",
-          width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+          width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, borderRadius: "var(--radius-md)",
           visibility: covered ? "hidden" : "visible",
           pointerEvents: covered ? "none" : "auto",
           background: rightPanelOpen ? "var(--bg-selected)" : "none",
@@ -1938,7 +1937,7 @@ export function AppShell() {
           position: "fixed",
           inset: 0,
           zIndex: 199,
-          background: "rgba(0,0,0,0.4)",
+          background: "var(--scrim)",
           opacity: sidebarOpen ? 1 : 0,
           pointerEvents: sidebarOpen ? "auto" : "none",
           transition: "opacity 0.25s ease",
@@ -1985,8 +1984,8 @@ export function AppShell() {
              aria-label={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-              background: "none", border: "none", borderRight: "1px solid var(--border)",
+              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, borderRadius: "var(--radius-md)",
+              background: "none", border: "none",
               color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
             }}
             onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text)"; }}
@@ -2028,9 +2027,9 @@ export function AppShell() {
                     position: "relative",
                     zIndex: mobileToolbarMoreOpen ? 21 : undefined,
                     display: "flex", alignItems: "center", justifyContent: "center",
-                    width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+                    width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, borderRadius: "var(--radius-md)",
                     background: mobileToolbarMoreOpen ? "var(--bg-selected)" : "none",
-                    border: "none", borderRight: "1px solid var(--border)",
+                    border: "none",
                     color: mobileToolbarMoreOpen ? "var(--text)" : "var(--text-muted)",
                     cursor: "pointer", flexShrink: 0, transition: "color 0.12s, background 0.12s",
                   }}
@@ -2116,7 +2115,7 @@ export function AppShell() {
                   style={{
                     background: "var(--bg-elev)",
                     borderLeft: "1px solid var(--border)",
-                    borderRight: "1px solid var(--border)",
+
                     borderBottom: "1px solid var(--border)",
                     overflow: "hidden",
                     padding: 4,
@@ -2502,7 +2501,7 @@ export function AppShell() {
           display: "flex",
           alignItems: "center",
           flexShrink: 0,
-          height: "calc(var(--height-toolbar, 46px) + env(safe-area-inset-top))",
+          height: "calc(var(--height-toolbar-pane, 40px) + env(safe-area-inset-top))",
           paddingTop: "env(safe-area-inset-top)",
           background: "var(--bg-panel)",
           borderBottom: "1px solid var(--border)",
@@ -2524,7 +2523,7 @@ export function AppShell() {
             aria-label={translate("files.hidePanel")}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, borderRadius: "var(--radius-md)",
               background: "var(--bg-selected)", border: "none", borderLeft: "1px solid var(--border)",
               color: "var(--text)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
             }}

@@ -114,7 +114,9 @@
   --conversation-item-gap: 16px;
   --conversation-grouped-item-gap: 4px;
   --chat-content-font-size: 13px;
+  /* Focus + scrim */
   --focus-ring: color-mix(in oklab, #339cff 70%, transparent);
+  --scrim: rgba(0, 0, 0, 0.4);
 }
 
 html.dark {
