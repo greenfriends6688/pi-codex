@@ -142,5 +142,7 @@ test("renders projects as primary rows with the selected project's tasks nested 
   assert.match(source, /<ProjectRow/);
   assert.match(source, /isSelectedProject && \([\s\S]*?ref=\{sessionListRef\}/);
   assert.match(source, /t\("sidebar\.addProject"\)/);
-  assert.match(source, /showMoreProjects/);
+  assert.doesNotMatch(source, /showMoreProjects/);
+  assert.doesNotMatch(source, /showFewerProjects/);
+  assert.doesNotMatch(source, /PROJECTS_COLLAPSED_LIMIT/);
 });

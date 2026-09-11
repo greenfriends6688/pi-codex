@@ -95,7 +95,6 @@ interface ValidatedProject {
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const LAST_CUSTOM_CWD_STORAGE_KEY = "pi-web:last-custom-cwd";
 const RUNNING_SESSIONS_POLL_MS = 2500;
-const PROJECTS_COLLAPSED_LIMIT = 6;
 
 function loadLastCustomCwd(): string {
   if (typeof window === "undefined") return "";
@@ -493,7 +492,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const isMobile = useIsMobile();
   const [validatedProject, setValidatedProject] = useState<ValidatedProject | null>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
-  const [showAllProjects, setShowAllProjects] = useState(false);
   // ponytail: 每個項目獨立展開，避免只能看選中項的傻折疊
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   const projectMenuRef = useRef<HTMLDivElement>(null);
@@ -1085,15 +1083,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (!selectedProject || recent.some((project) => project.key === selectedProject.key)) return recent;
     return [{ key: selectedProject.key, root: selectedProject.root }, ...recent];
   }, [allSessions, selectedProject]);
-  const visibleProjects = useMemo(() => {
-    if (showAllProjects || projectChoices.length <= PROJECTS_COLLAPSED_LIMIT) return projectChoices;
-    const collapsed = projectChoices.slice(0, PROJECTS_COLLAPSED_LIMIT);
-    if (!selectedProject || collapsed.some((project) => project.key === selectedProject.key)) return collapsed;
-    return [
-      projectChoices.find((project) => project.key === selectedProject.key)!,
-      ...collapsed.slice(0, PROJECTS_COLLAPSED_LIMIT - 1),
-    ];
-  }, [projectChoices, selectedProject, showAllProjects]);
+  // 项目全部展示，靠外层滚动查看，不再截断
+  const visibleProjects = projectChoices;
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
@@ -1166,7 +1157,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     observer.observe(list);
     observer.observe(section);
     return () => observer.disconnect();
-  }, [selectedProject?.key, sessionFamilies.length, showAllProjects, visibleProjects.length]);
+  }, [selectedProject?.key, sessionFamilies.length, visibleProjects.length]);
 
   const virtualIndices = getSessionListIndices(
     sessionFamilies.length,
@@ -1835,28 +1826,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               </div>
             );
           })}
-          {projectChoices.length > PROJECTS_COLLAPSED_LIMIT && (
-            <button
-              type="button"
-              onClick={() => setShowAllProjects((show) => !show)}
-              style={{
-                width: "100%",
-                height: 32,
-                display: "flex",
-                alignItems: "center",
-                padding: "0 9px",
-                background: "transparent",
-                border: "none",
-                borderRadius: "var(--radius-md)",
-                color: "var(--text-dim)",
-                cursor: "pointer",
-                textAlign: "left",
-                fontSize: 12.5,
-              }}
-            >
-              {t(showAllProjects ? "sidebar.showFewerProjects" : "sidebar.showMoreProjects")}
-            </button>
-          )}
         </div>
       </SessionSearch>
 
