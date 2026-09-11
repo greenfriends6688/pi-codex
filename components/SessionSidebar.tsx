@@ -8,13 +8,15 @@ import { skillExpansionToCommand } from "@/lib/slash-display";
 import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
+import { getFileName } from "@/lib/file-paths";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { SessionSearch } from "./SessionSearch";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 // Fixed row height for the session list. SessionItem renders at exactly this
 // height, so the list can be windowed (only the visible slice is mounted).
-export const SESSION_LIST_ITEM_HEIGHT = 32;
+export const SESSION_LIST_ITEM_HEIGHT = 34;
 
 export function getSessionListIndices(count: number, scrollTop: number, viewportHeight: number, focusedIndex = -1): number[] {
   const overscan = 8;
@@ -93,6 +95,7 @@ interface ValidatedProject {
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const LAST_CUSTOM_CWD_STORAGE_KEY = "pi-web:last-custom-cwd";
 const RUNNING_SESSIONS_POLL_MS = 2500;
+const PROJECTS_COLLAPSED_LIMIT = 6;
 
 function loadLastCustomCwd(): string {
   if (typeof window === "undefined") return "";
@@ -269,6 +272,8 @@ function PiWebTitle() {
 
   const triggerScramble = useCallback((toVersion: boolean) => {
     setShowVersion(toVersion);
+    // Vestibular-sensitive users get an instant swap instead of the scramble.
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     setScrambling(true);
     setTimeout(() => setScrambling(false), (toVersion ? 6 : 8) * 4 * (1000 / 60) + 100);
   }, []);
@@ -301,6 +306,174 @@ function PiWebTitle() {
   );
 }
 
+function SidebarNavIcon() {
+  const common = {
+    width: 15,
+    height: 15,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+  return (
+    <svg {...common}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function SidebarNavButton({
+  label,
+  onClick,
+  active,
+  disabled,
+  title,
+}: {
+  label: string;
+  onClick?: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title ?? label}
+      aria-label={label}
+      style={{
+        width: "100%",
+        height: 36,
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "0 9px",
+        background: active ? "var(--bg-selected)" : "transparent",
+        border: "none",
+        borderRadius: "var(--radius-md)",
+        color: disabled ? "var(--text-dim)" : "var(--text)",
+        cursor: disabled ? "not-allowed" : "pointer",
+        textAlign: "left",
+        fontSize: 13.5,
+        fontWeight: active ? 500 : 400,
+        opacity: disabled ? 0.42 : 1,
+        transition: "background 0.12s, color 0.12s",
+      }}
+      onMouseEnter={(event) => {
+        if (!disabled && !active) event.currentTarget.style.background = "var(--bg-hover)";
+      }}
+      onMouseLeave={(event) => {
+        if (!active) event.currentTarget.style.background = "transparent";
+      }}
+    >
+      <span style={{ display: "flex", flexShrink: 0, color: active ? "var(--text)" : "var(--text-muted)" }}>
+        <SidebarNavIcon />
+      </span>
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+    </button>
+  );
+}
+
+function ProjectRow({
+  label,
+  title,
+  selected,
+  count,
+  expanded,
+  onToggle,
+  activity,
+  onClick,
+}: {
+  label: string;
+  title: string;
+  selected: boolean;
+  count?: number;
+  expanded?: boolean;
+  onToggle?: () => void;
+  activity?: { running: number; unread: number };
+  onClick: () => void;
+}) {
+  const { t } = useI18n();
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-current={selected ? "page" : undefined}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: "100%",
+        height: 36,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "0 9px",
+        background: selected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
+        border: "none",
+        borderRadius: "var(--radius-md)",
+        color: "var(--text)",
+        cursor: "pointer",
+        textAlign: "left",
+        fontSize: 13.5,
+        fontWeight: selected ? 500 : 400,
+        transition: "background 0.12s, color 0.12s",
+      }}
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        style={{ flexShrink: 0, color: selected ? "var(--text)" : "var(--text-muted)" }}
+      >
+        <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      </svg>
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {label}
+      </span>
+      {typeof count === "number" && (
+        <span style={{ fontSize: 12, color: "var(--text-dim)", flexShrink: 0, minWidth: 14, textAlign: "right" }}>{count}</span>
+      )}
+      {showProjectActivity(activity, t)}
+      {onToggle && (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+              onToggle();
+            }
+          }}
+          aria-label={expanded ? t("sidebar.collapseSubagents") : t("sidebar.expandSubagents")}
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, flexShrink: 0, color: "var(--text-dim)", cursor: "pointer" }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ transform: expanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }}>
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      )}
+      </button>
+  );
+}
+
 export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
@@ -311,15 +484,21 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
   const [homeDir, setHomeDir] = useState<string>("");
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [projectFilter, setProjectFilter] = useState("");
   const [wtFilter, setWtFilter] = useState("");
   const [customPathOpen, setCustomPathOpen] = useState(false);
   const [customPathValue, setCustomPathValue] = useState(loadLastCustomCwd);
   const [customPathError, setCustomPathError] = useState<string | null>(null);
   const [customPathValidating, setCustomPathValidating] = useState(false);
+  const [nativePicking, setNativePicking] = useState(false);
+  const isMobile = useIsMobile();
   const [validatedProject, setValidatedProject] = useState<ValidatedProject | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  const [showAllProjects, setShowAllProjects] = useState(false);
+  // ponytail: 每個項目獨立展開，避免只能看選中項的傻折疊
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  const projectMenuRef = useRef<HTMLDivElement>(null);
+  const sessionListRef = useRef<HTMLDivElement>(null);
+  const [sessionListOffsetTop, setSessionListOffsetTop] = useState(0);
   // Worktree switcher state
   const [worktreeState, setWorktreeState] = useState<WorktreeState | null>(null);
   const [wtDropdownOpen, setWtDropdownOpen] = useState(false);
@@ -723,7 +902,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setCustomPathValue(data.cwd);
       setSelectedCwd(data.cwd);
       setCustomPathOpen(false);
-      setDropdownOpen(false);
+      setProjectMenuOpen(false);
     } catch (e) {
       setCustomPathError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -734,8 +913,52 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const handleCustomPathClick = useCallback(() => {
     setCustomPathOpen(true);
     setCustomPathError(null);
-    setDropdownOpen(false);
+    setProjectMenuOpen(false);
   }, []);
+  // ponytail: 桌面走服务端原生选框，手机直走弹窗；服务端失败再试浏览器，最后回退
+  const handleAddProjectClick = useCallback(async () => {
+    if (isMobile) {
+      handleCustomPathClick();
+      return;
+    }
+    if (nativePicking || customPathValidating) return;
+    setNativePicking(true);
+    setCustomPathError(null);
+    setProjectMenuOpen(false);
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 65000);
+      const res = await fetch("/api/cwd/pick", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPath: customPathValue || selectedCwd || undefined }),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      const data = (await res.json().catch(() => ({}))) as { cwd?: string; cancelled?: boolean; fallback?: boolean; error?: string };
+      if (res.ok && data.cwd) {
+        await commitCustomPath(data.cwd);
+        return;
+      }
+      if (data.cancelled) return;
+      if (res.status === 501 && typeof window !== "undefined" && "showDirectoryPicker" in window) {
+        try {
+          const handle = await (window as unknown as { showDirectoryPicker: (opts?: unknown) => Promise<{ name: string }> }).showDirectoryPicker({ mode: "read" });
+          const hint = handle.name;
+          const guessed = customPathValue ? `${customPathValue.replace(/\/+$/, "")}/${hint}` : hint;
+          setCustomPathValue(guessed);
+        } catch (pickError: unknown) {
+          const name = pickError instanceof Error ? pickError.name : "";
+          if (name === "AbortError") return;
+        }
+      }
+    } catch {
+      // 静默回退到自定义弹窗
+    } finally {
+      setNativePicking(false);
+    }
+    handleCustomPathClick();
+  }, [isMobile, nativePicking, customPathValidating, customPathValue, selectedCwd, commitCustomPath, handleCustomPathClick]);
   const handleDefaultCwd = useCallback(async () => {
     try {
       const res = await fetch("/api/default-cwd", { method: "POST" });
@@ -744,13 +967,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         setSelectedCwd(data.cwd);
         setCustomPathOpen(false);
         setCustomPathError(null);
-        setDropdownOpen(false);
+        setProjectMenuOpen(false);
       }
     } catch {
       // ignore
     }
   }, []);
-
   const handleCreateWorktree = useCallback(async () => {
     const branch = wtNewBranch.trim();
     if (!branch || wtBusy || !worktreeState) return;
@@ -821,9 +1043,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
-        setProjectFilter("");
+      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target as Node)) {
+        setProjectMenuOpen(false);
       }
       if (wtDropdownRef.current && !wtDropdownRef.current.contains(e.target as Node)) {
         setWtDropdownOpen(false);
@@ -849,23 +1070,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [onSelectSession]);
 
   const handleNewSession = useCallback(() => {
-    if (!selectedCwd) return;
-    // Generate a temporary UUID client-side — no backend call needed.
-    // Pi will be spawned lazily when the user sends the first message.
+    // ponytail: 允许不在项目中工作 — 没有选目录时用 homeDir 兜底
+    const effectiveCwd = selectedCwd || homeDir || "/";
     const tempId = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-    onNewSession?.(tempId, selectedCwd);
-  }, [selectedCwd, onNewSession]);
-
-  const recentProjects = getRecentProjects(allSessions);
-  const showProjectFilter = recentProjects.length > 8;
-  const visibleProjects = projectFilter.trim()
-    ? recentProjects.filter((project) => project.root.toLowerCase().includes(projectFilter.trim().toLowerCase()))
-    : recentProjects;
+    onNewSession?.(tempId, effectiveCwd);
+  }, [selectedCwd, homeDir, onNewSession]);
 
   // Sessions of every worktree in the selected project are shown together
   const selectedProject = projectFor(selectedCwd);
+  const projectChoices = useMemo(() => {
+    const recent = getRecentProjects(allSessions);
+    if (!selectedProject || recent.some((project) => project.key === selectedProject.key)) return recent;
+    return [{ key: selectedProject.key, root: selectedProject.root }, ...recent];
+  }, [allSessions, selectedProject]);
+  const visibleProjects = useMemo(() => {
+    if (showAllProjects || projectChoices.length <= PROJECTS_COLLAPSED_LIMIT) return projectChoices;
+    const collapsed = projectChoices.slice(0, PROJECTS_COLLAPSED_LIMIT);
+    if (!selectedProject || collapsed.some((project) => project.key === selectedProject.key)) return collapsed;
+    return [
+      projectChoices.find((project) => project.key === selectedProject.key)!,
+      ...collapsed.slice(0, PROJECTS_COLLAPSED_LIMIT - 1),
+    ];
+  }, [projectChoices, selectedProject, showAllProjects]);
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
@@ -873,16 +1101,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     () => getProjectActivity(allSessions, runningSessionIds, unreadSessionIds),
     [allSessions, runningSessionIds, unreadSessionIds],
   );
-
-  // Any activity in a project other than the one currently selected — shown as
-  // a dot on the (collapsed) selector button so it is visible without opening
-  // the dropdown.
-  const hasOtherWorkspaceActivity = useMemo(
-    () => [...projectActivity.entries()].some(
-      ([key, { running, unread }]) => key !== selectedProject?.key && (running > 0 || unread > 0),
-    ),
-    [projectActivity, selectedProject],
-  );
+  // ponytail: 跟随选中项目自动展开
+  useEffect(() => {
+    if (selectedProject) {
+      setExpandedProjects((prev) => {
+        if (prev.has(selectedProject.key)) return prev;
+        const next = new Set(prev);
+        next.add(selectedProject.key);
+        return next;
+      });
+    }
+  }, [selectedProject]);
 
   const filteredSessions = selectedProject
     ? sessionsForProject(allSessions, selectedProject.key)
@@ -918,9 +1147,28 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   const sessionFamilies = listSessionFamilies(filteredSessions);
 
+  useLayoutEffect(() => {
+    const list = listScrollRef.current;
+    const section = sessionListRef.current;
+    if (!list || !section) {
+      setSessionListOffsetTop(0);
+      return;
+    }
+    const updateOffset = () => {
+      const listTop = list.getBoundingClientRect().top;
+      const sectionTop = section.getBoundingClientRect().top;
+      setSessionListOffsetTop(Math.max(0, sectionTop - listTop + list.scrollTop));
+    };
+    updateOffset();
+    const observer = new ResizeObserver(updateOffset);
+    observer.observe(list);
+    observer.observe(section);
+    return () => observer.disconnect();
+  }, [selectedProject?.key, sessionFamilies.length, showAllProjects, visibleProjects.length]);
+
   const virtualIndices = getSessionListIndices(
     sessionFamilies.length,
-    listScrollTop,
+    Math.max(0, listScrollTop - sessionListOffsetTop),
     listViewportH,
     sessionFamilies.findIndex((family) => family.root.id === focusedSessionId),
   );
@@ -942,271 +1190,166 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       {/* Header */}
       <div
         style={{
-          padding: "10px 8px 8px",
+          padding: "9px 10px 8px",
           borderBottom: "1px solid var(--border-faint)",
           flexShrink: 0,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <PiWebTitle />
-          <div style={{ display: "flex", gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setSessionSearchOpen((open) => !open);
+              setWtDropdownOpen(false);
+            }}
+            title={t("sidebar.toggleSessionSearch")}
+            aria-label={t("sidebar.toggleSessionSearch")}
+            aria-expanded={sessionSearchOpen}
+            aria-controls="session-search-input"
+            className={`flex h-[30px] w-[30px] shrink-0 cursor-pointer items-center justify-center rounded-[8px] border-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-accent ${sessionSearchOpen ? "bg-bg-selected text-accent" : "bg-transparent text-text-muted"}`}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
+            </svg>
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          <SidebarNavButton
+            label={t("sidebar.newTask")}
+            onClick={handleNewSession}
+            active={!selectedSessionId}
+            disabled={false}
+            title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.newTask")}
+          />
+        </div>
+
+        <div
+          style={{
+            marginTop: 18,
+            marginBottom: 6,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            minHeight: 28,
+            paddingLeft: 10,
+            position: "relative",
+          }}
+          ref={projectMenuRef}
+        >
+          <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-dim)" }}>
+            {t("sidebar.projects")}
+          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
             <button
-              onClick={handleNewSession}
-              disabled={!selectedCwd}
+              type="button"
+              onClick={() => setProjectMenuOpen((open) => !open)}
+              title={t("sidebar.projectActions")}
+              aria-label={t("sidebar.projectActions")}
+              aria-expanded={projectMenuOpen}
               style={{
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                background: selectedCwd ? "var(--bg-selected)" : "var(--bg-subtle)",
-                border: "1px solid transparent",
-                color: selectedCwd ? "var(--text)" : "var(--text-dim)",
-                cursor: selectedCwd ? "pointer" : "not-allowed",
-                height: 30,
-                paddingLeft: 10,
-                paddingRight: 12,
+                width: 28,
+                height: 28,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 0,
+                background: projectMenuOpen ? "var(--bg-selected)" : "transparent",
+                border: "none",
                 borderRadius: "var(--radius-md)",
-                fontSize: 12,
-                fontWeight: 500,
-                letterSpacing: "-0.01em",
-                flexShrink: 0,
-                transition: "background 0.12s, color 0.12s, border-color 0.12s",
-              }}
-             title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.selectProject")}
-              onMouseEnter={(e) => {
-                if (!selectedCwd) return;
-                e.currentTarget.style.background = "var(--bg-hover)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = selectedCwd ? "var(--bg-selected)" : "var(--bg-subtle)";
-                e.currentTarget.style.color = selectedCwd ? "var(--text)" : "var(--text-dim)";
-                e.currentTarget.style.borderColor = "transparent";
+                color: projectMenuOpen ? "var(--text)" : "var(--text-dim)",
+                cursor: "pointer",
               }}
             >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                <line x1="6" y1="1" x2="6" y2="11" />
-                <line x1="1" y1="6" x2="11" y2="6" />
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <circle cx="5" cy="12" r="1.5" />
+                <circle cx="12" cy="12" r="1.5" />
+                <circle cx="19" cy="12" r="1.5" />
               </svg>
-              {t("sidebar.new")}
             </button>
             <button
               type="button"
-              onClick={() => {
-                setSessionSearchOpen((open) => !open);
-                setWtDropdownOpen(false);
+              onClick={handleAddProjectClick}
+              disabled={nativePicking || customPathValidating}
+              title={nativePicking ? t("sidebar.checking") : t("sidebar.addProject")}
+              aria-label={t("sidebar.addProject")}
+              aria-busy={nativePicking}
+              style={{
+                width: 28,
+                height: 28,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 0,
+                background: "transparent",
+                border: "none",
+                borderRadius: "var(--radius-md)",
+                color: "var(--text-dim)",
+                cursor: nativePicking ? "wait" : "pointer",
+                opacity: nativePicking ? 0.6 : 1,
               }}
-              title={t("sidebar.toggleSessionSearch")}
-              aria-label={t("sidebar.toggleSessionSearch")}
-              aria-expanded={sessionSearchOpen}
-              aria-controls="session-search-input"
-              className={`flex h-[30px] w-[30px] shrink-0 cursor-pointer items-center justify-center rounded-[10px] border-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-accent ${sessionSearchOpen ? "bg-bg-selected text-accent" : "bg-transparent text-text-muted"}`}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
-              </svg>
+              {nativePicking ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 0.8s linear infinite" }}>
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              )}
             </button>
           </div>
-        </div>
-
-        {/* CWD picker */}
-        <div ref={dropdownRef} style={{ position: "relative" }}>
-          <button
-            onClick={() => setDropdownOpen((v) => !v)}
-            title={selectedProject?.root ?? selectedCwd ?? ""}
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              padding: "6px 10px",
-              background: selectedCwd ? "var(--bg-subtle)" : "var(--accent-soft)",
-              border: `1px solid ${selectedCwd ? "transparent" : "var(--accent-border)"}`,
-              borderRadius: "var(--radius-md)",
-              cursor: "pointer",
-              fontSize: 12,
-              color: "var(--text)",
-              textAlign: "left",
-              transition: "border-color 0.15s, background 0.15s",
-            }}
-          >
-            {selectedCwd ? (
-              <PathLabel
-                text={displayCwd(selectedProject?.root ?? selectedCwd, homeDir)}
-                style={{
-                  flex: 1,
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  color: "var(--text)",
-                }}
-              />
-            ) : (
-              <span
-                style={{
-                  flex: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  color: "var(--text-dim)",
-                }}
-              >
-                 {initialSessionId && !restoredRef.current ? "" : t("sidebar.selectProject")}
-              </span>
-            )}
-            {hasOtherWorkspaceActivity && (
-              <span
-                title={t("sidebar.newActivity")}
-                aria-label={t("sidebar.newActivity")}
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: "50%",
-                  flexShrink: 0,
-                  marginLeft: 6,
-                  background: "var(--accent)",
-                }}
-              />
-            )}
-          </button>
-
           <AnimatedDropdown
-            open={dropdownOpen}
+            open={projectMenuOpen}
             style={{
               position: "absolute",
-              top: "calc(100% + 4px)",
+              top: "calc(100% + 2px)",
               left: 0,
               right: 0,
               zIndex: 100,
               background: "var(--bg-elev)",
               border: "1px solid var(--border)",
               borderRadius: "var(--radius-lg)",
-              boxShadow: "var(--shadow-md)",
+              boxShadow: "var(--shadow-lg)",
               overflow: "hidden",
+              padding: "6px 0",
             }}
           >
-              {showProjectFilter && (
-                <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                  <input
-                    value={projectFilter}
-                    onChange={(e) => setProjectFilter(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        setProjectFilter("");
-                        setDropdownOpen(false);
-                      }
-                    }}
-                     placeholder={t("sidebar.filterProjects")}
-                    autoFocus
-                    style={{
-                      width: "100%",
-                      fontSize: 11,
-                      fontFamily: "var(--font-mono)",
-                      padding: "5px 8px",
-                      border: "1px solid var(--border)",
-                      borderRadius: "var(--radius-xs)",
-                      outline: "none",
-                      background: "var(--bg)",
-                      color: "var(--text)",
-                      boxSizing: "border-box",
-                    }}
-                  />
-                </div>
-              )}
-              <div style={{ maxHeight: "min(50vh, 380px)", overflowY: "auto" }}>
-                {visibleProjects.map((project) => (
-                  <button
-                    key={project.key}
-                    onClick={() => {
-                      setSelectedCwd(project.root);
-                      setProjectFilter("");
-                      setCustomPathOpen(false);
-                      setCustomPathError(null);
-                      setDropdownOpen(false);
-                    }}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 7,
-                      width: "100%",
-                      padding: "8px 10px",
-                      background: "var(--bg)",
-                      border: "none",
-                      borderBottom: "1px solid var(--border)",
-                      color: project.key === selectedProject?.key ? "var(--text)" : "var(--text-muted)",
-                      cursor: "pointer",
-                      textAlign: "left",
-                      fontSize: 11,
-                      fontFamily: "var(--font-mono)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                    title={project.root}
-                  >
-                    {project.key === selectedProject?.key && (
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                        <polyline points="1.5 5 4 7.5 8.5 2.5" />
-                      </svg>
-                    )}
-                    {project.key !== selectedProject?.key && <span style={{ width: 10, flexShrink: 0 }} />}
-                    <PathLabel text={displayCwd(project.root, homeDir)} style={{ flex: 1 }} />
-                    {showProjectActivity(projectActivity.get(project.key), t)}
-                  </button>
-                ))}
-                {visibleProjects.length === 0 && projectFilter.trim() && (
-                   <div style={{ padding: "8px 10px", fontSize: 11, color: "var(--text-dim)" }}>{t("sidebar.noMatchingProjects")}</div>
-                )}
-              </div>
-
-              {/* Default cwd shortcut */}
-              {!customPathOpen && (
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleDefaultCwd(); }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 7,
-                    width: "100%",
-                    padding: "8px 10px",
-                    background: "none",
-                    border: "none",
-                    borderTop: visibleProjects.length > 0 ? "1px solid var(--border)" : "none",
-                    color: "var(--text-muted)",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    fontSize: 11,
-                  }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <path d="M1 3A1 1 0 0 1 2 2H4L5 3.5H8.5a.5.5 0 0 1 .5.5v4a.5.5 0 0 1-.5.5h-7A.5.5 0 0 1 1 8V3Z" />
-                  </svg>
-                   <span>{t("sidebar.useDefaultDirectory")}</span>
-                </button>
-              )}
-
-              {/* Custom path directory picker */}
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleCustomPathClick();
-                }}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                  width: "100%",
-                  padding: "8px 10px",
-                  background: "none",
-                  border: "none",
-                  color: "var(--text-muted)",
-                  cursor: "pointer",
-                  textAlign: "left",
-                  fontSize: 11,
-                }}
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" style={{ flexShrink: 0 }}>
-                  <line x1="5" y1="1" x2="5" y2="9" />
-                  <line x1="1" y1="5" x2="9" y2="5" />
+            {selectedProject && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", color: "var(--text)", fontWeight: 600, fontSize: 13 }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)" }} aria-hidden="true">
+                  <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
                 </svg>
-                <span>{t("sidebar.customPath")}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(selectedProject.root) || selectedProject.root}</span>
+                <span style={{ color: "var(--success)", flexShrink: 0 }}>✓</span>
+            </div>
+          )}
+            <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>已添加的工作区</div>
+            {projectChoices.slice(0, 8).map((project) => (
+              <button
+                key={project.key}
+                type="button"
+                onClick={() => {
+                  setSelectedCwd(project.root);
+                  setCustomPathError(null);
+                  setProjectMenuOpen(false);
+                }}
+                title={project.root}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: project.key === selectedProject?.key ? "var(--bg-selected)" : "transparent", border: "none", color: project.key === selectedProject?.key ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                  <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+                </svg>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(project.root) || project.root}</span>
               </button>
+            ))}
+            <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+            <button type="button" onClick={() => void handleDefaultCwd()} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+              {t("sidebar.useDefaultDirectory")}
+            </button>
           </AnimatedDropdown>
         </div>
 
@@ -1553,23 +1696,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             title={inactiveWorktreeSelector.title}
             style={{
               width: "100%",
-              height: 29,
+              height: 28,
               boxSizing: "border-box",
-              marginTop: 6,
+              marginTop: 4,
               display: "flex",
               alignItems: "center",
               gap: 6,
               padding: "0 10px",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-sm)",
-              background: "var(--bg-hover)",
+              border: "none",
+              borderRadius: "var(--radius-md)",
+              background: "transparent",
               color: "var(--text-dim)",
-              fontSize: 11,
+              fontSize: 12,
               lineHeight: 1.35,
               whiteSpace: "nowrap",
               textAlign: "left",
               cursor: "default",
-              opacity: 0.82,
             }}
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -1583,67 +1725,127 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         )}
       </div>
 
-      {/* Session list */}
+      {/* Projects and their tasks */}
       <SessionSearch open={sessionSearchOpen} query={sessionSearchQuery} refreshKey={sessionListVersion} selectedSessionId={selectedSessionId} onSelectSession={handleSelectSessionFromList}>
-      <div
-        ref={listScrollRef}
-        onScroll={handleListScroll}
-        style={{ flex: "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}
-      >
-        {loading && (
-          <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            {t("sidebar.loading")}
-          </div>
-        )}
-        {error && (
-          <div style={{ padding: "12px 14px", color: "var(--danger)", fontSize: 12 }}>
-            {error}
-          </div>
-        )}
-        {!loading && !error && sessionFamilies.length === 0 && (
-          <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
-            {t("sidebar.noSessions")}
-          </div>
-        )}
-        {sessionFamilies.length > 0 && (
-          <div
-            style={{
-              position: "relative",
-              height: sessionFamilies.length * SESSION_LIST_ITEM_HEIGHT,
-            }}
-          >
-            {virtualIndices.map((index) => {
-              const family = sessionFamilies[index];
-              const familySessions = [family.root, ...family.subagents];
-              const displaySession = family.latestModified === family.root.modified
-                ? family.root
-                : { ...family.root, modified: family.latestModified };
-              // Bubble blur after the input's save handler before unpinning the row.
-              return (
-                <div
-                  key={family.root.id}
-                  onFocus={() => setFocusedSessionId(family.root.id)}
-                  onBlur={() => setFocusedSessionId(null)}
-                  style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0 }}
-                >
-                  <SessionItem
-                    session={displaySession}
-                    isSelected={familySessions.some((session) => session.id === selectedSessionId)}
-                    isRunning={familySessions.some((session) => runningSessionIds.has(session.id))}
-                    isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))}
-                    onClick={() => handleSelectSessionFromList(family.root)}
-                    onRenamed={loadSessions}
-                    onDeleted={(id) => {
-                      onSessionDeleted?.(id);
-                      loadSessions();
-                    }}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        <div
+          ref={listScrollRef}
+          onScroll={handleListScroll}
+          style={{ flex: "1 1 auto", overflowY: "auto", padding: "0 6px 8px", minHeight: 80 }}
+        >
+          {loading && projectChoices.length === 0 && (
+            <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
+              {t("sidebar.loading")}
+            </div>
+          )}
+          {error && (
+            <div style={{ padding: "12px 14px", color: "var(--danger)", fontSize: 12 }}>
+              {error}
+            </div>
+          )}
+          {!loading && !error && visibleProjects.length === 0 && (
+            <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
+              {t("sidebar.noSessions")}
+            </div>
+          )}
+          {visibleProjects.map((project) => {
+            const isSelectedProject = project.key === selectedProject?.key;
+            const count = sessionsForProject(allSessions, project.key).length;
+            const isExpanded = expandedProjects.has(project.key);
+            return (
+              <div key={project.key}>
+                <ProjectRow
+                  label={getFileName(project.root) || project.root}
+                  title={project.root}
+                  selected={isSelectedProject}
+                  count={count}
+                  expanded={isExpanded}
+                  onToggle={() => {
+                    setExpandedProjects((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(project.key)) next.delete(project.key);
+                      else next.add(project.key);
+                      return next;
+                    });
+                  }}
+                  activity={projectActivity.get(project.key)}
+                  onClick={() => {
+                    setSelectedCwd(project.root);
+                    setCustomPathError(null);
+                    setProjectMenuOpen(false);
+                  }}
+                />
+                {isExpanded &&
+                  (() => {
+                    const families = listSessionFamilies(sessionsForProject(allSessions, project.key));
+                    if (families.length === 0) {
+                      return (
+                        <div style={{ padding: "6px 0 6px 34px", color: "var(--text-dim)", fontSize: 12 }}>{t("sidebar.noTasks")}</div>
+                      );
+                    }
+                    if (project.key === selectedProject?.key) {
+                      return (
+                        <div ref={sessionListRef} style={{ minHeight: sessionFamilies.length > 0 ? sessionFamilies.length * SESSION_LIST_ITEM_HEIGHT : 34 }}>
+                          {sessionFamilies.length > 0 && (
+                            <div style={{ position: "relative", height: sessionFamilies.length * SESSION_LIST_ITEM_HEIGHT }}>
+                              {virtualIndices.map((index) => {
+                                const family = sessionFamilies[index];
+                                const familySessions = [family.root, ...family.subagents];
+                                const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
+                                return (
+                                  <div key={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0 }}>
+                                    <div style={{ flex: 1, minWidth: 0 }}>
+                                      <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 1, marginLeft: 8, borderLeft: "1px solid var(--border-faint)", paddingLeft: 4 }}>
+                        {families.map((family) => {
+                          const familySessions = [family.root, ...family.subagents];
+                          const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
+                          return (
+                            <div key={family.root.id}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+              </div>
+            );
+          })}
+          {projectChoices.length > PROJECTS_COLLAPSED_LIMIT && (
+            <button
+              type="button"
+              onClick={() => setShowAllProjects((show) => !show)}
+              style={{
+                width: "100%",
+                height: 32,
+                display: "flex",
+                alignItems: "center",
+                padding: "0 9px",
+                background: "transparent",
+                border: "none",
+                borderRadius: "var(--radius-md)",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                textAlign: "left",
+                fontSize: 12.5,
+              }}
+            >
+              {t(showAllProjects ? "sidebar.showFewerProjects" : "sidebar.showMoreProjects")}
+            </button>
+          )}
+        </div>
       </SessionSearch>
 
     </div>
@@ -1889,11 +2091,11 @@ function SessionItem({
         height: SESSION_LIST_ITEM_HEIGHT,
         display: "flex",
         alignItems: "center",
-        marginLeft: 6,
-        marginRight: 6,
-        paddingLeft: depth > 0 ? depth * 8 + 8 : 8,
+        marginLeft: 12,
+        marginRight: 0,
+        paddingLeft: depth > 0 ? depth * 8 + 8 : 10,
         paddingRight: 4,
-        borderRadius: "var(--radius-pill)",
+        borderRadius: "var(--radius-md)",
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
           ? "var(--danger-soft)"
@@ -1983,8 +2185,8 @@ function SessionItem({
           )}
           {isRunning ? <RunningSessionIndicator /> : isUnread ? <UnreadSessionIndicator /> : null}
           <span
-            title={title}
-            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: isSelected ? 500 : 400, lineHeight: 1.3, color: "var(--text)" }}
+            title={`${title} · ${formatRelativeTime(session.modified, locale)}`}
+            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13.5, fontWeight: isSelected ? 500 : 400, lineHeight: 1.3, color: "var(--text)" }}
           >
             {title}
           </span>
@@ -2022,7 +2224,9 @@ function SessionItem({
             </button>
           )}
 
-          {/* Hover actions replace the metadata readout; metadata reserves its space when idle */}
+          {/* Hover actions appear over the title's trailing edge; nothing is
+              reserved when idle so the title uses the full row width. The
+              relative time stays available in the title tooltip above. */}
           {hovered && !session.transient ? (
             <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
               <button
@@ -2077,12 +2281,7 @@ function SessionItem({
                 </svg>
               </button>
             </div>
-          ) : (
-            <span style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-dim)", fontSize: 11, flexShrink: 0, opacity: hovered ? 1 : 0, transition: "opacity 0.12s" }}>
-              <span title={session.modified}>{formatRelativeTime(session.modified, locale)}</span>
-              <span>{t("sidebar.messagesCount", { count: session.messageCount })}</span>
-            </span>
-          )}
+          ) : null}
         </>
       )}
     </div>

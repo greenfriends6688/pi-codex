@@ -1436,6 +1436,111 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   })();
   const rawToolPresetLabel = Object.entries(TOOL_PRESET_MAP).find(([, v]) => v === (toolPreset ?? "default"))?.[0] ?? "default";
   const toolPresetLabel = rawToolPresetLabel === "chat-only" ? t("chat.chatOnly") : rawToolPresetLabel;
+  const sendButton = (
+    <button
+      onClick={handleSend}
+      disabled={!value.trim() && !attachedImages.length}
+      aria-label={t("chat.send")}
+      title={t("chat.send")}
+      style={{
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 32,
+        height: 32,
+        padding: 0,
+        background: (value.trim() || attachedImages.length) ? "var(--primary-bg)" : "var(--bg-subtle)",
+        border: "none",
+        borderRadius: "var(--radius-pill)",
+        color: (value.trim() || attachedImages.length) ? "var(--primary-fg)" : "var(--text-dim)",
+        cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
+        transition: "background 0.15s, opacity 0.15s",
+      }}
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 19V5" />
+        <polyline points="5 12 12 5 19 12" />
+      </svg>
+    </button>
+  );
+  const stopButton = (
+    <button
+      onClick={onAbort}
+      title={t("chat.stopAgent")}
+      aria-label={t("chat.stopAgent")}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 32,
+        height: 32,
+        padding: 0,
+        background: "var(--primary-bg)",
+        border: "none",
+        borderRadius: "var(--radius-pill)",
+        color: "var(--primary-fg)",
+        cursor: "pointer",
+        flexShrink: 0,
+      }}
+    >
+      <svg width="11" height="11" viewBox="0 0 10 10" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
+      </svg>
+    </button>
+  );
+  const queueControls = isStreaming ? (
+    <>
+      {onSteer && (
+        <button
+          onClick={() => sendQueued("steer")}
+          disabled={!canQueueStreamingMessage}
+          title={t("chat.steerHint")}
+          style={{
+            display: "flex", alignItems: "center", gap: 5,
+            height: 28, padding: "0 9px",
+            background: canQueueStreamingMessage ? "var(--warning-soft)" : "none",
+            border: `1px solid ${canQueueStreamingMessage ? "var(--warning)" : "var(--border)"}`,
+            borderRadius: "var(--radius-md)",
+            color: canQueueStreamingMessage ? "var(--warning)" : "var(--text-dim)",
+            cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
+            fontSize: 12, fontWeight: 500,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
+          </svg>
+          {t("chat.steer")}
+        </button>
+      )}
+      {onFollowUp && (
+        <button
+          onClick={() => sendQueued("followup")}
+          disabled={!canQueueStreamingMessage}
+          title={`${t("chat.followUpHint")} (${isMobile ? "Ctrl/Cmd+" : ""}Alt/Option+Enter)`}
+          aria-keyshortcuts={isMobile ? "Control+Alt+Enter Meta+Alt+Enter" : "Alt+Enter"}
+          style={{
+            display: "flex", alignItems: "center", gap: 5,
+            height: 28, padding: "0 9px",
+            background: canQueueStreamingMessage ? "var(--accent-soft)" : "none",
+            border: `1px solid ${canQueueStreamingMessage ? "var(--accent-border)" : "var(--border)"}`,
+            borderRadius: "var(--radius-md)",
+            color: canQueueStreamingMessage ? "var(--accent)" : "var(--text-dim)",
+            cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
+            fontSize: 12, fontWeight: 500,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
+            <line x1="2" y1="9" x2="8" y2="9" />
+          </svg>
+          {t("chat.followUp")}
+        </button>
+      )}
+    </>
+  ) : null;
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -1485,7 +1590,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           e.target.value = "";
         }}
       />}
-      <div style={{ maxWidth: "var(--composer-max-width, 816px)", margin: "0 auto" }}>
+      <div style={{ maxWidth: "var(--composer-max-width, 892px)", margin: "0 auto" }}>
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
         {showImageUnsupportedWarning && (() => {
@@ -1501,7 +1606,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         })()}
         {/* Queued steering / follow-up messages (delivered by pi on upcoming turns) */}
         {((queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0)) > 0 && (
-          <div style={{
+          <div className="anim-popover-down" style={{
             marginBottom: 8,
             border: "1px solid var(--border)",
             borderRadius: "var(--radius-md)",
@@ -1650,6 +1755,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           {historyMenuOpen && inputHistory.length > 0 && (
             <div
               ref={historyMenuRef}
+              className="anim-popover"
               style={{
                 position: "absolute",
                 left: 0,
@@ -1737,6 +1843,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           {slashMenuOpen && slashQuery !== null && (
             <div
               ref={slashMenuRef}
+              className="anim-popover"
               style={{
                 position: "absolute",
                 left: 0,
@@ -1895,6 +2002,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               : "";
             return (
               <div
+                className="anim-popover"
                 style={{
                   position: "absolute",
                   left: 0,
@@ -1986,18 +2094,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             style={{
               minWidth: 0,
               display: "flex",
-              flexDirection: compact ? "column" : "row",
-              gap: 8,
-              alignItems: compact ? "stretch" : "center",
+              flexDirection: "column",
               background: compact ? "none" : "var(--bg-elev)",
               border: compact ? "none" : `1px solid ${bashMode ? "var(--border-strong)" : isStreaming && (onSteer || onFollowUp)
                 ? "var(--warning)"
                 : "var(--border)"}`,
-              borderRadius: compact ? 0 : "var(--radius-composer, 22px)",
-              padding: compact ? 0 : "8px 8px 8px 12px",
+              borderRadius: compact ? 0 : "var(--radius-composer, 18px)",
+              padding: compact ? 0 : "10px 8px 6px 12px",
               boxShadow: compact ? "none" : "var(--shadow-sm)",
               transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
             } as React.CSSProperties}
+          >
+          <div
+            style={{
+              minWidth: 0,
+              display: "flex",
+              flexDirection: compact ? "column" : "row",
+              gap: 8,
+              alignItems: compact ? "stretch" : "center",
+            }}
           >
           <textarea
             ref={textareaRef}
@@ -2051,85 +2166,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             }}
           />
 
-          {isStreaming ? (
+          {(compact || isMobile) && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
-              {onSteer && (
-                <button
-                  onClick={() => sendQueued("steer")}
-                  disabled={!canQueueStreamingMessage}
-                  title={t("chat.steerHint")}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "5px 10px",
-                    background: canQueueStreamingMessage ? "var(--warning-soft)" : "none",
-                    border: `1px solid ${canQueueStreamingMessage ? "var(--warning)" : "var(--border)"}`,
-                    borderRadius: "var(--radius-md)",
-                    color: canQueueStreamingMessage ? "var(--warning)" : "var(--text-dim)",
-                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
-                    fontSize: 12, fontWeight: 600, letterSpacing: "-0.01em",
-                    transition: "background 0.12s",
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 1 L9 5 L5 9" /><line x1="1" y1="5" x2="9" y2="5" />
-                  </svg>
-                  {t("chat.steer")}
-                </button>
-              )}
-              {onFollowUp && (
-                <button
-                  onClick={() => sendQueued("followup")}
-                  disabled={!canQueueStreamingMessage}
-                  title={`${t("chat.followUpHint")} (${isMobile ? "Ctrl/Cmd+" : ""}Alt/Option+Enter)`}
-                  aria-keyshortcuts={isMobile ? "Control+Alt+Enter Meta+Alt+Enter" : "Alt+Enter"}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5,
-                    padding: "5px 10px",
-                    background: canQueueStreamingMessage ? "var(--accent-soft)" : "none",
-                    border: `1px solid ${canQueueStreamingMessage ? "var(--accent-border)" : "var(--border)"}`,
-                    borderRadius: "var(--radius-md)",
-                    color: canQueueStreamingMessage ? "var(--accent)" : "var(--text-dim)",
-                    cursor: canQueueStreamingMessage ? "pointer" : "not-allowed",
-                    fontSize: 12, fontWeight: 600, letterSpacing: "-0.01em",
-                    transition: "background 0.12s",
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="5" y1="1" x2="5" y2="6" /><polyline points="2.5 3.5 5 1 7.5 3.5" />
-                    <line x1="2" y1="9" x2="8" y2="9" />
-                  </svg>
-                  {t("chat.followUp")}
-                </button>
-              )}
+              {isStreaming ? stopButton : sendButton}
             </div>
-          ) : (
-            <button
-              onClick={handleSend}
-              disabled={!value.trim() && !attachedImages.length}
-              aria-label={t("chat.send")}
-              title={t("chat.send")}
-              style={{
-                flexShrink: 0,
-                alignSelf: "flex-end",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: "var(--spacing-token-button-composer, 28px)",
-                height: "var(--spacing-token-button-composer, 28px)",
-                background: (value.trim() || attachedImages.length) ? "var(--primary-bg)" : "var(--bg-subtle)",
-                border: "none",
-                borderRadius: "var(--radius-pill)",
-                color: (value.trim() || attachedImages.length) ? "var(--primary-fg)" : "var(--text-dim)",
-                cursor: (value.trim() || attachedImages.length) ? "pointer" : "not-allowed",
-                transition: "background 0.15s, opacity 0.15s",
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M12 19V5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-            </button>
           )}
           </div>
-        </div>
 
         {/* Bash mode status label */}
         {bashMode && (
@@ -2140,7 +2182,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
         {/* Bottom bar: left | center (context) | right */}
         {!compact && <div style={{
-          marginTop: 8,
+          marginTop: 6,
           display: isMobile ? "grid" : "flex",
           gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : undefined,
           alignItems: "center",
@@ -2171,10 +2213,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 e.currentTarget.style.color = attachedImages.length ? "var(--accent)" : "var(--text-muted)";
               }}
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                <circle cx="8.5" cy="8.5" r="1.5" />
-                <polyline points="21 15 16 10 5 21" />
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" />
               </svg>
             </button>
             {/* Model selector - visible always, disabled while the session or switch is busy */}
@@ -2305,7 +2345,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{thinkingDisplayLabel}</span>}
                 </button>
                 {thinkingDropdownOpen && (
-                  <div style={{
+                  <div className="anim-popover" style={{
                     position: "absolute", bottom: "calc(100% + 6px)",
                     ...(isMobile ? { left: 0 } : { right: 0 }),
                     zIndex: 100, background: "var(--bg)", border: "1px solid var(--border)",
@@ -2391,7 +2431,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   {(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{toolPresetLabel}</span>}
                 </button>
                 {toolDropdownOpen && (
-                  <div style={{
+                  <div className="anim-popover" style={{
                     position: "absolute",
                     bottom: "calc(100% + 6px)",
                     right: isMobile ? undefined : 0,
@@ -2480,32 +2520,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             )}
 
-            {isStreaming && (
-              <button
-                onClick={onAbort}
-                 title={t("chat.stopAgent")}
-                style={{
-                  display: "flex", alignItems: "center", gap: 6,
-                  padding: "8px 14px",
-                  height: 28,
-                  background: "var(--danger-soft)",
-                  border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)",
-                  borderRadius: "var(--radius-md)",
-                  color: "var(--danger)",
-                  cursor: "pointer",
-                  fontSize: 12, fontWeight: 600,
-                  whiteSpace: "nowrap", letterSpacing: "-0.01em",
-                  transition: "background 0.12s",
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = "color-mix(in srgb, var(--danger) 18%, transparent)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = "var(--danger-soft)"; }}
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                  <rect x="1.5" y="1.5" width="7" height="7" rx="1.5" fill="currentColor" />
-                </svg>
-                 {t("chat.stop")}
-              </button>
-            )}
+            {isStreaming && queueControls}
 
             {onSoundToggle !== undefined && (
               <button
@@ -2591,10 +2606,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 </svg>
               </button>
             )}
+            {!isMobile && (isStreaming ? stopButton : sendButton)}
             </div>
           </div>
 
         </div>}
+        {/* Close composer panel (wraps textarea + bottom controls) */}
+        </div>
+        {/* Close main-input relative wrapper (anchors history / @-mention menus) */}
+        </div>
       </div>
     </div>
   );

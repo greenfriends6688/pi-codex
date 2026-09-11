@@ -11,13 +11,13 @@ const chatAppearanceHook = await readFile(new URL("../hooks/useChatAppearance.ts
 const jiti = createJiti(import.meta.url);
 const { clampChatContentWidth, clampChatContentFontSize } = await jiti.import("../hooks/useChatAppearance.ts");
 
-const widthVariable = /var\(--chat-content-max-width, 768px\)/g;
-const composerVariable = /var\(--composer-max-width, 816px\)/g;
+const widthVariable = /var\(--chat-content-max-width, 860px\)/g;
+const composerVariable = /var\(--composer-max-width, 892px\)/g;
 
-test("chat content keeps the 768px Codex default behind one shared variable", () => {
+test("chat content keeps the 860px Codex default behind one shared variable", () => {
   assert.equal((chatWindow.match(widthVariable) ?? []).length, 1);
   assert.equal((chatInput.match(composerVariable) ?? []).length, 1);
-  assert.match(globals, /--chat-content-max-width: 768px;/);
+  assert.match(globals, /--chat-content-max-width: 860px;/);
   assert.doesNotMatch(chatWindow, /max-w-\[768px\]|maxWidth: 768/);
   assert.doesNotMatch(chatInput, /maxWidth: 768/);
 });
@@ -34,8 +34,8 @@ test("General chat settings own the chat width preference", () => {
 });
 
 test("chat width validation preserves the default and supported range", () => {
-  assert.equal(clampChatContentWidth(undefined), 768);
-  assert.equal(clampChatContentWidth("invalid"), 768);
+  assert.equal(clampChatContentWidth(undefined), 860);
+  assert.equal(clampChatContentWidth("invalid"), 860);
   assert.equal(clampChatContentWidth(700), 700);
   assert.equal(clampChatContentWidth(1104), 1104);
   assert.equal(clampChatContentWidth(2400), 2000);

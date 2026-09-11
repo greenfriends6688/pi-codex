@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
-export const CHAT_CONTENT_WIDTH_DEFAULT = 768;
+export const CHAT_CONTENT_WIDTH_DEFAULT = 860;
 export const CHAT_CONTENT_WIDTH_MIN = 640;
 export const CHAT_CONTENT_WIDTH_MAX = 2000;
 export const CHAT_CONTENT_WIDTH_STORAGE_KEY = "pi-chat-content-width";

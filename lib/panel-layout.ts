@@ -1,9 +1,9 @@
 export const MOBILE_MAX_WIDTH = 640;
 export const SPLIT_PANEL_MIN_WIDTH = 960;
 
-// Codex sidebar sizing: clamp(240px, 275px, min(520px, 100vw - 320px)).
-export const SIDEBAR_DEFAULT_WIDTH = 275;
-export const SIDEBAR_MIN_WIDTH = 240;
+// Codex sidebar sizing: compact by default, but still user-resizable.
+export const SIDEBAR_DEFAULT_WIDTH = 224;
+export const SIDEBAR_MIN_WIDTH = 216;
 export const SIDEBAR_MAX_WIDTH = 520;
 
 export const RIGHT_PANEL_FALLBACK_WIDTH = 384;
@@ -17,6 +17,16 @@ export function clampPanelWidth(width: number, minWidth: number, maxWidth: numbe
   const finiteWidth = Number.isFinite(width) ? width : minWidth;
   const effectiveMax = Math.max(minWidth, maxWidth);
   return Math.round(Math.max(minWidth, Math.min(effectiveMax, finiteWidth)));
+}
+
+// Codex shows the editor and the file tree side by side inside one pane. The
+// pane only splits when it is wide enough to hold both; narrower panes keep the
+// single-surface behavior, where the tree yields to the active viewer.
+export const PANEL_EXPLORER_WIDTH = 248;
+export const PANEL_SPLIT_MIN_WIDTH = 560;
+
+export function getSplitPanelWidth(viewportWidth: number): number {
+  return clampPanelWidth(Math.round(viewportWidth * 0.5), PANEL_SPLIT_MIN_WIDTH, 760);
 }
 
 export function getDefaultRightPanelWidth(viewportWidth: number): number {

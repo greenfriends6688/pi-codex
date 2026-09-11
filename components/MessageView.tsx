@@ -307,6 +307,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -374,25 +375,31 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
-      style={{ marginBottom: 16, display: "flex", flexDirection: "column", alignItems: "flex-end" }}
+      className="anim-message-in"
+      style={{ marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "flex-start" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setFocused(false);
+      }}
     >
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, maxWidth: "80%" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, width: "100%", maxWidth: "100%" }}>
         <div
           style={{
             flex: 1,
             minWidth: 0,
-            background: "var(--user-bg)",
+            background: "var(--bg-subtle)",
             border: "1px solid var(--border-faint)",
-            borderRadius: "var(--radius-2xl)",
-            padding: "8px 12px",
-            fontSize: "calc(13px + var(--chat-font-size-offset, 0px))",
-            lineHeight: 1.6,
+            borderRadius: "var(--radius-xl)",
+            padding: "12px 16px",
+            fontSize: "calc(14px + var(--chat-font-size-offset, 0px))",
+            lineHeight: 1.65,
             color: "var(--text)",
             wordBreak: "break-word",
             maxHeight: USER_BUBBLE_MAX_HEIGHT,
             overflowY: "auto",
+            boxShadow: "none",
           }}
         >
           {commandText ? (
@@ -465,16 +472,13 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
       </div>
 
       {/* Bottom row: action buttons + timestamp */}
-      {(time || canFork || canNavigate || true) && (
+      {(hovered || focused || forking || copied) && (
         <div style={{
-          display: "flex", alignItems: "center", justifyContent: "flex-end",
-          gap: 6, marginTop: 3,
+          display: "flex", alignItems: "center", justifyContent: "flex-start",
+          gap: 6, marginTop: 4,
         }}>
           <div style={{
             display: "flex", gap: 3,
-            opacity: hovered ? 1 : 0,
-            pointerEvents: hovered ? "auto" : "none",
-            transition: "opacity 0.12s",
           }}>
             <button
               onClick={copyContent}
@@ -509,9 +513,6 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           {(canFork || canNavigate) && (
             <div style={{
               display: "flex", gap: 3,
-              opacity: (hovered || forking) ? 1 : 0,
-              pointerEvents: (hovered || forking) ? "auto" : "none",
-              transition: "opacity 0.12s",
             }}>
               {canNavigate && (
                 <button
@@ -612,6 +613,7 @@ function AssistantMessageView({
   const blocks = useMemo(() => blockItems.map(({ block }) => block), [blockItems]);
   const providerError = getAssistantErrorMessage(message, { isStreaming });
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const [copied, setCopied] = useState(false);
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
@@ -734,56 +736,69 @@ function AssistantMessageView({
     <div
       data-message-role="assistant"
       data-entry-id={entryId}
-      style={{ marginBottom: 16 }}
+      className="anim-message-in"
+      style={{ marginBottom: 20 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) setFocused(false);
+      }}
     >
-      {/* Model label */}
-      <div
-        style={{
-          fontSize: 11,
-          color: "var(--text-dim)",
-          marginBottom: 4,
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-        }}
-      >
-        {message.provider && (
-          <span>{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
-        )}
-        {isStreaming && (() => {
-          const est = Math.round(estimatedTokens);
-          return (
-            <>
+      {/* Codex keeps the response surface quiet; model metadata is only useful
+          while a response is actively generating. */}
+      {isStreaming && (
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--text-dim)",
+            marginBottom: 4,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+        >
+          {message.provider && (
+            <span>{modelNames?.[`${message.provider}:${message.model}`] ?? modelNames?.[message.model] ?? message.model}</span>
+          )}
+          {(() => {
+            const est = Math.round(estimatedTokens);
+            return (
+              <>
 
-              {est > 0 && (
-                <span style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text)" }} title={t("i18n.estimatedTokens")}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 11, fontWeight: 400 }}>
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
-                    </svg>
-                    {est}
+                {est > 0 && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text)" }} title={t("i18n.estimatedTokens")}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 11, fontWeight: 400 }}>
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
+                      </svg>
+                      {est}
+                    </span>
+                    {tps !== null && (() => {
+                      const bg = tps >= 50 ? "#53b3cb" : tps >= 30 ? "#9bc53d" : tps >= 15 ? "#f9c22e" : "#e01a4f";
+                      return (
+                        <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: "var(--radius-xs)", background: bg, color: "#fff", fontSize: 11, fontWeight: 400 }}>
+                          {tps.toFixed(1)} t/s
+                        </span>
+                      );
+                    })()}
                   </span>
-                  {tps !== null && (() => {
-                    const bg = tps >= 50 ? "#53b3cb" : tps >= 30 ? "#9bc53d" : tps >= 15 ? "#f9c22e" : "#e01a4f";
-                    return (
-                      <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: "var(--radius-xs)", background: bg, color: "#fff", fontSize: 11, fontWeight: 400 }}>
-                        {tps.toFixed(1)} t/s
-                      </span>
-                    );
-                  })()}
-                </span>
-              )}
-            </>
-          );
-        })()}
-      </div>
+                )}
+              </>
+            );
+          })()}
+        </div>
+      )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blockItems.map(({ block, originalIndex }) => (
           <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
         ))}
+        {isStreaming && (
+          <span aria-hidden="true" style={{ display: "flex", alignItems: "center", minHeight: 18 }}>
+            <span className="streaming-caret" />
+          </span>
+        )}
       </div>
 
       {providerError && (
@@ -811,8 +826,11 @@ function AssistantMessageView({
         <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
       )}
 
-      <div style={{
+      <div className="reveal-on-hover" style={{
         display: "flex", alignItems: "center", gap: 8, marginTop: 4,
+        opacity: hovered || focused || copied ? 1 : 0,
+        pointerEvents: hovered || focused || copied ? "auto" : "none",
+        transition: "opacity var(--motion-fast) ease",
       }}>
         {message.usage && !isStreaming && (
           <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
@@ -832,9 +850,9 @@ function AssistantMessageView({
               cursor: "pointer",
               fontSize: 11, fontWeight: 400,
               whiteSpace: "nowrap",
-              opacity: hovered ? 1 : 0,
-              pointerEvents: hovered ? "auto" : "none",
-              transition: "opacity 0.12s, color 0.12s",
+              opacity: hovered || focused ? 1 : 0,
+              pointerEvents: hovered || focused ? "auto" : "none",
+              transition: "opacity var(--motion-fast) ease, color var(--motion-fast) ease",
             }}
             onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
             onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
@@ -937,13 +955,13 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex 
   return (
     <div style={{
       display: "flex", alignItems: "flex-start", gap: 6, minWidth: 0,
-      border: "1px solid var(--border-faint)",
-      borderRadius: "var(--radius-lg)",
-      padding: "7px 11px",
-      background: "var(--bg-subtle)",
+      border: "none",
+      borderRadius: 0,
+      padding: "2px 0",
+      background: "transparent",
       fontFamily: "var(--font-mono)",
-      fontSize: "calc(11px + var(--chat-font-size-offset, 0px))",
-      lineHeight: 1.5,
+      fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
+      lineHeight: 1.45,
     }}>
       <button
         type="button"
@@ -985,7 +1003,12 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex 
             overflowWrap: "anywhere",
           }}
         >
-           {loading ? t("i18n.loadingThinking") : error ?? (block.deferred ? content : block.thinking)}
+          {loading ? (
+            <span style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0" }} aria-hidden="true">
+              <span className="skeleton-line" style={{ height: 10, width: "92%" }} />
+              <span className="skeleton-line" style={{ height: 10, width: "78%" }} />
+            </span>
+          ) : error ?? (block.deferred ? content : block.thinking)}
         </div>
       )}
       {duration !== undefined && (
@@ -999,6 +1022,52 @@ function isSubagentToolDetails(value: unknown): value is SubagentToolDetails {
   if (!value || typeof value !== "object") return false;
   const details = value as Partial<SubagentToolDetails>;
   return details.kind === "pi-web-subagent" && typeof details.sessionId === "string";
+}
+
+function ToolCallIcon({ toolName }: { toolName: string }) {
+  const name = toolName.toLowerCase();
+  const common = {
+    width: 12,
+    height: 12,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    "aria-hidden": true,
+  };
+
+  if (name.includes("read") || name.includes("view") || name.includes("open")) {
+    return (
+      <svg {...common}>
+        <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5Z" />
+        <path d="M4 5.5v15" />
+      </svg>
+    );
+  }
+  if (name.includes("edit") || name.includes("write") || name.includes("patch")) {
+    return (
+      <svg {...common}>
+        <path d="M12 20h9" />
+        <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
+      </svg>
+    );
+  }
+  if (name.includes("search") || name.includes("grep") || name.includes("find")) {
+    return (
+      <svg {...common}>
+        <circle cx="11" cy="11" r="7" />
+        <path d="m20 20-4-4" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="m7 9 3 3-3 3M13 15h4" />
+    </svg>
+  );
 }
 
 function ToolCallBlock({ block, result, duration, onOpenSession }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSession?: (sessionId: string) => void }) {
@@ -1017,15 +1086,19 @@ function ToolCallBlock({ block, result, duration, onOpenSession }: { block: Tool
   const resultIsEmpty = resultText === null ? false : (resultText.trim() === "(no output)" || resultText.trim() === "");
   const isError = result?.isError ?? false;
   const subagent = isSubagentToolDetails(result?.details) ? result.details : null;
+  const showExpandedSurface = expanded || isError;
 
   return (
     <div
       style={{
-        borderRadius: "var(--radius-xl)",
+        borderRadius: "var(--radius-lg)",
         overflow: "hidden",
         fontSize: 12,
-        border: `1px solid ${isError ? "color-mix(in srgb, var(--danger) 38%, var(--border))" : "var(--border)"}`,
-        background: isError ? "var(--danger-soft)" : "var(--tool-bg)",
+        border: `1px solid ${isError
+          ? "color-mix(in srgb, var(--danger) 38%, var(--border))"
+          : showExpandedSurface ? "var(--border)" : "transparent"}`,
+        background: isError ? "var(--danger-soft)" : showExpandedSurface ? "var(--tool-bg)" : "transparent",
+        transition: "background 0.12s, border-color 0.12s",
       }}
     >
       {/* ── Tool call header ── */}
@@ -1038,16 +1111,26 @@ function ToolCallBlock({ block, result, duration, onOpenSession }: { block: Tool
             gap: 7,
             flex: 1,
             minWidth: 0,
-            padding: "6px 10px",
+            padding: expanded ? "7px 10px" : "5px 8px",
             background: "none",
             border: "none",
             color: "var(--text-muted)",
             cursor: "pointer",
             fontSize: 12,
             textAlign: "left",
+            borderRadius: "var(--radius-md)",
+          }}
+          onMouseEnter={(e) => {
+            if (!expanded) e.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(e) => {
+            if (!expanded) e.currentTarget.style.background = "none";
           }}
         >
-          <span style={{ color: isError ? "var(--danger)" : "var(--text)", fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: 11, flexShrink: 0 }}>
+          <span style={{ display: "inline-flex", alignItems: "center", color: isError ? "var(--danger)" : "var(--text-muted)", flexShrink: 0 }}>
+            <ToolCallIcon toolName={block.toolName} />
+          </span>
+          <span style={{ color: isError ? "var(--danger)" : "var(--text-muted)", fontWeight: 500, fontSize: 12, flexShrink: 0 }}>
             {block.toolName}
           </span>
           <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
@@ -1083,7 +1166,7 @@ function ToolCallBlock({ block, result, duration, onOpenSession }: { block: Tool
             fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
             lineHeight: 1.5,
             overflow: "auto",
-            background: "var(--bg-subtle)",
+            background: "var(--code-bg)",
             borderTop: "1px solid var(--border)",
             whiteSpace: "pre-wrap",
             wordBreak: "break-all",

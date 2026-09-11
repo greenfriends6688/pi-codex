@@ -397,7 +397,8 @@ export function ChatMinimap({
         pendingNavigationRef.current = null;
         lockActiveNode(pendingNode.index);
         const targetOffset = scrollEl.clientHeight * 0.3;
-        scrollEl.scrollTo({ top: Math.max(0, targetTop - targetOffset), behavior: "smooth" });
+        const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+        scrollEl.scrollTo({ top: Math.max(0, targetTop - targetOffset), behavior: reduceMotion ? "auto" : "smooth" });
       }
     }, 150);
   }, [lockActiveNode, messageRefs, scrollContainer, syncActiveNode]);
@@ -446,11 +447,12 @@ export function ChatMinimap({
       onRevealHistory();
       return;
     }
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     const targetTop = Math.max(
       0,
       node.targetTurn.scrollTop - scrollEl.clientHeight * 0.3,
     );
-    scrollEl.scrollTo({ top: targetTop, behavior });
+    scrollEl.scrollTo({ top: targetTop, behavior: reduceMotion ? "auto" : behavior });
   }, [lockActiveNode, onRevealHistory, scrollContainer]);
 
   const scrollToAssistant = useCallback((node: NodeInfo, assistantIndex: number) => {
@@ -475,7 +477,8 @@ export function ChatMinimap({
       - scrollEl.clientHeight * 0.3
     );
     lockActiveNode(node.index);
-    scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: reduceMotion ? "auto" : "smooth" });
   }, [lockActiveNode, onRevealHistory, scrollContainer]);
 
   const findNearestNode = useCallback((ratio: number): NodeInfo | null => {
@@ -526,7 +529,8 @@ export function ChatMinimap({
       - scrollEl.clientHeight * 0.3
     );
     lockActiveNode(node.index);
-    scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+    const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    scrollEl.scrollTo({ top: Math.max(0, targetTop), behavior: reduceMotion ? "auto" : "smooth" });
   }, [lockActiveNode, onRevealHistory, scrollContainer]);
 
   const cancelPreviewHide = useCallback(() => {

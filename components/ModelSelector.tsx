@@ -233,6 +233,7 @@ export function ModelSelector({
             ref={panelRef}
             role="listbox"
             aria-label={ariaLabel}
+            className={openAbove ? "anim-popover-down" : "anim-popover"}
             style={{
               position: "fixed",
               ...verticalPosition,
@@ -246,6 +247,7 @@ export function ModelSelector({
               borderRadius: "var(--radius-lg)",
               background: "var(--bg-elev)",
               boxShadow: "var(--shadow-md)",
+              transformOrigin: openAbove ? "bottom center" : "top center",
             }}
           >
             {showFilter && (

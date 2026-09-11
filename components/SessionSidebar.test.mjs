@@ -130,3 +130,17 @@ test("hides subagent rows and aggregates their state into the main session row",
   assert.match(source, /familySessions\.some\(\(session\) => runningSessionIds\.has\(session\.id\)\)/);
   assert.doesNotMatch(source, /function SessionTreeItem/);
 });
+
+test("keeps configuration out of the sidebar — entry points live in the AppShell footer", () => {
+  assert.match(source, /label=\{t\("sidebar\.newTask"\)\}/);
+  assert.doesNotMatch(source, /section="(?:models|skills|plugins|settings)"/);
+  assert.doesNotMatch(source, /onOpenSettings/);
+});
+
+test("renders projects as primary rows with the selected project's tasks nested below", () => {
+  assert.match(source, /\{visibleProjects\.map\(\(project\) => \{/);
+  assert.match(source, /<ProjectRow/);
+  assert.match(source, /isSelectedProject && \([\s\S]*?ref=\{sessionListRef\}/);
+  assert.match(source, /t\("sidebar\.addProject"\)/);
+  assert.match(source, /showMoreProjects/);
+});

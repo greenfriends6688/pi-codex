@@ -101,10 +101,10 @@
   --elevation-sidebar: var(--elevation-stroke), 0 3px 7.5px rgba(0, 0, 0, 0.03), 0 0 16px rgba(0, 0, 0, 0.02);
 
   /* Layout metrics lifted from the Codex app:
-     thread content 48rem (768px), toolbar 46px, composer radius 5.5×spacing,
-     and a 24px inline overhang that lets the composer sit wider than the thread. */
-  --chat-content-max-width: 768px;
-  --composer-max-width: calc(var(--chat-content-max-width) + 48px);
+     thread content 860px, toolbar 46px, composer radius 5.5×spacing,
+     and a 16px inline overhang that lets the composer sit wider than the thread. */
+  --chat-content-max-width: 860px;
+  --composer-max-width: calc(var(--chat-content-max-width) + 32px);
   --radius-composer: 22px;
   --height-toolbar: 46px;
   --height-toolbar-sm: 36px;
@@ -117,6 +117,15 @@
   /* Focus + scrim */
   --focus-ring: color-mix(in oklab, #339cff 70%, transparent);
   --scrim: rgba(0, 0, 0, 0.4);
+
+  /* Motion — single source of truth for durations/easings.
+     fast: hover/press, base: menus/popovers, med: toasts/dialogs, slow: panels. */
+  --motion-fast: 120ms;
+  --motion-base: 150ms;
+  --motion-med: 180ms;
+  --motion-slow: 250ms;
+  --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-standard: cubic-bezier(0.32, 0, 0.24, 1);
 }
 
 html.dark {
@@ -1378,24 +1387,195 @@ span.token.table {
   to   { opacity: 1; transform: scale(1); }
 }
 
-@keyframes drop-icon-float {
-  0%, 100% { transform: translateY(0px); }
-  50%       { transform: translateY(-6px); }
-}
-
-@keyframes drop-ring-pulse {
-  0%, 100% { opacity: 0.5; transform: scale(1); }
-  50%       { opacity: 1;   transform: scale(1.06); }
-}
-
 @keyframes drop-ripple {
   0%   { transform: scale(0); opacity: 0.6; }
   100% { transform: scale(1); opacity: 0; }
 }
 
+/* Streaming caret — the live "pen tip" at the end of generated text. */
 @keyframes blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+
+/* ---------------------------------------------------------------------------
+   Unified motion system — every floating layer enters with the same language:
+   fade + small rise + subtle un-scale. Dialogs scale a touch more from center,
+   backdrops only fade. Keep entry at --motion-base/--motion-med so menus feel
+   snappy and dialogs feel settled. Exit animations stay with components that
+   keep a mounted-then-hide state (e.g. AnimatedDropdown, NoticeShelf).
+--------------------------------------------------------------------------- */
+
+@keyframes popover-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes popover-in-down {
+  from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+
+@keyframes phase-dot {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-2px); }
+}
+
+.anim-popover {
+  animation: popover-in var(--motion-base) var(--ease-out) both;
+  transform-origin: bottom center;
+}
+
+.anim-popover-down {
+  animation: popover-in-down var(--motion-base) var(--ease-out) both;
+  transform-origin: top center;
+}
+
+.anim-dialog {
+  animation: dialog-in var(--motion-med) var(--ease-out) both;
+  transform-origin: center;
+}
+
+.anim-backdrop {
+  animation: backdrop-in var(--motion-base) ease-out both;
+}
+
+.anim-message-in {
+  animation: message-in var(--motion-med) var(--ease-out) both;
+}
+
+/* Press feedback — one shared rule so every button feels tactile without
+   per-component onMouseDown handlers. Disabled controls opt out. */
+button:not(:disabled),
+a.file-viewer-icon-button {
+  transition: transform var(--motion-fast) var(--ease-out), background-color var(--motion-fast) ease, color var(--motion-fast) ease, border-color var(--motion-fast) ease, opacity var(--motion-fast) ease;
+}
+
+button:not(:disabled):active,
+a.file-viewer-icon-button:active {
+  transform: scale(0.97);
+}
+
+/* Keyboard users get the same affordance hover users get. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Skeleton shimmer for loading states (sessions, files, thinking). */
+.skeleton-line {
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--bg-hover) 25%,
+    var(--bg-selected) 50%,
+    var(--bg-hover) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+/* Streaming caret rendered after in-flight assistant text. */
+.streaming-caret {
+  display: inline-block;
+  width: 8px;
+  height: 1.05em;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: blink 1.1s ease-in-out infinite;
+}
+
+/* Three-dot "working" indicator next to phase labels. */
+.phase-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 7px;
+  vertical-align: baseline;
+}
+
+.phase-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: phase-dot 1.2s ease-in-out infinite;
+}
+
+.phase-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.phase-dots > span:nth-child(3) { animation-delay: 0.3s; }
+
+/* Hover-only action bars also reveal on keyboard focus so Tab users and
+   touch readers are not locked out of copy/fork/edit affordances. */
+.reveal-on-hover:focus-within {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+.reveal-on-hover:focus-within button {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* Global reduced-motion safety net: decorative motion collapses to instant
+   state changes while content (text, layout) still updates. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .sidebar-container,
+  .right-panel-container,
+  .right-panel-overlay-backdrop {
+    transition: none !important;
+  }
+
+  button:not(:disabled):active,
+  a.file-viewer-icon-button:active {
+    transform: none;
+  }
+
+  .streaming-caret {
+    animation: none;
+    opacity: 1;
+  }
+
+  .phase-dots > span {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  .skeleton-line {
+    animation: none;
+  }
 }
 
 @keyframes spin {
@@ -1489,7 +1669,7 @@ span.token.table {
   .sidebar-container {
     position: relative;
     overflow: hidden;
-    transition: width 0.2s ease, min-width 0.2s ease;
+    transition: width var(--motion-slow) var(--ease-out), min-width var(--motion-slow) var(--ease-out);
   }
   .sidebar-container.sidebar-open {
     width: var(--sidebar-width, 260px);
@@ -1515,7 +1695,7 @@ span.token.table {
 @media (min-width: 960px) {
   .right-panel-container {
     overflow: hidden;
-    transition: width 0.2s ease, min-width 0.2s ease;
+    transition: width var(--motion-slow) var(--ease-out), min-width var(--motion-slow) var(--ease-out);
     flex-shrink: 0;
   }
   .right-panel-container.right-panel-open {
@@ -1551,7 +1731,7 @@ span.token.table {
     background: rgba(0, 0, 0, 0.24);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--motion-slow) var(--ease-out);
   }
   .right-panel-overlay-backdrop.is-open {
     opacity: 1;
@@ -1567,7 +1747,7 @@ span.token.table {
     min-width: 300px;
     overflow: hidden;
     box-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
-    transition: transform 0.2s ease;
+    transition: transform var(--motion-slow) var(--ease-out);
   }
   .right-panel-container.right-panel-open {
     transform: translateX(0);
@@ -1595,7 +1775,7 @@ span.token.table {
     width: 280px;
     max-width: 85vw;
     height: var(--app-viewport-height, 100dvh);
-    transition: transform 0.25s ease, box-shadow 0.25s ease;
+    transition: transform var(--motion-slow) var(--ease-out), box-shadow var(--motion-slow) var(--ease-out);
   }
   .sidebar-container.sidebar-open {
     transform: translateX(0);
@@ -1612,7 +1792,7 @@ span.token.table {
     height: var(--app-viewport-height, 100dvh);
     z-index: 250;
     overflow: hidden;
-    transition: transform 0.2s ease;
+    transition: transform var(--motion-slow) var(--ease-out);
   }
   .right-panel-container.right-panel-open {
     width: auto;

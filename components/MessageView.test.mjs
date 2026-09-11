@@ -151,7 +151,7 @@ test("renders subagents as standard tool calls with only an extra session button
     onOpenSession() {},
   });
 
-  assert.match(html, /border:1px solid var\(--border\)/);
+  assert.match(html, /border:1px solid transparent/);
   assert.match(html, />Agent</);
   assert.match(html, />Explore</);
   assert.match(html, /aria-label="Open sub-agent session"/);
@@ -229,6 +229,18 @@ test("renders a complete SDK skill expansion as a compact command", () => {
   assert.match(html, /src\/main\.ts/);
   assert.match(html, /aria-expanded="false"/);
   assert.doesNotMatch(html, /Review the supplied files/);
+});
+
+test("renders user messages as left-aligned Codex prompt cards", () => {
+  const html = renderMessage({
+    role: "user",
+    content: "Make the conversation match the Codex layout.",
+  });
+
+  assert.match(html, /align-items:flex-start/);
+  assert.match(html, /max-width:100%/);
+  assert.match(html, /border:1px solid var\(--border-faint\)/);
+  assert.doesNotMatch(html, /max-width:88%/);
 });
 
 test("does not collapse incomplete skill-looking user text", () => {

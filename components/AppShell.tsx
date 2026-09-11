@@ -69,7 +69,7 @@ type AutoNameStatus =
   | { kind: "success" }
   | { kind: "error"; message: string };
 
-const TOP_BAR_ICON_BUTTON_SIZE = 32;
+const TOP_BAR_ICON_BUTTON_SIZE = 28;
 const LANGUAGE_MENU_WIDTH = 176;
 const AGENT_PANEL_WIDTH = 420;
 
@@ -1114,6 +1114,11 @@ export function AppShell() {
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
   const windowTitle = activeCwdName ? `${activeCwdName} - Pi Web` : "Pi Web";
+  const topBarSessionTitle = selectedSession
+    ? (selectedSession.name?.trim()
+      || selectedSession.firstMessage?.trim().replace(/\s+/g, " ").slice(0, 80)
+      || translate("i18n.newSession"))
+    : translate("i18n.newSession");
 
   useEffect(() => {
     const syncWindowTitle = () => {
@@ -1159,7 +1164,7 @@ export function AppShell() {
               aria-label={label}
               style={{
                 flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                height: 32, padding: 0, background: "none", border: "none",
+                height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: "none", border: "none",
                 borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
                 fontSize: 12, opacity: disabled ? 0.35 : 1,
                 transition: "background 0.12s, color 0.12s",
@@ -1179,7 +1184,7 @@ export function AppShell() {
           aria-label={translate("common.settings")}
           style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            height: 32, padding: 0, background: "none", border: "none",
+            height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: "none", border: "none",
             borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: "pointer",
             fontSize: 12, transition: "background 0.12s, color 0.12s",
           }}
@@ -1301,7 +1306,7 @@ export function AppShell() {
           height: mobileBanner ? undefined : 32,
           alignSelf: "center",
           borderRadius: "var(--radius-md)",
-          margin: "0 2px",
+          margin: 0,
           padding: mobileBanner ? "6px 12px" : "0 10px",
           background: mobileBanner ? "color-mix(in srgb, var(--warning) 8%, var(--bg-panel))" : "color-mix(in srgb, var(--warning) 10%, transparent)",
           border: "none",
@@ -1340,7 +1345,7 @@ export function AppShell() {
   const renderChatToolbarActions = (mobile: boolean) => {
     if (!mobile && !showChat) return null;
     return (
-      <div style={{ display: "flex", alignItems: "stretch", height: "100%" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
         <button
           type="button"
           onClick={() => {
@@ -1354,12 +1359,10 @@ export function AppShell() {
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            gap: 6,
-            width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-            height: 32,
-            alignSelf: "center",
+            width: TOP_BAR_ICON_BUTTON_SIZE,
+            height: TOP_BAR_ICON_BUTTON_SIZE,
             borderRadius: "var(--radius-md)",
-            margin: "0 2px",
+            margin: 0,
             padding: mobile ? 0 : "0 10px",
             background: "none",
             border: "none",
@@ -1402,7 +1405,7 @@ export function AppShell() {
             <path d="M3 3v5h5" />
             <path d="M12 7v5l3 2" />
           </svg>
-          {!mobile && <span>{translate("history.label")}</span>}
+
         </button>
         {(() => {
           // 上下文压缩后当前消息可能不再包含 user 消息，需同时参考会话文件的消息总数。
@@ -1440,8 +1443,8 @@ export function AppShell() {
               aria-label={label}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-                height: 32, alignSelf: "center", borderRadius: "var(--radius-md)", margin: "0 2px", padding: mobile ? 0 : "0 10px",
+                width: TOP_BAR_ICON_BUTTON_SIZE,
+                height: TOP_BAR_ICON_BUTTON_SIZE, borderRadius: "var(--radius-md)", margin: 0, padding: 0,
                 background: "none", border: "none",
 
                 color: isError ? "var(--danger)" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
@@ -1477,7 +1480,7 @@ export function AppShell() {
                   <path d="M6 4V2M5 3H3M19 19v3M17.5 20.5h3" />
                 </svg>
               )}
-              {!mobile && <span>{label}</span>}
+
             </button>
           );
         })()}
@@ -1491,8 +1494,8 @@ export function AppShell() {
             style={{
               position: "relative",
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-              height: 32, alignSelf: "center", borderRadius: "var(--radius-md)", margin: "0 2px", padding: mobile ? 0 : "0 10px",
+              width: TOP_BAR_ICON_BUTTON_SIZE,
+              height: TOP_BAR_ICON_BUTTON_SIZE, borderRadius: "var(--radius-md)", margin: 0, padding: 0,
               background: activeTopPanel === "agents" ? "var(--bg-selected)" : "none",
               border: "none",
 
@@ -1505,7 +1508,7 @@ export function AppShell() {
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
             </svg>
-            {!mobile && <span>{translate("agentSwitcher.title")}</span>}
+
             <span
               aria-hidden="true"
               style={{
@@ -1528,7 +1531,7 @@ export function AppShell() {
             aria-pressed={activeTopPanel === "branches"}
             style={{
               display: "flex", alignItems: "center", justifyContent: "center",
-              width: TOP_BAR_ICON_BUTTON_SIZE, height: "100%", padding: 0,
+              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
               background: activeTopPanel === "branches" ? "var(--bg-selected)" : "none",
               border: "none",
 
@@ -1566,8 +1569,8 @@ export function AppShell() {
           aria-pressed={activeTopPanel === "system"}
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-            height: 32, alignSelf: "center", borderRadius: "var(--radius-md)", margin: "0 2px", padding: mobile ? 0 : "0 10px",
+            width: TOP_BAR_ICON_BUTTON_SIZE,
+            height: TOP_BAR_ICON_BUTTON_SIZE, alignSelf: "center", borderRadius: "var(--radius-md)", margin: 0, padding: 0,
             background: activeTopPanel === "system" ? "var(--bg-selected)" : "none",
             border: "none",
 
@@ -1591,7 +1594,7 @@ export function AppShell() {
             <line x1="8" y1="13" x2="16" y2="13" />
             <line x1="8" y1="17" x2="13" y2="17" />
           </svg>
-          {!mobile && <span>{translate("system.label")}</span>}
+
         </button>
         <button
           type="button"
@@ -1602,8 +1605,8 @@ export function AppShell() {
           aria-pressed={activeTopPanel === "tools"}
           style={{
             display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            width: mobile ? TOP_BAR_ICON_BUTTON_SIZE : undefined,
-            height: 32, alignSelf: "center", borderRadius: "var(--radius-md)", margin: "0 2px", padding: mobile ? 0 : "0 10px",
+            width: TOP_BAR_ICON_BUTTON_SIZE,
+            height: TOP_BAR_ICON_BUTTON_SIZE, alignSelf: "center", borderRadius: "var(--radius-md)", margin: 0, padding: 0,
             background: activeTopPanel === "tools" ? "var(--bg-selected)" : "none",
             border: "none",
 
@@ -1624,7 +1627,7 @@ export function AppShell() {
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemTools?.some((tool) => tool.active) ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z" />
           </svg>
-          {!mobile && <span>{translate("tools.label")}</span>}
+
         </button>
         {mobile && renderThemeButton(true)}
         {mobile && renderLanguageButton(true)}
@@ -1697,7 +1700,7 @@ export function AppShell() {
           gap: mobile ? 7 : 10,
           paddingLeft: mobile ? 6 : 12,
           paddingRight: mobile ? 6 : 12,
-          height: "100%",
+          height: TOP_BAR_ICON_BUTTON_SIZE,
           overflow: "hidden",
           visibility: covered ? "hidden" : "visible",
           pointerEvents: covered ? "none" : "auto",
@@ -1751,35 +1754,27 @@ export function AppShell() {
           </>
         ) : (
           <>
-            {tokens && tokens.input > 0 && (
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
-                </svg>
-                {formatCompact(tokens.input)}
-              </span>
-            )}
-            {tokens && tokens.output > 0 && (
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
-                </svg>
-                {formatCompact(tokens.output)}
-              </span>
-            )}
-            {tokens && tokens.cacheRead > 0 && (
-              <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
-                </svg>
-                {formatCompact(tokens.cacheRead)}
-              </span>
-            )}
-            {costText && (
-              <span style={{ display: "flex", alignItems: "center", color: "var(--text)", fontWeight: 500 }}>
-                {costText}
-              </span>
-            )}
+            <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.input ? 1 : 0.45 }}>
+              <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
+              </svg>
+              {formatCompact(tokens?.input ?? 0)}
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.output ? 1 : 0.45 }}>
+              <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
+              </svg>
+              {formatCompact(tokens?.output ?? 0)}
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.cacheRead ? 1 : 0.45 }}>
+              <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
+              </svg>
+              {formatCompact(tokens?.cacheRead ?? 0)}
+            </span>
+            <span style={{ display: "flex", alignItems: "center", color: costText ? "var(--text)" : "var(--text-muted)", fontWeight: 500, opacity: costText ? 1 : 0.6 }}>
+              {costText ?? "$0.00"}
+            </span>
             {desktopContextText && (
               <span style={{ display: "flex", alignItems: "center", gap: 4, color: contextColor }}>
                 <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1809,7 +1804,7 @@ export function AppShell() {
         aria-label={rightPanelOpen ? translate("files.hidePanel") : translate("files.showPanel")}
         data-mobile-toolbar-file={mobile ? "true" : undefined}
         style={{
-          marginLeft: !mobile && !sessionStats && !contextUsage ? "auto" : 0,
+          marginLeft: 8,
           display: "flex", alignItems: "center", justifyContent: "center",
           width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, borderRadius: "var(--radius-md)",
           visibility: covered ? "hidden" : "visible",
@@ -1996,6 +1991,51 @@ export function AppShell() {
               </svg>
             )}
           </button>
+          {!isMobile && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                minWidth: 0,
+                maxWidth: "min(46vw, 560px)",
+                marginLeft: 8,
+                marginRight: 16,
+                overflow: "hidden",
+              }}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                style={{ flexShrink: 0, color: "var(--text-muted)" }}
+              >
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M8 9h8M8 13h5" />
+              </svg>
+              <span
+                title={topBarSessionTitle}
+                style={{
+                  minWidth: 0,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  letterSpacing: 0,
+                  color: "var(--text)",
+                }}
+              >
+                {topBarSessionTitle}
+              </span>
+            </div>
+          )}
           {isMobile && (
             <div
               ref={mobileToolbarRef}
@@ -2069,15 +2109,15 @@ export function AppShell() {
             </div>
           )}
           {!isMobile && (
-            <>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 4, marginLeft: "auto", minWidth: 0 }}>
               {renderThemeButton(false)}
               {renderLanguageButton(false)}
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
               {renderSessionStatsButton(false)}
-            </>
+              {renderMainFileToggle(false)}
+            </div>
           )}
-          {!isMobile && renderMainFileToggle(false)}
           {isMobile && sessionHasBranches && (
             <BranchNavigator
               tree={branchTree}
@@ -2094,7 +2134,7 @@ export function AppShell() {
           )}
           {/* Top panel dropdown — shared, only one active at a time */}
           {activeTopPanel && topPanelPos && (
-            <div style={{
+            <div className="anim-popover-down" style={{
               position: "fixed",
               top: topPanelPos.top,
               left: topPanelPos.left,

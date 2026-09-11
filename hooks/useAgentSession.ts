@@ -390,11 +390,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     const container = scrollContainerRef.current;
     if (!container) return;
+    const reduceMotion = typeof window !== "undefined"
+      && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     // Scroll the chat container itself instead of scrolling a sentinel element
     // into view: that propagates to every scrollable ancestor, and on mobile
     // the keyboard-shifted document layer visibly jumps the whole app while
     // streaming content follows the tail.
-    container.scrollTo({ top: container.scrollHeight, behavior });
+    container.scrollTo({ top: container.scrollHeight, behavior: reduceMotion ? "auto" : behavior });
     previousScrollTopRef.current = container.scrollTop;
   }, []);
 

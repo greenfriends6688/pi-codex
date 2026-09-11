@@ -616,10 +616,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     const element = scrollContainerRef.current?.querySelector<HTMLElement>(searchMessage?.role === "user" ? selector : `${selector} [data-search-target]`);
     if (element) {
       scrollToMessage(element);
-      element.animate([
-        { backgroundColor: "var(--bg-selected)" },
-        { backgroundColor: "transparent" },
-      ], { duration: 2500 });
+      const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      if (!reduceMotion) {
+        element.animate([
+          { backgroundColor: "var(--bg-selected)" },
+          { backgroundColor: "transparent" },
+        ], { duration: 2500 });
+      }
     }
     setPendingSearchScroll(null);
     onSearchTargetHandled?.(pendingSearchScroll);
@@ -713,7 +716,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     chatInputRef?.current?.addImages(files);
   }, [chatInputRef]);
 
-  const { isDragOver, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
+  const { isDragOver, isRejectedDrag, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
 
   const visibleMessages = messages.filter((m) => isMessageGroupAnchor(m) || m.role === "assistant");
   // Stable Map identity: `messages` doesn't change during streaming updates
@@ -901,8 +904,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   if (loading) {
     return (
-      <div className="flex h-full items-center justify-center text-text-muted">
-         {t("chat.loadingSession")}
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-8" role="status" aria-live="polite" aria-label={t("chat.loadingSession")}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "min(100%, 480px)" }} aria-hidden="true">
+          <div className="skeleton-line" style={{ height: 14, width: "38%" }} />
+          <div className="skeleton-line" style={{ height: 56, width: "100%" }} />
+          <div className="skeleton-line" style={{ height: 56, width: "92%", alignSelf: "flex-end" }} />
+          <div className="skeleton-line" style={{ height: 14, width: "24%" }} />
+        </div>
+        <div className="text-xs text-text-muted">{t("chat.loadingSession")}</div>
       </div>
     );
   }
@@ -924,6 +933,21 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
+      {isRejectedDrag && !isDragOver && (
+        <div
+          role="status"
+          className="anim-popover-down pointer-events-none absolute inset-x-0 top-3 z-50 mx-auto w-fit max-w-[calc(100%-32px)] px-3 py-1.5 text-xs"
+          style={{
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-pill)",
+            color: "var(--text-muted)",
+            boxShadow: "var(--shadow-md)",
+          }}
+        >
+          {t("chat.dropImagesOnly")}
+        </div>
+      )}
       {isDragOver && (
         <div className="pointer-events-none absolute inset-0 z-50 flex animate-[drop-zone-in_0.15s_ease_both] items-center justify-center backdrop-blur-[1px]" style={{ background: "var(--accent-soft)" }}>
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -987,7 +1011,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
-            <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 768px)", margin: "0 auto" }}>
+            <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 860px)", margin: "0 auto" }}>
             {(() => {
               let lastUserIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
@@ -1197,14 +1221,16 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (
-              <div className="break-words py-2 text-xs text-text-muted">
-                <span className="animate-[pulse_1.5s_infinite]">{phaseLabel(agentPhase, t)}</span>
+              <div className="break-words py-2 text-xs text-text-muted" role="status" aria-live="polite">
+                <span>{phaseLabel(agentPhase, t)}</span>
+                <span className="phase-dots" aria-hidden="true"><span /><span /><span /></span>
               </div>
             )}
 
             {bashRunning && !pendingBash && (
-              <div className="py-2 text-xs text-text-muted">
-                 <span className="animate-[pulse_1.5s_infinite]">{t("chat.runningCommand")}</span>
+              <div className="py-2 text-xs text-text-muted" role="status" aria-live="polite">
+                <span>{t("chat.runningCommand")}</span>
+                <span className="phase-dots" aria-hidden="true"><span /><span /><span /></span>
               </div>
             )}
 
@@ -1242,6 +1268,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           ref={quotePopoverRef}
           role={quoteInputOpen ? "dialog" : "toolbar"}
           aria-label={t(quoteInputOpen ? "chat.newQuoteChat" : "chat.askSelection")}
+          className="anim-popover-down"
           style={{
             position: "fixed",
             top: quotedSelection.top,
@@ -1318,22 +1345,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
       <div className="relative shrink-0">
         {isEmptyNew && (
-          <div className="mx-auto mb-3 w-full" style={{ maxWidth: "var(--composer-max-width, 816px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-              <div style={{ display: "flex", alignItems: "baseline", gap: isMobile ? 7 : 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-                <span style={{ fontSize: 24, fontWeight: 600, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
-                <span style={{ fontSize: 20, color: "var(--text)", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
-                <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  web <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}</span>
-                </span>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  pi <span style={{ color: "var(--text)" }}>v{process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}</span>
-                </span>
-              </div>
-            </div>
+          <div className="mx-auto w-full" style={{ maxWidth: "var(--composer-max-width, 892px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
+            <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
           </div>
         )}
         {chatInputElement}
@@ -1352,6 +1365,8 @@ function NoticeShelf({ notices, floating = false, onPauseChange }: { notices: No
   if (notices.length === 0) return null;
   return (
     <div
+      role="status"
+      aria-live="polite"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -1553,6 +1568,8 @@ function ExtensionDialog({
       <div
         role="dialog"
         aria-label={request.title}
+        aria-modal="true"
+        className="anim-dialog"
         style={{
           pointerEvents: "auto",
           width: "min(560px, 100%)",

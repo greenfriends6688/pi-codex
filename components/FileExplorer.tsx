@@ -287,9 +287,20 @@ function TreeNode({
   return (
     <div>
       <div
+        role="treeitem"
+        aria-expanded={node.isDir ? open : undefined}
+        aria-selected={false}
+        tabIndex={0}
         onClick={handleClick}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          handleClick();
+        }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
+        onFocus={() => setHovered(true)}
+        onBlur={() => setHovered(false)}
         style={{
           position: "relative",
           display: "flex",

@@ -182,6 +182,13 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     commitWidth(nextDefault, { forcePersist: true });
   }, [commitWidth, defaultWidth, getDefaultWidth]);
 
+  // Programmatic, clamped resize (e.g. widening the pane so the editor and the
+  // file tree both fit). Non-persisting by default: a stored width means the
+  // user chose one, so only their own drags should write it.
+  const setWidthValue = useCallback((candidate: number, persist = false) => {
+    commitWidth(candidate, { persist });
+  }, [commitWidth]);
+
   const reclampWidth = useCallback(() => {
     commitWidth(widthRef.current);
   }, [commitWidth, widthRef]);
@@ -262,7 +269,7 @@ export function useResizablePanel(options: UseResizablePanelOptions) {
     isResizing,
     panelRef,
     reclampWidth,
-    resetWidth,
+    setWidth: setWidthValue,
     separatorProps: {
       "aria-label": ariaLabel,
       "aria-orientation": "vertical" as const,
