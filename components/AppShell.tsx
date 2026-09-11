@@ -575,6 +575,27 @@ export function AppShell() {
     return () => controller.abort();
   }, [initialNavigation]);
 
+  // Fall back to a default sandbox directory (~/pi-cwd-YYYYMMDD) when the app
+  // starts with no URL cwd, no selected project and no session, so the chat
+  // area gets an actual home project instead of an empty "Get Started" guide.
+  useEffect(() => {
+    if (!initialSessionRestored || selectedSession !== null || activeCwd || newSessionCwd) return;
+    const controller = new AbortController();
+    void fetch("/api/default-cwd", { method: "POST", signal: controller.signal })
+      .then((response) => (response.ok ? (response.json() as Promise<{ cwd?: string }>) : null))
+      .then((data) => {
+        if (controller.signal.aborted || !data?.cwd) return;
+        setNewSessionDraftId(`default:${data.cwd}`);
+        activeNewSessionDraftKeyRef.current = `new:default:${data.cwd}:${data.cwd}`;
+        setNewSessionCwd(data.cwd);
+        setInitialCwdStatus("ready");
+      })
+      .catch(() => {
+        // Ignore; the placeholder will show if the default cannot be created.
+      });
+    return () => controller.abort();
+  }, [activeCwd, initialSessionRestored, newSessionCwd, selectedSession]);
+
   // Restore the workspace's last open session after switching to it. Called
   // from handleCwdChange once the outgoing context has been reset. The session
   // is looked up against the live list so a deleted or drifted session falls
