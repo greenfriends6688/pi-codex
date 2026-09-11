@@ -54,7 +54,7 @@ export function ProjectTrustDialog({
             height="20"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="#f59e0b"
+            stroke="var(--warning)"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -88,7 +88,7 @@ export function ProjectTrustDialog({
               {cwd}
             </code>
             {error && (
-              <div role="alert" style={{ marginTop: 10, color: "#ef4444", fontSize: 12, lineHeight: 1.5 }}>
+              <div role="alert" style={{ marginTop: 10, color: "var(--danger)", fontSize: 12, lineHeight: 1.5 }}>
                 {error}
               </div>
             )}
@@ -127,10 +127,10 @@ export function ProjectTrustDialog({
             style={{
               height: 32,
               padding: "0 12px",
-              border: "1px solid var(--accent)",
-              borderRadius: 5,
-              background: "var(--accent)",
-              color: "white",
+              border: "1px solid var(--primary-bg)",
+              borderRadius: "var(--radius-md)",
+              background: "var(--primary-bg)",
+              color: "var(--primary-fg)",
               cursor: busy ? "wait" : "pointer",
               opacity: busy ? 0.7 : 1,
               fontSize: 12,

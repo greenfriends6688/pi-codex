@@ -345,7 +345,7 @@ export function BranchNavigator({ tree, activeLeafId, onLeafChange, inline, cont
             top: dropdownPos.top,
             left: dropdownPos.left,
             width: dropdownPos.width,
-            background: "var(--bg-panel)",
+            background: "var(--bg-elev)",
             borderBottom: "1px solid var(--border)",
             zIndex: 500,
           }}>

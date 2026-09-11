@@ -26,7 +26,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--bg-elev);
 }
 
 .config-panel-root.is-embedded > .config-panel-surface {
@@ -41,8 +41,8 @@
   width: min(var(--config-panel-width), calc(100vw - 16px));
   height: min(var(--config-panel-height), calc(100dvh - 16px));
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-lg);
 }
 
 .config-panel-header {
@@ -50,8 +50,8 @@
   flex-shrink: 0;
   align-items: center;
   gap: 10px;
-  height: 50px;
-  padding: 0 14px 0 18px;
+  height: 52px;
+  padding: 0 16px 0 20px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -139,13 +139,13 @@
   gap: 8px;
   width: 100%;
   min-width: 0;
-  height: 30px;
-  padding: 0 8px;
+  height: 32px;
+  padding: 0 9px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   outline: none;
   background: transparent;
-  color: var(--text);
+  color: var(--text-muted);
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;
@@ -542,7 +542,7 @@
   gap: 6px;
   border-width: 1px;
   border-style: solid;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-family: inherit;
   letter-spacing: 0;
@@ -564,9 +564,9 @@
 }
 
 .config-button-primary {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
+  border-color: var(--primary-bg);
+  background: var(--primary-bg);
+  color: var(--primary-fg);
   font-weight: 600;
 }
 
@@ -577,9 +577,9 @@
 }
 
 .config-button-danger {
-  border-color: rgba(239, 68, 68, 0.35);
-  background: rgba(239, 68, 68, 0.06);
-  color: #ef4444;
+  border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .config-button-ghost {
@@ -589,8 +589,8 @@
 }
 
 .config-button-primary:not(:disabled):hover {
-  border-color: color-mix(in srgb, var(--accent) 88%, #000);
-  background: color-mix(in srgb, var(--accent) 88%, #000);
+  border-color: var(--primary-hover);
+  background: var(--primary-hover);
 }
 
 .config-button-secondary:not(:disabled):hover,
@@ -601,8 +601,8 @@
 }
 
 .config-button-danger:not(:disabled):hover {
-  border-color: rgba(239, 68, 68, 0.5);
-  background: rgba(239, 68, 68, 0.12);
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 
 .config-button:focus-visible {
@@ -616,8 +616,8 @@
 }
 
 .config-button-primary.is-success {
-  border-color: #16a34a;
-  background: #16a34a;
+  border-color: var(--success);
+  background: var(--success);
   animation: saved-pop 0.45s ease;
 }
 

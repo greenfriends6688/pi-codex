@@ -243,9 +243,9 @@ export function ModelSelector({
               maxHeight,
               overflow: "hidden",
               border: "1px solid var(--border)",
-              borderRadius: 8,
-              background: "var(--bg)",
-              boxShadow: openAbove ? "0 -4px 16px rgba(0,0,0,0.10)" : "0 4px 16px rgba(0,0,0,0.10)",
+              borderRadius: "var(--radius-lg)",
+              background: "var(--bg-elev)",
+              boxShadow: "var(--shadow-md)",
             }}
           >
             {showFilter && (

@@ -31,9 +31,9 @@ function formatRelativeTime(value: string, locale: string): string {
 
 function statusColor(status: SubagentSessionStatus): string {
   if (status === "running" || status === "starting") return "var(--accent)";
-  if (status === "completed") return "#16a34a";
-  if (status === "failed") return "#dc2626";
-  if (status === "aborted") return "#d97706";
+  if (status === "completed") return "var(--success)";
+  if (status === "failed") return "var(--danger)";
+  if (status === "aborted") return "var(--warning)";
   return "var(--text-dim)";
 }
 
@@ -174,12 +174,12 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
       role="listbox"
       aria-label={t("agentSwitcher.title")}
       style={{
-        background: "var(--bg-panel)",
+        background: "var(--bg-elev)",
         borderLeft: "1px solid var(--border)",
         borderRight: "1px solid var(--border)",
         borderBottom: "1px solid var(--border)",
-        borderRadius: "0 0 6px 6px",
-        boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+        borderRadius: "0 0 var(--radius-md) var(--radius-md)",
+        boxShadow: "var(--shadow-md)",
         overflow: "hidden",
       }}
     >
