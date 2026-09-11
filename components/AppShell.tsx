@@ -10,6 +10,7 @@ import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
 import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
+import { ExplorerPanel } from "./ExplorerPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
@@ -1138,12 +1139,6 @@ export function AppShell() {
         onSessionDeleted={handleSessionDeleted}
         selectedCwd={selectedSession?.cwd ?? newSessionCwd ?? null}
         onCwdChange={handleCwdChange}
-        onOpenFile={handleOpenFile}
-        onOpenTerminal={handleOpenTerminal}
-        explorerRefreshKey={explorerRefreshKey}
-        onExplorerRefresh={handleExplorerRefresh}
-        onAtMention={handleAtMention}
-        onAtMentions={handleAtMentions}
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
         onSessionsChange={handleSessionsChange}
@@ -2562,9 +2557,21 @@ export function AppShell() {
               )}
             />
           ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) ? (
-            <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
-               {translate("files.noneOpen")}
-            </div>
+            activeCwd ? (
+              <ExplorerPanel
+                cwd={activeCwd}
+                onOpenFile={handleOpenFile}
+                onOpenTerminal={handleOpenTerminal}
+                explorerRefreshKey={explorerRefreshKey}
+                onExplorerRefresh={handleExplorerRefresh}
+                onAtMention={handleAtMention}
+                onAtMentions={handleAtMentions}
+              />
+            ) : (
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
+                 {translate("files.noneOpen")}
+              </div>
+            )
           ) : null}
           {terminalTabs.map((tab) => (
             <div key={tab.id} hidden={tab.id !== activeFileTabId} style={{ width: "100%", height: "100%" }}>

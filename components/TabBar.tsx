@@ -33,11 +33,13 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
       role="tablist"
       style={{
         display: "flex",
-        alignItems: "flex-end",
-        background: "var(--bg-panel)",
+        alignItems: "center",
+        gap: 2,
+        padding: "0 4px",
+        background: "transparent",
         overflowX: "auto",
         flexShrink: 0,
-        height: 36,
+        height: 32,
       }}
     >
       {tabs.map((tab) => {
@@ -77,11 +79,12 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               display: "flex",
               alignItems: "center",
               gap: 6,
-              height: 36,
-              paddingLeft: 12,
-              paddingRight: 6,
-              borderRight: "1px solid var(--border)",
-              background: isActive ? "var(--bg)" : "var(--bg-panel)",
+              height: 26,
+              paddingLeft: 10,
+              paddingRight: 4,
+              border: "none",
+              borderRadius: "var(--radius-md)",
+              background: isActive ? "var(--bg-selected)" : "transparent",
               cursor: "pointer",
               fontSize: 12,
               color: isActive ? "var(--text)" : "var(--text-muted)",
@@ -121,7 +124,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
                 width: 24, height: 24,
                 background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
                 border: "none",
-                borderRadius: 4,
+                borderRadius: "var(--radius-sm)",
                 color: hoveredClose === tab.id ? "var(--text)" : "var(--text-dim)",
                 cursor: "pointer",
                 padding: 0,
