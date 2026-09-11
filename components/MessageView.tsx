@@ -378,7 +378,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, maxWidth: "85%" }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, maxWidth: "80%" }}>
         <div
           style={{
             flex: 1,
@@ -386,8 +386,8 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             background: "var(--user-bg)",
             border: "1px solid var(--border-faint)",
             borderRadius: "var(--radius-2xl)",
-            padding: "9px 13px",
-            fontSize: "calc(14px + var(--chat-font-size-offset, 0px))",
+            padding: "8px 12px",
+            fontSize: "calc(13px + var(--chat-font-size-offset, 0px))",
             lineHeight: 1.6,
             color: "var(--text)",
             wordBreak: "break-word",
@@ -414,7 +414,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     cursor: "pointer",
                     color: "var(--accent)",
                     fontFamily: "var(--font-mono)",
-                    fontSize: "calc(13px + var(--chat-font-size-offset, 0px))",
+                    fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
                     textAlign: "left",
                   }}
                 >
@@ -853,7 +853,7 @@ function AssistantMessageView({
           </button>
         )}
         {time && !isStreaming && (
-          <span style={{ fontSize: 10, color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>
+          <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>
         )}
       </div>
     </div>
@@ -1147,7 +1147,7 @@ function SplitPatchView({ text }: { text: string }) {
             borderTop: fileIndex === 0 ? "none" : "1px solid var(--border)",
             fontFamily: "var(--font-mono)",
             fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
-            lineHeight: 1.55,
+            lineHeight: 1.7,
           }}
         >
           {showFileHeaders && (
@@ -1274,7 +1274,7 @@ function PatchTextView({ text }: { text: string }) {
   const lines = text.split(/\r?\n/);
 
   return (
-    <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", fontFamily: "var(--font-mono)", fontSize: "calc(12px + var(--chat-font-size-offset, 0px))", lineHeight: 1.55, minWidth: 0 }}>
+    <div style={{ maxHeight: 520, overflowY: "auto", overflowX: "hidden", fontFamily: "var(--font-mono)", fontSize: "calc(12px + var(--chat-font-size-offset, 0px))", lineHeight: 1.7, minWidth: 0 }}>
       {lines.map((line, i) => {
         const kind =
           line.startsWith("@@") ? "hunk" :

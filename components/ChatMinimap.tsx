@@ -660,14 +660,17 @@ export function ChatMinimap({
           >
             <div
               style={{
-                width: 8,
-                height: 8,
+                width: 22,
+                height: 3,
                 borderRadius: 2,
-                background: isActive ? "rgba(128,128,128,0.42)" : "rgba(128,128,128,0.16)",
-                border: `1.5px solid ${isActive ? "rgba(128,128,128,0.95)" : "rgba(128,128,128,0.58)"}`,
-                boxShadow: isActive ? "0 0 0 2px var(--bg-panel)" : "none",
-                transition: "transform 0.1s, background 0.1s",
-                transform: isNearest ? "scale(1.25)" : "scale(1)",
+                background: isActive
+                  ? "color-mix(in srgb, var(--text) 75%, transparent)"
+                  : isNearest
+                    ? "color-mix(in srgb, var(--text) 55%, transparent)"
+                    : "color-mix(in srgb, var(--text) 22%, transparent)",
+                transition: "transform 0.1s, background 0.1s, width 0.1s",
+                transform: isNearest || isActive ? "scaleX(1)" : "scaleX(0.65)",
+                transformOrigin: "center",
               }}
             />
           </div>

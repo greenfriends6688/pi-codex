@@ -84,7 +84,7 @@ function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, 
 }
 
 const CHAT_MINIMAP_WIDTH = 36;
-const CHAT_COLUMN_PADDING = 16;
+const CHAT_COLUMN_PADDING = 12;
 
 function NewSessionUpdateLink({
   label,
@@ -1197,13 +1197,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (
-              <div className="break-words py-2 text-[13px] text-text-muted">
+              <div className="break-words py-2 text-xs text-text-muted">
                 <span className="animate-[pulse_1.5s_infinite]">{phaseLabel(agentPhase, t)}</span>
               </div>
             )}
 
             {bashRunning && !pendingBash && (
-              <div className="py-2 text-[13px] text-text-muted">
+              <div className="py-2 text-xs text-text-muted">
                  <span className="animate-[pulse_1.5s_infinite]">{t("chat.runningCommand")}</span>
               </div>
             )}
@@ -1319,10 +1319,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       <div className="relative shrink-0">
         {isEmptyNew && (
           <div className="mx-auto mb-3 w-full" style={{ maxWidth: "var(--composer-max-width, 816px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, fontFamily: "var(--font-mono)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: isMobile ? 7 : 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
-                <span style={{ fontSize: 28, fontWeight: 700, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
-                <span style={{ fontSize: 22, color: "var(--text)", fontWeight: 700, flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
+                <span style={{ fontSize: 24, fontWeight: 600, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>
+                <span style={{ fontSize: 20, color: "var(--text)", fontWeight: 600, flexShrink: 0, whiteSpace: "nowrap" }}>Pi Web</span>
                 <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, flexShrink: 0 }}>
@@ -1366,7 +1366,7 @@ function NoticeShelf({ notices, floating = false, onPauseChange }: { notices: No
           : notice.type === "warning"
             ? "var(--warning)"
             : notice.type === "success"
-              ? "#10b981"
+              ? "var(--success)"
               : "var(--accent)";
         return (
           <div
@@ -1395,9 +1395,9 @@ function NoticeShelf({ notices, floating = false, onPauseChange }: { notices: No
               pointerEvents: "auto",
               marginBottom: index === notices.length - 1 ? 0 : 6,
               overflow: "hidden",
-              borderRadius: 14,
-              border: "1px solid color-mix(in srgb, var(--border) 70%, transparent)",
-              background: "var(--bg)",
+              borderRadius: "var(--radius-xl)",
+              border: "1px solid var(--border)",
+              background: "var(--bg-elev)",
               color: "var(--text-muted)",
               width: "fit-content",
               maxWidth: "min(100%, 620px)",
