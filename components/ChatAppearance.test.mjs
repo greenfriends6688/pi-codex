@@ -11,14 +11,15 @@ const chatAppearanceHook = await readFile(new URL("../hooks/useChatAppearance.ts
 const jiti = createJiti(import.meta.url);
 const { clampChatContentWidth, clampChatContentFontSize } = await jiti.import("../hooks/useChatAppearance.ts");
 
-const widthVariable = /var\(--chat-content-max-width, 820px\)/g;
+const widthVariable = /var\(--chat-content-max-width, 768px\)/g;
+const composerVariable = /var\(--composer-max-width, 816px\)/g;
 
-test("chat content keeps the existing 820px default behind one shared variable", () => {
-  assert.equal((chatWindow.match(widthVariable) ?? []).length, 2);
-  assert.equal((chatInput.match(widthVariable) ?? []).length, 1);
-  assert.match(globals, /--chat-content-max-width: 820px;/);
-  assert.doesNotMatch(chatWindow, /max-w-\[820px\]|maxWidth: 820/);
-  assert.doesNotMatch(chatInput, /maxWidth: 820/);
+test("chat content keeps the 768px Codex default behind one shared variable", () => {
+  assert.equal((chatWindow.match(widthVariable) ?? []).length, 1);
+  assert.equal((chatInput.match(composerVariable) ?? []).length, 1);
+  assert.match(globals, /--chat-content-max-width: 768px;/);
+  assert.doesNotMatch(chatWindow, /max-w-\[768px\]|maxWidth: 768/);
+  assert.doesNotMatch(chatInput, /maxWidth: 768/);
 });
 
 test("General chat settings own the chat width preference", () => {
@@ -33,16 +34,16 @@ test("General chat settings own the chat width preference", () => {
 });
 
 test("chat width validation preserves the default and supported range", () => {
-  assert.equal(clampChatContentWidth(undefined), 820);
-  assert.equal(clampChatContentWidth("invalid"), 820);
-  assert.equal(clampChatContentWidth(700), 820);
+  assert.equal(clampChatContentWidth(undefined), 768);
+  assert.equal(clampChatContentWidth("invalid"), 768);
+  assert.equal(clampChatContentWidth(700), 700);
   assert.equal(clampChatContentWidth(1104), 1104);
   assert.equal(clampChatContentWidth(2400), 2000);
 });
 
 test("chat font size preserves the default and bounds stored or supplied values", () => {
   for (const value of [undefined, null, "invalid", Infinity, NaN]) {
-    assert.equal(clampChatContentFontSize(value), 14);
+    assert.equal(clampChatContentFontSize(value), 13);
   }
   assert.equal(clampChatContentFontSize(8), 12);
   assert.equal(clampChatContentFontSize("18"), 18);

@@ -987,7 +987,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
-            <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 820px)", margin: "0 auto" }}>
+            <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 768px)", margin: "0 auto" }}>
             {(() => {
               let lastUserIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {
@@ -1318,7 +1318,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
       <div className="relative shrink-0">
         {isEmptyNew && (
-          <div className="mx-auto mb-3 w-full" style={{ maxWidth: "var(--composer-max-width, 720px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
+          <div className="mx-auto mb-3 w-full" style={{ maxWidth: "var(--composer-max-width, 816px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, fontFamily: "var(--font-mono)" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: isMobile ? 7 : 10, minWidth: 0, flex: 1, lineHeight: 1.4, overflow: "hidden" }}>
                 <span style={{ fontSize: 28, fontWeight: 700, color: "var(--text)", flexShrink: 0, whiteSpace: "nowrap" }}>π</span>

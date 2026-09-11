@@ -1485,7 +1485,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           e.target.value = "";
         }}
       />}
-      <div style={{ maxWidth: "var(--composer-max-width, 720px)", margin: "0 auto" }}>
+      <div style={{ maxWidth: "var(--composer-max-width, 816px)", margin: "0 auto" }}>
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
         {showImageUnsupportedWarning && (() => {
@@ -2042,7 +2042,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               outline: "none",
               resize: "none",
               color: "var(--text)",
-              fontSize: "var(--chat-content-font-size, 14px)",
+              fontSize: "var(--chat-content-font-size, 13px)",
               lineHeight: 1.6,
               fontFamily: "inherit",
               minHeight: compact ? 96 : 24,

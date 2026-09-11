@@ -81,28 +81,40 @@
   --diff-added: rgba(0, 162, 64, 0.15);
   --diff-removed: rgba(186, 38, 35, 0.15);
 
-  /* Geometry */
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  /* Geometry — Codex corner-radius scale (base × 1.25) */
+  --corner-radius-scale: 1.25;
+  --radius-xs: calc(4px * var(--corner-radius-scale));
+  --radius-sm: calc(6px * var(--corner-radius-scale));
+  --radius-md: calc(8px * var(--corner-radius-scale));
+  --radius-lg: calc(10px * var(--corner-radius-scale));
+  --radius-xl: calc(12px * var(--corner-radius-scale));
+  --radius-2xl: calc(16px * var(--corner-radius-scale));
   --radius-pill: 999px;
 
-  /* Elevation: light theme carries shadows, dark theme relies on lines */
-  --shadow-sm: 0 1px 2px rgba(13, 13, 13, 0.05);
-  --shadow-md: 0 6px 20px -6px rgba(13, 13, 13, 0.16), 0 1px 2px rgba(13, 13, 13, 0.05);
-  --shadow-lg: 0 20px 56px -12px rgba(13, 13, 13, 0.24), 0 1px 3px rgba(13, 13, 13, 0.06);
+  /* Elevation — Codex: hairline stroke plus very light shadows */
+  --shadow-sm: 0px 1px 2px -1px #00000014;
+  --shadow-md: 0px 2px 4px -1px #00000014;
+  --shadow-lg: 0px 4px 8px -2px #0000001a;
+  --shadow-xl: 0px 8px 16px -4px #0000001f;
+  --elevation-stroke: 0 0 0 0.5px var(--border-strong);
+  --elevation-prominent: var(--elevation-stroke), 0 3px 7.5px rgba(0, 0, 0, 0.04), 0 0 20px rgba(0, 0, 0, 0.05);
+  --elevation-sidebar: var(--elevation-stroke), 0 3px 7.5px rgba(0, 0, 0, 0.03), 0 0 16px rgba(0, 0, 0, 0.02);
 
   /* Layout metrics lifted from the Codex app:
-     --thread-content-max-width: 42rem, toolbar 46px, composer radius 5.5×spacing,
+     thread content 48rem (768px), toolbar 46px, composer radius 5.5×spacing,
      and a 24px inline overhang that lets the composer sit wider than the thread. */
-  --chat-content-max-width: 672px;
+  --chat-content-max-width: 768px;
   --composer-max-width: calc(var(--chat-content-max-width) + 48px);
   --radius-composer: 22px;
   --height-toolbar: 46px;
-  --chat-content-font-size: 14px;
+  --height-toolbar-sm: 36px;
+  --height-toolbar-pane: 40px;
+  --spacing-token-button-composer: 28px;
+  --radius-token-composer-single-line: 22px;
+  --conversation-item-gap: 16px;
+  --conversation-grouped-item-gap: 4px;
+  --chat-content-font-size: 13px;
+  --focus-ring: color-mix(in oklab, #339cff 70%, transparent);
 }
 
 html.dark {
@@ -149,9 +161,10 @@ html.dark {
   --diff-added: rgba(64, 201, 119, 0.23);
   --diff-removed: rgba(250, 66, 62, 0.23);
 
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 8px 24px -8px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0 24px 64px -16px rgba(0, 0, 0, 0.7);
+  --shadow-sm: 0px 1px 2px -1px #00000014;
+  --shadow-md: 0px 2px 4px -1px #00000014;
+  --shadow-lg: 0px 4px 8px -2px #0000001a;
+  --shadow-xl: 0px 8px 16px -4px #0000001f;
 }
 
 /* WebKit reports dvh/innerHeight without the status-bar strip for installed
@@ -558,7 +571,8 @@ button.extension-widget-trigger:focus-visible {
 }
 
 :root {
-  --font-mono: var(--font-noto-mono), 'JetBrains Mono', 'Fira Code', 'Consolas', ui-monospace, 'PingFang SC', 'Microsoft YaHei', monospace;
+  /* Codex mono stack: SF Mono first, then cross-platform fallbacks. */
+  --font-mono: ui-monospace, "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", var(--font-noto-mono), 'PingFang SC', 'Microsoft YaHei', monospace;
 }
 
 pre, code {
@@ -567,15 +581,15 @@ pre, code {
 
 /* react-markdown output styles */
 .chat-content {
-  --chat-font-size-offset: calc(var(--chat-content-font-size, 14px) - 14px);
+  --chat-font-size-offset: calc(var(--chat-content-font-size, 13px) - 13px);
 }
 
 .markdown-body {
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
-  font-size: calc(14px + var(--chat-font-size-offset, 0px));
-  line-height: 1.68;
+  font-size: calc(13px + var(--chat-font-size-offset, 0px));
+  line-height: 1.62;
   color: var(--text);
   word-break: break-word;
 }
@@ -1634,6 +1648,6 @@ span.token.table {
     font-size: 16px !important;
   }
   .chat-input-textarea {
-    font-size: max(16px, var(--chat-content-font-size, 14px)) !important;
+    font-size: max(16px, var(--chat-content-font-size, 13px)) !important;
   }
 }

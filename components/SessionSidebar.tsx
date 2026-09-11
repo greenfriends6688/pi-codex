@@ -16,7 +16,7 @@ import { SessionSearch } from "./SessionSearch";
 
 // Fixed row height for the session list. SessionItem renders at exactly this
 // height, so the list can be windowed (only the visible slice is mounted).
-const SESSION_LIST_ITEM_HEIGHT = 48;
+export const SESSION_LIST_ITEM_HEIGHT = 48;
 
 export function getSessionListIndices(count: number, scrollTop: number, viewportHeight: number, focusedIndex = -1): number[] {
   const overscan = 8;
