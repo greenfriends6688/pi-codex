@@ -20,7 +20,8 @@ export function clampPanelWidth(width: number, minWidth: number, maxWidth: numbe
 }
 
 export function getDefaultRightPanelWidth(viewportWidth: number): number {
-  return clampPanelWidth(viewportWidth * 0.42, 320, 640);
+  // Codex keeps its side panel around 384px and only shrinks it on narrow viewports.
+  return clampPanelWidth(Math.min(viewportWidth * 0.42, 384), 320, 640);
 }
 
 export function getSidebarMaxWidth(options: {

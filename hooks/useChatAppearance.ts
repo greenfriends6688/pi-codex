@@ -24,7 +24,7 @@ let appearance: ChatAppearance | null = null;
 const listeners = new Set<() => void>();
 
 export function clampChatContentWidth(value: unknown): number {
-  const width = Number(value);
+  const width = Number(value ?? CHAT_CONTENT_WIDTH_DEFAULT);
   if (!Number.isFinite(width)) return CHAT_CONTENT_WIDTH_DEFAULT;
   return Math.max(CHAT_CONTENT_WIDTH_MIN, Math.min(CHAT_CONTENT_WIDTH_MAX, Math.round(width)));
 }
