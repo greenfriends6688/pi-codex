@@ -1101,17 +1101,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     () => getProjectActivity(allSessions, runningSessionIds, unreadSessionIds),
     [allSessions, runningSessionIds, unreadSessionIds],
   );
-  // ponytail: 跟随选中项目自动展开
+  // ponytail: 跟随选中项目自动展开（仅 key 变化时触发，避免每次渲染都把手动折叠覆盖掉）
   useEffect(() => {
     if (selectedProject) {
+      const key = selectedProject.key;
       setExpandedProjects((prev) => {
-        if (prev.has(selectedProject.key)) return prev;
+        if (prev.has(key)) return prev;
         const next = new Set(prev);
-        next.add(selectedProject.key);
+        next.add(key);
         return next;
       });
     }
-  }, [selectedProject]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedProject?.key]);
 
   const filteredSessions = selectedProject
     ? sessionsForProject(allSessions, selectedProject.key)
@@ -1769,6 +1771,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   }}
                   activity={projectActivity.get(project.key)}
                   onClick={() => {
+                    if (isSelectedProject) {
+                      // 再次点击已选中的项目：折叠/展开切换，而不是无意义地重选
+                      setExpandedProjects((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(project.key)) next.delete(project.key);
+                        else next.add(project.key);
+                        return next;
+                      });
+                      return;
+                    }
                     setSelectedCwd(project.root);
                     setCustomPathError(null);
                     setProjectMenuOpen(false);
