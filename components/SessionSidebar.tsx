@@ -16,7 +16,7 @@ import { SessionSearch } from "./SessionSearch";
 
 // Fixed row height for the session list. SessionItem renders at exactly this
 // height, so the list can be windowed (only the visible slice is mounted).
-export const SESSION_LIST_ITEM_HEIGHT = 48;
+export const SESSION_LIST_ITEM_HEIGHT = 32;
 
 export function getSessionListIndices(count: number, scrollTop: number, viewportHeight: number, focusedIndex = -1): number[] {
   const overscan = 8;
@@ -358,9 +358,8 @@ function PiWebTitle() {
       onClick={handleClick}
       style={{
         background: "none", border: "none", padding: 0, cursor: "default",
-        fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em",
+        fontWeight: 600, fontSize: 13.5, letterSpacing: "-0.01em",
         color: showVersion ? "var(--accent)" : "var(--text)",
-        fontFamily: "var(--font-mono)",
         minWidth: "6ch",
       }}
     >
@@ -1029,8 +1028,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       {/* Header */}
       <div
         style={{
-          padding: "12px 10px 10px",
-          borderBottom: "1px solid var(--border)",
+          padding: "10px 8px 8px",
+          borderBottom: "1px solid var(--border-faint)",
           flexShrink: 0,
         }}
       >
@@ -1042,16 +1041,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               disabled={!selectedCwd}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                background: selectedCwd ? "var(--primary-bg)" : "var(--bg-subtle)",
+                background: selectedCwd ? "var(--bg-selected)" : "var(--bg-subtle)",
                 border: "1px solid transparent",
-                color: selectedCwd ? "var(--primary-fg)" : "var(--text-dim)",
+                color: selectedCwd ? "var(--text)" : "var(--text-dim)",
                 cursor: selectedCwd ? "pointer" : "not-allowed",
-                height: 32,
-                paddingLeft: 11,
-                paddingRight: 13,
-                borderRadius: "var(--radius-pill)",
+                height: 30,
+                paddingLeft: 10,
+                paddingRight: 12,
+                borderRadius: "var(--radius-md)",
                 fontSize: 12,
-                fontWeight: 600,
+                fontWeight: 500,
                 letterSpacing: "-0.01em",
                 flexShrink: 0,
                 transition: "background 0.12s, color 0.12s, border-color 0.12s",
@@ -1059,11 +1058,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
              title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.selectProject")}
               onMouseEnter={(e) => {
                 if (!selectedCwd) return;
-                e.currentTarget.style.background = "var(--primary-hover)";
+                e.currentTarget.style.background = "var(--bg-hover)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = selectedCwd ? "var(--primary-bg)" : "var(--bg-subtle)";
-                e.currentTarget.style.color = selectedCwd ? "var(--primary-fg)" : "var(--text-dim)";
+                e.currentTarget.style.background = selectedCwd ? "var(--bg-selected)" : "var(--bg-subtle)";
+                e.currentTarget.style.color = selectedCwd ? "var(--text)" : "var(--text-dim)";
                 e.currentTarget.style.borderColor = "transparent";
               }}
             >
@@ -1083,7 +1082,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               aria-label={t("sidebar.toggleSessionSearch")}
               aria-expanded={sessionSearchOpen}
               aria-controls="session-search-input"
-              className={`flex h-[32px] w-[32px] shrink-0 cursor-pointer items-center justify-center rounded-[7px] border border-border hover:bg-bg-selected focus-visible:outline-2 focus-visible:outline-accent ${sessionSearchOpen ? "bg-bg-selected text-accent" : "bg-bg-hover text-text-muted"}`}
+              className={`flex h-[30px] w-[30px] shrink-0 cursor-pointer items-center justify-center rounded-[10px] border-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-accent ${sessionSearchOpen ? "bg-bg-selected text-accent" : "bg-transparent text-text-muted"}`}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
@@ -1102,9 +1101,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               display: "flex",
               alignItems: "center",
               padding: "6px 10px",
-              background: selectedCwd ? "transparent" : "var(--accent-soft)",
-              border: `1px solid ${selectedCwd ? "var(--border)" : "var(--accent-border)"}`,
-              borderRadius: "var(--radius-lg)",
+              background: selectedCwd ? "var(--bg-subtle)" : "var(--accent-soft)",
+              border: `1px solid ${selectedCwd ? "transparent" : "var(--accent-border)"}`,
+              borderRadius: "var(--radius-md)",
               cursor: "pointer",
               fontSize: 12,
               color: "var(--text)",
@@ -2123,9 +2122,9 @@ function SessionItem({
         alignItems: "center",
         marginLeft: 6,
         marginRight: 6,
-        paddingLeft: depth > 0 ? depth * 12 + 8 : 8,
-        paddingRight: 8,
-        borderRadius: "var(--radius-lg)",
+        paddingLeft: depth > 0 ? depth * 8 + 8 : 8,
+        paddingRight: 4,
+        borderRadius: "var(--radius-pill)",
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
           ? "var(--danger-soft)"
@@ -2204,7 +2203,7 @@ function SessionItem({
           }}
         />
       ) : (
-        /* ── Normal view ── */
+        /* ── Normal view: single-line Codex pill row ── */
         <>
           {/* Subagent indicator for child sessions */}
           {depth > 0 && (
@@ -2213,49 +2212,26 @@ function SessionItem({
               <path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
             </svg>
           )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                minWidth: 0,
-                fontSize: 12,
-                fontWeight: isSelected ? 500 : 400,
-                lineHeight: 1.4,
-                color: "var(--text)",
-              }}
-              title={title}
+          {isRunning ? <RunningSessionIndicator /> : isUnread ? <UnreadSessionIndicator /> : null}
+          <span
+            title={title}
+            style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: isSelected ? 500 : 400, lineHeight: 1.3, color: "var(--text)" }}
+          >
+            {title}
+          </span>
+          {session.isWorktree && session.branch && (
+            <span
+              title={`Worktree: ${session.cwd}`}
+              style={{ display: "flex", alignItems: "center", color: "var(--accent)", flexShrink: 0 }}
             >
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                {title}
-              </span>
-            </div>
-            <div style={{ marginTop: 2, display: "flex", alignItems: "center", gap: 8, color: "var(--text-dim)", fontSize: 11, minWidth: 0 }}>
-              {isRunning ? (
-                <RunningSessionIndicator />
-              ) : isUnread ? (
-                <UnreadSessionIndicator />
-              ) : (
-                <span title={session.modified}>{formatRelativeTime(session.modified, locale)}</span>
-              )}
-              <span>{t("sidebar.messagesCount", { count: session.messageCount })}</span>
-              {session.isWorktree && session.branch && (
-                <span
-                  title={`Worktree: ${session.cwd}`}
-                  style={{ display: "flex", alignItems: "center", gap: 3, color: "var(--accent)", minWidth: 0, overflow: "hidden" }}
-                >
-                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-                    <line x1="6" y1="3" x2="6" y2="15" />
-                    <circle cx="18" cy="6" r="3" />
-                    <circle cx="6" cy="18" r="3" />
-                    <path d="M18 9a9 9 0 0 1-9 9" />
-                  </svg>
-                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{session.branch}</span>
-                </span>
-              )}
-            </div>
-          </div>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <line x1="6" y1="3" x2="6" y2="15" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
+              </svg>
+            </span>
+          )}
 
           {/* Collapse toggle — always visible when has children */}
           {hasChildren && (
@@ -2264,8 +2240,8 @@ function SessionItem({
               title={t(collapsed ? "sidebar.expandSubagents" : "sidebar.collapseSubagents")}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: 20, height: 20, padding: 0, flexShrink: 0,
-                background: "none", border: "none",
+                width: 18, height: 18, padding: 0, flexShrink: 0,
+                background: "none", border: "none", borderRadius: "var(--radius-sm)",
                 color: "var(--text-dim)", cursor: "pointer",
                 transform: collapsed ? "rotate(-90deg)" : "none",
                 transition: "transform 0.15s",
@@ -2277,32 +2253,30 @@ function SessionItem({
             </button>
           )}
 
-          {/* Action buttons — shown on hover */}
-          {hovered && !session.transient && (
-            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          {/* Hover actions replace the metadata readout; metadata reserves its space when idle */}
+          {hovered && !session.transient ? (
+            <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
               <button
                 onClick={startRename}
                 title={t("sidebar.rename")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
-                  background: "var(--bg-hover)", border: "1px solid var(--border)",
-                  borderRadius: 7, color: "var(--text-muted)",
+                  width: 24, height: 24, padding: 0,
+                  background: "transparent", border: "none",
+                  borderRadius: "var(--radius-md)", color: "var(--text-muted)",
                   cursor: "pointer", flexShrink: 0,
-                  transition: "background 0.12s, color 0.12s, border-color 0.12s",
+                  transition: "background 0.12s, color 0.12s",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--bg-selected)";
+                  e.currentTarget.style.background = "var(--bg-hover)";
                   e.currentTarget.style.color = "var(--accent)";
-                  e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.background = "transparent";
                   e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.borderColor = "var(--border)";
                 }}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
                 </svg>
               </button>
@@ -2311,24 +2285,22 @@ function SessionItem({
                 title={t("sidebar.deleteWithShiftClick")}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, padding: 0,
-                  background: "var(--bg-hover)", border: "1px solid var(--border)",
-                  borderRadius: 7, color: "var(--text-muted)",
+                  width: 24, height: 24, padding: 0,
+                  background: "transparent", border: "none",
+                  borderRadius: "var(--radius-md)", color: "var(--text-muted)",
                   cursor: "pointer", flexShrink: 0,
-                  transition: "background 0.12s, color 0.12s, border-color 0.12s",
+                  transition: "background 0.12s, color 0.12s",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(239,68,68,0.08)";
+                  e.currentTarget.style.background = "var(--danger-soft)";
                   e.currentTarget.style.color = "var(--danger)";
-                  e.currentTarget.style.borderColor = "rgba(239,68,68,0.35)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.background = "transparent";
                   e.currentTarget.style.color = "var(--text-muted)";
-                  e.currentTarget.style.borderColor = "var(--border)";
                 }}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="3 6 5 6 21 6" />
                   <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
                   <path d="M10 11v6M14 11v6" />
@@ -2336,6 +2308,11 @@ function SessionItem({
                 </svg>
               </button>
             </div>
+          ) : (
+            <span style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-dim)", fontSize: 11, flexShrink: 0, opacity: hovered ? 1 : 0, transition: "opacity 0.12s" }}>
+              <span title={session.modified}>{formatRelativeTime(session.modified, locale)}</span>
+              <span>{t("sidebar.messagesCount", { count: session.messageCount })}</span>
+            </span>
           )}
         </>
       )}
