@@ -1160,7 +1160,7 @@ export function AppShell() {
               style={{
                 flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 height: 32, padding: 0, background: "none", border: "none",
-                borderRadius: 9, color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
+                borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
                 fontSize: 12, opacity: disabled ? 0.35 : 1,
                 transition: "background 0.12s, color 0.12s",
               }}
@@ -1180,7 +1180,7 @@ export function AppShell() {
           style={{
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
             height: 32, padding: 0, background: "none", border: "none",
-            borderRadius: 9, color: "var(--text-muted)", cursor: "pointer",
+            borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: "pointer",
             fontSize: 12, transition: "background 0.12s, color 0.12s",
           }}
           onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
@@ -1303,7 +1303,7 @@ export function AppShell() {
           borderRadius: "var(--radius-md)",
           margin: "0 2px",
           padding: mobileBanner ? "6px 12px" : "0 10px",
-          background: mobileBanner ? "color-mix(in srgb, #d97706 8%, var(--bg-panel))" : "color-mix(in srgb, var(--warning) 10%, transparent)",
+          background: mobileBanner ? "color-mix(in srgb, var(--warning) 8%, var(--bg-panel))" : "color-mix(in srgb, var(--warning) 10%, transparent)",
           border: "none",
           borderRight: "none",
           borderBottom: mobileBanner ? "1px solid var(--border)" : "none",
@@ -1510,7 +1510,7 @@ export function AppShell() {
               aria-hidden="true"
               style={{
                 minWidth: 15, height: 15, padding: "0 4px", display: "grid", placeItems: "center",
-                borderRadius: 7, background: "var(--bg-selected)", color: "var(--accent)",
+                borderRadius: "var(--radius-sm)", background: "var(--bg-selected)", color: "var(--accent)",
                 fontSize: 10, lineHeight: 1, fontVariantNumeric: "tabular-nums",
                 ...(mobile ? { position: "absolute", top: 2, right: 2, minWidth: 13, height: 13, padding: "0 3px", fontSize: 9 } : {}),
               }}
@@ -1844,7 +1844,7 @@ export function AppShell() {
           transform: translateY(0);
           filter: blur(0);
           background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
-          box-shadow: 0 18px 44px rgba(37,99,235,0.16);
+          box-shadow: 0 18px 44px color-mix(in srgb, var(--accent) 16%, transparent);
         }
         100% {
           opacity: 1;
@@ -2129,7 +2129,7 @@ export function AppShell() {
                       style={{
                         display: "flex", alignItems: "center",
                         width: "100%", height: 34, padding: "0 10px",
-                        border: "none", borderRadius: 4,
+                        border: "none", borderRadius: "var(--radius-xs)",
                         background: locale === plugin.id ? "var(--bg-selected)" : "transparent",
                         color: "var(--text)", cursor: "pointer", textAlign: "left", fontSize: 12,
                         transition: "background 0.1s",
@@ -2279,7 +2279,7 @@ export function AppShell() {
                             color: copied ? "var(--accent)" : "var(--text-dim)",
                             background: "transparent",
                             border: "1px solid var(--border)",
-                            borderRadius: 4,
+                            borderRadius: "var(--radius-xs)",
                             cursor: "pointer",
                             flex: "0 0 auto",
                             transition: "color 0.12s, border-color 0.12s, background 0.12s",

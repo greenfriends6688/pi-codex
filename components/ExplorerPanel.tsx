@@ -219,7 +219,7 @@ export function ExplorerPanel({
           title={t("sidebar.refreshExplorer")}
           skipHover={explorerRefreshDone}
           color={explorerRefreshDone ? "var(--success)" : "var(--text-dim)"}
-          background={explorerRefreshDone ? "rgba(74,222,128,0.18)" : "none"}
+          background={explorerRefreshDone ? "var(--success-soft)" : "none"}
           marginRight={6}
         >
           {explorerRefreshDone ? (

@@ -116,7 +116,7 @@ function SafeMarkdownBody({ children, className, ...props }: React.ComponentProp
           margin: "4px 0",
           padding: "7px 10px",
           border: "1px solid var(--border)",
-          borderRadius: 6,
+          borderRadius: "var(--radius-sm)",
           background: "var(--bg-panel)",
           color: "var(--text-muted)",
           cursor: "pointer",
@@ -483,7 +483,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                 display: "flex", alignItems: "center", gap: 4,
                 padding: "3px 8px", height: 22,
                 background: "none", border: "none",
-                borderRadius: 5,
+                borderRadius: "var(--radius-xs)",
                 color: copied ? "var(--accent)" : "var(--text-dim)",
                 cursor: "pointer",
                 fontSize: 11, fontWeight: 400,
@@ -521,7 +521,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     display: "flex", alignItems: "center", gap: 4,
                     padding: "3px 8px", height: 22,
                     background: "none", border: "none",
-                    borderRadius: 5,
+                    borderRadius: "var(--radius-xs)",
                     color: "var(--text-dim)",
                     cursor: "pointer",
                     fontSize: 11, fontWeight: 400,
@@ -547,7 +547,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                     display: "flex", alignItems: "center", gap: 4,
                     padding: "3px 8px", height: 22,
                     background: "none", border: "none",
-                    borderRadius: 5,
+                    borderRadius: "var(--radius-xs)",
                     color: forking ? "var(--accent)" : "var(--text-dim)",
                     cursor: forking ? "not-allowed" : "pointer",
                     fontSize: 11, fontWeight: 400,
@@ -768,7 +768,7 @@ function AssistantMessageView({
                   {tps !== null && (() => {
                     const bg = tps >= 50 ? "#53b3cb" : tps >= 30 ? "#9bc53d" : tps >= 15 ? "#f9c22e" : "#e01a4f";
                     return (
-                      <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 4, background: bg, color: "#fff", fontSize: 11, fontWeight: 400 }}>
+                      <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: "var(--radius-xs)", background: bg, color: "#fff", fontSize: 11, fontWeight: 400 }}>
                         {tps.toFixed(1)} t/s
                       </span>
                     );
@@ -827,7 +827,7 @@ function AssistantMessageView({
               display: "flex", alignItems: "center", gap: 4,
               padding: "3px 8px", height: 22,
               background: "none", border: "none",
-              borderRadius: 5,
+              borderRadius: "var(--radius-xs)",
               color: copied ? "var(--accent)" : "var(--text-dim)",
               cursor: "pointer",
               fontSize: 11, fontWeight: 400,
@@ -1383,7 +1383,7 @@ function PairedResult({ text, images, isEmpty, isError }: {
                     display: "block",
                     maxWidth: "min(100%, 720px)",
                     maxHeight: 520,
-                    borderRadius: 6,
+                    borderRadius: "var(--radius-sm)",
                     objectFit: "contain",
                     border: "1px solid var(--border)",
                   }}
@@ -1428,7 +1428,7 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
       <div
         style={{
           border: "1px solid var(--border)",
-          borderRadius: 8,
+          borderRadius: "var(--radius-md)",
           overflow: "hidden",
           background: "var(--bg)",
         }}
@@ -1525,7 +1525,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
       <div
         style={{
           border: "1px solid var(--border)",
-          borderRadius: 8,
+          borderRadius: "var(--radius-md)",
           overflow: "hidden",
           background: isHiddenDisplay ? "var(--bg-subtle)" : "var(--bg)",
           opacity: isHiddenDisplay && !contentExpanded ? 0.82 : 1,
@@ -1563,7 +1563,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                       <img
                         src={src}
                         alt=""
-                        style={{ maxWidth: 240, maxHeight: 240, borderRadius: 6, objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
+                        style={{ maxWidth: 240, maxHeight: 240, borderRadius: "var(--radius-sm)", objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
                       />
                     </ImagePreview>
                   );

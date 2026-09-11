@@ -17,7 +17,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--scrim);
 }
 
 .config-panel-surface {
@@ -78,7 +78,7 @@
   margin-left: auto;
   padding: 0;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -241,7 +241,7 @@
 }
 
 .agents-feature-copy > .agents-feature-reload-notice {
-  color: #d97706;
+  color: var(--warning);
 }
 
 .agents-feature-actions {
@@ -258,7 +258,7 @@
 }
 
 .config-sidebar-message.is-error {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .config-sidebar-message.is-empty {
@@ -365,7 +365,7 @@
   background: var(--border);
   border: 5px solid transparent;
   background-clip: padding-box;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
 }
 
 .config-field-label {
@@ -490,7 +490,7 @@
 }
 
 .skill-update-status.is-error {
-  color: #ef4444;
+  color: var(--danger);
 }
 
 .skill-description {
@@ -638,7 +638,7 @@
   height: 18px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--bg-selected);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
@@ -710,7 +710,7 @@
   min-height: 30px;
   padding: 0 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-dim);
   cursor: pointer;
@@ -757,7 +757,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.38);
+  background: var(--scrim);
 }
 
 .settings-dialog-surface {
@@ -769,9 +769,9 @@
   max-height: calc(100dvh - 16px);
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-xl);
   background: var(--bg);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.22);
+  box-shadow: var(--shadow-lg);
 }
 
 .settings-dialog-header {
@@ -857,7 +857,7 @@
 }
 
 .settings-section-tab:focus-visible:not([aria-current="page"]) {
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--bg-hover);
   color: var(--text);
 }
@@ -955,7 +955,7 @@
   height: 42px;
   padding: 0 8px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
@@ -1049,7 +1049,7 @@
   height: 44px;
   padding: 0 10px;
   border: 0;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--text);
   cursor: pointer;
@@ -1107,7 +1107,7 @@
   max-width: 420px;
   min-height: 44px;
   padding: 0 10px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: var(--bg-panel);
   color: var(--text);
   font-size: 12px;
@@ -1115,7 +1115,7 @@
 
 .settings-general-error {
   margin: 8px 0 0;
-  color: #ef4444;
+  color: var(--danger);
   font-size: 11px;
 }
 
@@ -1169,7 +1169,7 @@
     margin-left: 14px;
     padding: 0 9px;
     border: 1px solid var(--border);
-    border-radius: 5px;
+    border-radius: var(--radius-xs);
     background: var(--bg-panel);
     color: var(--text);
     font-size: 16px;
@@ -1177,9 +1177,9 @@
 }
 
 @keyframes saved-pop {
-  0%   { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.55); }
-  40%  { transform: scale(1.08); box-shadow: 0 0 0 6px rgba(74, 222, 128, 0.25); }
-  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(74, 222, 128, 0); }
+  0%   { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 55%, transparent); }
+  40%  { transform: scale(1.08); box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 25%, transparent); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
 }
 
 @keyframes saved-check-draw {

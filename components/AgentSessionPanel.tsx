@@ -205,7 +205,7 @@ export function AgentSessionPanel({ rootSession, subagents, selectedSessionId, r
               aria-label={t("agentSwitcher.search")}
               style={{
                 width: "100%", height: 32, padding: "0 10px",
-                border: "1px solid var(--border)", borderRadius: 6,
+                border: "1px solid var(--border)", borderRadius: "var(--radius-sm)",
                 background: "var(--bg)", color: "var(--text)", fontSize: 12, outline: "none",
               }}
             />

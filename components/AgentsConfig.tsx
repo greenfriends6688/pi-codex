@@ -60,7 +60,7 @@ const inputStyle: CSSProperties = {
   height: 34,
   padding: "0 9px",
   border: "1px solid var(--border)",
-  borderRadius: 5,
+  borderRadius: "var(--radius-xs)",
   background: "var(--bg)",
   color: "var(--text)",
   fontSize: 12,
@@ -511,14 +511,14 @@ export function AgentsConfig({
 
                   {creating && (
                     <Field label={t("agents.saveScope")}>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, padding: 3, border: "1px solid var(--border)", borderRadius: 5, background: "var(--bg-panel)" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3, padding: 3, border: "1px solid var(--border)", borderRadius: "var(--radius-xs)", background: "var(--bg-panel)" }}>
                         {(["global", "project"] as const).map((scope) => (
                           <button
                             key={scope}
                             type="button"
                             onClick={() => setTargetScope(scope)}
                             disabled={saving}
-                            style={{ height: 28, border: "none", borderRadius: 4, background: targetScope === scope ? "var(--bg-selected)" : "transparent", color: targetScope === scope ? "var(--text)" : "var(--text-muted)", cursor: saving ? "default" : "pointer", fontSize: 11, fontWeight: targetScope === scope ? 600 : 400 }}
+                            style={{ height: 28, border: "none", borderRadius: "var(--radius-xs)", background: targetScope === scope ? "var(--bg-selected)" : "transparent", color: targetScope === scope ? "var(--text)" : "var(--text-muted)", cursor: saving ? "default" : "pointer", fontSize: 11, fontWeight: targetScope === scope ? 600 : 400 }}
                           >
                             {t(`agents.scope.${scope}`)}
                           </button>

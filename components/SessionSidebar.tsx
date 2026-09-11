@@ -1100,7 +1100,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       fontFamily: "var(--font-mono)",
                       padding: "5px 8px",
                       border: "1px solid var(--border)",
-                      borderRadius: 5,
+                      borderRadius: "var(--radius-xs)",
                       outline: "none",
                       background: "var(--bg)",
                       color: "var(--text)",
@@ -1259,7 +1259,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   padding: "0 10px",
                   background: "var(--bg-hover)",
                   border: "1px solid var(--border)",
-                  borderRadius: 7,
+                  borderRadius: "var(--radius-sm)",
                   cursor: "pointer",
                   fontSize: 11,
                   lineHeight: 1.35,
@@ -1300,7 +1300,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   zIndex: 100,
                   background: "var(--bg)",
                   border: "1px solid var(--border)",
-                  borderRadius: 8,
+                  borderRadius: "var(--radius-md)",
                   boxShadow: "0 6px 20px rgba(0,0,0,0.10)",
                   overflow: "hidden",
                 }}
@@ -1324,7 +1324,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           fontFamily: "var(--font-mono)",
                           padding: "5px 8px",
                           border: "1px solid var(--border)",
-                          borderRadius: 5,
+                          borderRadius: "var(--radius-xs)",
                           outline: "none",
                           background: "var(--bg)",
                           color: "var(--text)",
@@ -1338,20 +1338,20 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       const isCurrent = wt.path === currentWorktreePath;
                       if (wtConfirmRemove === wt.path) {
                         return (
-                          <div key={wt.path} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: "1px solid var(--border)", background: "rgba(239,68,68,0.06)" }}>
+                          <div key={wt.path} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 10px", borderBottom: "1px solid var(--border)", background: "var(--danger-soft)" }}>
                             <span style={{ flex: 1, fontSize: 11, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                               {t("sidebar.forceRemoveCheckout")}
                             </span>
                             <button
                               onClick={() => void handleRemoveWorktree(wt.path, true)}
                               disabled={wtBusy}
-                              style={{ padding: "3px 9px", background: "var(--danger)", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
+                              style={{ padding: "3px 9px", background: "var(--danger)", border: "none", borderRadius: "var(--radius-xs)", color: "#fff", fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}
                             >
                               {t("sidebar.force")}
                             </button>
                             <button
                               onClick={() => setWtConfirmRemove(null)}
-                              style={{ padding: "3px 9px", background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: 5, color: "var(--text-muted)", fontSize: 11, cursor: "pointer", flexShrink: 0 }}
+                              style={{ padding: "3px 9px", background: "var(--bg-hover)", border: "1px solid var(--border)", borderRadius: "var(--radius-xs)", color: "var(--text-muted)", fontSize: 11, cursor: "pointer", flexShrink: 0 }}
                             >
                               {t("sidebar.cancel")}
                             </button>
@@ -1408,10 +1408,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                 width: 34, height: 28, padding: 0, marginRight: 4,
                                 background: "none", border: "none",
                                 color: "var(--text-dim)", cursor: "pointer",
-                                borderRadius: 5, flexShrink: 0,
+                                borderRadius: "var(--radius-xs)", flexShrink: 0,
                                 transition: "color 0.12s, background 0.12s",
                               }}
-                              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--danger)"; e.currentTarget.style.background = "rgba(239,68,68,0.08)"; }}
+                              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--danger)"; e.currentTarget.style.background = "var(--danger-soft)"; }}
                               onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-dim)"; e.currentTarget.style.background = "none"; }}
                             >
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1486,7 +1486,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           fontFamily: "var(--font-mono)",
                           padding: "5px 8px",
                           border: "1px solid var(--accent)",
-                          borderRadius: 5,
+                          borderRadius: "var(--radius-xs)",
                           outline: "none",
                           background: "var(--bg)",
                           color: "var(--text)",
@@ -1519,7 +1519,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             padding: "4px 0",
                             background: "var(--bg-hover)",
                             border: "1px solid var(--border)",
-                            borderRadius: 5,
+                            borderRadius: "var(--radius-xs)",
                             color: "var(--text-muted)",
                             fontSize: 11,
                             cursor: "pointer",
@@ -1561,7 +1561,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               gap: 6,
               padding: "0 10px",
               border: "1px solid var(--border)",
-              borderRadius: 7,
+              borderRadius: "var(--radius-sm)",
               background: "var(--bg-hover)",
               color: "var(--text-dim)",
               fontSize: 11,
@@ -1701,7 +1701,7 @@ function UnreadSessionIndicator() {
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
-        color: "#0891b2",
+        color: "var(--accent)",
       }}
     >
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style={{ display: "block" }}>
@@ -1747,7 +1747,7 @@ function showProjectActivity(
         <span
           title={t("sidebar.newSessionActivity")}
           aria-label={`${t("sidebar.newSessionActivity")} (${activity.unread})`}
-          style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#0891b2", fontSize: 10, fontFamily: "var(--font-mono)" }}
+          style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "var(--accent)", fontSize: 10, fontFamily: "var(--font-mono)" }}
         >
           <span style={{ width: 6, height: 6, borderRadius: "50%", background: "currentColor", display: "inline-block" }} />
           {activity.unread}
@@ -1964,7 +1964,7 @@ function SessionItem({
             fontSize: 12,
             padding: "5px 8px",
             border: "1px solid var(--accent)",
-            borderRadius: 5,
+            borderRadius: "var(--radius-xs)",
             outline: "none",
             background: "var(--bg)",
             color: "var(--text)",

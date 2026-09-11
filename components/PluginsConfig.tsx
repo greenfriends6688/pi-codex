@@ -212,7 +212,7 @@ function SegmentedScope({
       style={{
         display: "inline-flex",
         border: "1px solid var(--border)",
-        borderRadius: 7,
+        borderRadius: "var(--radius-sm)",
         overflow: "hidden",
         height: 30,
       }}
@@ -331,7 +331,7 @@ function AddPluginPanel({
             height: 36,
             padding: "0 11px",
             border: "1px solid var(--border)",
-            borderRadius: 6,
+            borderRadius: "var(--radius-sm)",
             background: "var(--bg-panel)",
             color: "var(--text)",
             fontFamily: "var(--font-mono)",
@@ -376,7 +376,7 @@ function AddPluginPanel({
                 textAlign: "left",
                 padding: "6px 9px",
                 border: "1px solid var(--border)",
-                borderRadius: 6,
+                borderRadius: "var(--radius-sm)",
                 background: "var(--bg-panel)",
                 color: "var(--text-dim)",
                 cursor: "pointer",
