@@ -167,6 +167,12 @@ html[data-theme="pine"],
 - 列宽 860、列内边距 12；空态标题改非等宽 24/20px；通知条 `--radius-xl` + `--bg-elev`。
 - 用户气泡 80% 宽、13px、20px 圆角；时间戳 11px；工具卡/思考块沿用 token 化圆角与状态色；diff 行高 1.7。
 - **模型标签仅在 `isStreaming` 时显示**（Codex 的"安静表面"）；渲染走 `getModelDisplayName()`。
+- **两行操作区的可见性规则是相反的，合并上游时注意别被改回：**
+  - 用户消息下方（`复制` / `从此处编辑` / `新会话` / 时间戳）——**常显**。
+    上游用 `{(hovered || focused || forking || copied) && (...)}` 把它整个藏起来，
+    本 fork 去掉了这个门控（连带删掉只为它存在的 hover/focus 状态）。
+  - 助手消息下方的用量行（`N in · N out · N cache R · $x` + `复制`）——**hover 才显示**，
+    由 `.reveal-on-hover` 的 `opacity: 0 → 1` 控制。这一侧跟随上游。
 - Minimap 圆点改 22×3 圆角 marker（scaleX 渐进）。
 
 ### Composer `components/ChatInput.tsx` / `ModelSelector.tsx`
