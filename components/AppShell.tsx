@@ -2005,7 +2005,7 @@ export function AppShell() {
             </div>
           )}
           {!isMobile && (
-            <>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 4, marginLeft: "auto", minWidth: 0 }}>
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
               {renderSessionStatsButton(false)}

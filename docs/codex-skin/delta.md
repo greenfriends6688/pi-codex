@@ -1,63 +1,194 @@
 # Codex 皮肤改造台账
 
-本文件记录 pi-web 相对上游 v0.9.0 的全部**皮肤/布局**改动，用于将来合并上游更新时快速定位冲突并重打皮肤。这里不应出现任何功能改动；如果你发现台账之外的行为差异，视为合并事故。
+本文件记录 pi-web 相对上游的全部**皮肤/布局**改动，用于将来合并上游更新时快速定位冲突并重打皮肤。这里不应出现任何功能改动；如果你发现台账之外的行为差异，视为合并事故。
 
 ## 版本与分支
 
 | 分支/引用 | 内容 |
 |---|---|
-| `upstream` | 纯净上游快照链：`68e746c` = v0.9.0 原始源码包 |
-| `main` | `a43952b` 本地基线（v0.9.0 + 旧配色改造）→ 本皮肤各阶段提交 |
+| `upstream` | 纯净上游快照链：`68e746c` = v0.9.0 原始源码包 → `aeffa53` = v0.9.1 原始源码包 |
+| `main` | `a43952b` 本地基线（v0.9.0 + 旧配色改造）→ 12 个皮肤提交（`94c7741`）→ `166abb8` merge upstream v0.9.1 → `6bd923f` 剔除 Electron |
+| `backup/pre-0.9.1-merge` | 合并 0.9.1 之前的 main 快照（`94c7741`），回滚用 |
 | worktree | `../pi-web-upstream` 挂在 `upstream` 分支，专门用于落新版本源码包 |
+
+**当前基线版本：v0.9.1**
 
 ## 更新流水线（收到新源码包时）
 
 1. 先核对版本来源：以 npm `@agegr/pi-web` latest / GitHub Release 为准，不要只看 semver 最大的 tag（历史上 `v0.10.5` 比 `v0.9.0` 更早，是分叉线）。
-2. 在 `../pi-web-upstream` 解压覆盖新包 → `git add -A && git commit -m "upstream vX.Y.Z"`。
+2. 在 `../pi-web-upstream` 解压覆盖新包，提交为 `upstream vX.Y.Z`：
+   ```bash
+   rsync -a --delete --exclude '.git' --exclude 'node_modules' \
+     --exclude '.next' --exclude 'release' --exclude '.DS_Store' \
+     <新包目录>/ ../pi-web-upstream/
+   git add -A && git add -f build     # build/ 被 .gitignore 的 /build 忽略，需 -f
+   git commit -m "upstream vX.Y.Z (pristine upstream tarball)"
+   ```
 3. 回主仓库 `git merge upstream`；冲突只应出现在本台账列出的文件。
-4. 冲突策略：**逻辑冲突一律取上游**；皮肤冲突按本台账重打（见下方"皮肤改动点"）。
-5. `npm install`（依赖变化时）→ `tsc --noEmit` → `npm run lint` → `npm test`（已知唯一环境性失败：`uses the CLI global lock location` 依赖全局安装，可在干净环境复现，与本皮肤无关）。
-6. 提交 merge commit，打 tag `skin-vX.Y.Z`，并把本台账的"基线版本"更新为新版本。
+4. 冲突策略：**逻辑冲突一律取上游；皮肤冲突按本台账重打**。
+5. `npm install`（依赖变化时）→ `tsc --noEmit` → `npm run lint` → `npm test` → `node docs/codex-skin/audit-tokens.mjs`。
+   已知唯一环境性测试失败：`uses the CLI global lock location` 依赖全局安装，可在干净环境复现，与本皮肤无关。
+6. 提交 merge commit，打 tag `skin-vX.Y.Z`，并把本台账的"当前基线版本"更新为新版本。
+
+---
+
+## v0.9.0 → v0.9.1 合并记录（下次照做）
+
+上游 v0.9.1 的主要变化：新增 **Electron 桌面端**、Web 登录/鉴权页、Provider 用量统计、子代理队列、文本预览、终端改进；**主题从「亮/暗/auto」3 态升级为 6 套**（light / dark / mist / rose / pine / auto，用 `data-theme` 属性）；把内联样式组件化（`ConfigButton` 等）；把**主题选择与语言切换从顶栏搬进 `SettingsPanel`**。
+
+冲突面：**10 个文件 / 25 处**，其余全部自动合并成功（含 3 个 i18n 文件、`package-lock.json`、`FileViewer`、`useAgentSession`、`SettingsPanel`）。
+
+### A. 纯皮肤冲突 → 取本地（HEAD）
+
+上游只是把 `--primary-bg` 重构成 `--accent`、把圆角数字换成字面量；本地那侧才是皮肤，直接取 HEAD：
+
+`app/settings.css`（2）、`components/SessionSidebar.tsx`（1）、`components/ChatWindow.tsx`（2）、
+`components/DirectoryPicker.tsx`（1）、`components/ProjectTrustDialog.tsx`（1）
+
+### B. 结构性冲突 → 取上游，再补皮肤
+
+**`components/ModelsConfig.tsx`（10 处，最费手）**
+上游把内联样式抽成 `ConfigButton` / `ConfigDetailHeader` / `ConfigDetailHeaderInfo` / `ConfigDetailActions`（组件定义在 `components/SettingsUi.tsx`，样式在 `app/settings.css`），并把登录/登出按钮搬进 header、新增 `ProviderUsageSummary`。
+→ 取上游结构。但上游在这份文件里**重新引入了硬编码色**，需打回 token：`#4ade80` / `#16a34a` → `var(--success)`，`#f87171` → `var(--danger)`。另有 5 处上游数字圆角需换回 `var(--radius-*)`（`4`/`5` → `--radius-xs`，`6`/`7` → `--radius-sm`，`10` → `--radius-md`；`borderRadius: 3` 的 T 徽章本地原本就保留字面量）。
+
+**`components/ChatInput.tsx`（2 处）**
+取上游新增的 `ref={atMenuRef}`（@ 菜单定位，本地那侧只有 `className="anim-popover"`，两者都要）；发送键保留本地底部栏的圆形实现（`{!isMobile && (isStreaming ? stopButton : sendButton)}`），丢弃上游的带文字按钮。
+
+**`components/AppShell.tsx`（4 处）**
+上游删除了顶栏的 `renderThemeButton` / `renderLanguageButton` / 语言下拉 / `languageBtnRef` / `LANGUAGE_MENU_WIDTH` / `activeTopPanel` 的 `"language"` 分支，改由 `SettingsPanel` 承担。
+→ 取上游结构。**注意 JSX 配对**：上游把 `{!isMobile && (` 的内容换成 `<>` 片段，而本地那侧是 `<div style={{...marginLeft:"auto"}}>` + `</div>` 收尾；合并后会出现 `<>` 配 `</div>` 的失配，`tsc` 报 `TS17015`。修复方式是恢复本地那层 flex 包裹（去掉已删除的两个按钮）：
+
+```jsx
+{!isMobile && (
+  <div style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 4, marginLeft: "auto", minWidth: 0 }}>
+    {renderProjectTrustWarning(false)}
+    {renderChatToolbarActions(false)}
+    {renderSessionStatsButton(false)}
+    {renderMainFileToggle(false)}
+  </div>
+)}
+```
+
+顶栏尺寸常量保持本地的 `TOP_BAR_ICON_BUTTON_SIZE = 28`（上游是 36）。
+
+### C. 行为冲突 → 取本地行为 + 上游 helper
+
+**`components/MessageView.tsx`（1 处）**
+本地刻意在非流式时隐藏模型标签（Codex 的"安静表面"），上游改为始终显示、只把 token 估算放进 `isStreaming` 分支。
+→ 保留本地的 `{isStreaming && (...)}` 包裹，但采用上游新抽出的 `getModelDisplayName()` helper 替换本地原来的内联 `modelNames?.[...]` 查找。
+
+### 两个必查陷阱
+
+1. **自造 token 必须存活。** `--primary-bg` / `--primary-fg` / `--primary-hover` 以及整套 `--radius-*`（含 `--corner-radius-scale`）**是本地发明的，上游 0.9.0 和 0.9.1 都没有**。本地 8 个文件依赖它们（`globals.css`、`settings.css`、`ModelsConfig`、`SessionSidebar`、`DirectoryPicker`、`ChatWindow`、`ProjectTrustDialog`、`ChatInput`）。一旦 `app/globals.css` 的主题块取了上游那侧，这些 token 会全部 undefined，样式大面积塌掉。**合并后务必跑 `audit-tokens.mjs`。**
+2. **上游会重新引入硬编码色。** 除 ModelsConfig 外，`settings.css` 等文件也可能被上游改回字面量。取上游结构后逐文件确认硬编码色是否已 token 化。
+
+---
 
 ## 皮肤改动点
 
-### 基座 `app/globals.css`
-- 圆角改为 `--corner-radius-scale: 1.25` 的 calc 体系（xs 5 / sm 7.5 / md 10 / lg 12.5 / xl 15 / 2xl 20）。
-- 阴影改为 Codex 轻投影，新增 `--elevation-stroke/prominent/sidebar`、`--scrim`、`--focus-ring`。
-- 布局 token：`--chat-content-max-width: 768px`、`--height-toolbar-sm/pane`、`--spacing-token-button-composer: 28px`、`--conversation-item-gap` 等。
-- 等宽字体栈改为 SF Mono 优先；聊天正文 13px（`--chat-content-font-size`），markdown 行高 1.62。
+### 基座 `app/globals.css` — 6 套主题全部按 Codex 设计语言重打
+
+上游 v0.9.1 的主题结构是 `data-theme` 选调色板 + `.dark` 类同步（由 `hooks/useTheme.ts` 维护，`isDarkTheme()` 认定 `dark` 与 `pine` 属于暗色系）。本皮肤**采纳该机制**，但把 6 套调色板全部改写成 Codex 设计语言：分层表面、半透明细线而非实心灰、三级前景 alpha、单一单色主操作。**各主题之间只差强调色色相与中性色的极淡色调偏移。**
+
+文件结构：
+
+```css
+:root { /* 主题无关：圆角尺度、阴影/描边、布局度量、动效时长 */ }
+
+:root,
+[data-theme="light"] { color-scheme: light; /* Codex light：白面 + 近黑墨 + 蓝强调 */ }
+
+html.dark,
+[data-theme="dark"]  { color-scheme: dark;  /* Codex dark：分层近黑 + 白墨 + 蓝强调 */ }
+
+[data-theme="mist"]  { color-scheme: light; /* Codex light 面 + 极淡冷绿偏色 + 青绿强调 */ }
+[data-theme="rose"]  { color-scheme: light; /* Codex light 面 + 极淡暖偏色 + 玫瑰强调 */ }
+
+html[data-theme="pine"],
+[data-theme="pine"]  { color-scheme: dark;  /* Codex dark 面 + 极淡绿偏色 + 浅绿强调 */ }
+```
+
+- **几何/布局/动效放在裸 `:root`**，不随主题变化；每个调色板块只重述颜色。
+- **每个调色板块必须写全 34 个色板 token**（`audit-tokens.mjs` 会校验）。漏写会从 `:root` 泄漏成 light 的值——`pine` 会拿到 `--bg-elev: #ffffff` 这类亮色，直接坏掉。
+- 圆角为 `--corner-radius-scale: 1.25` 的 calc 体系（xs 5 / sm 7.5 / md 10 / lg 12.5 / xl 15 / 2xl 20）。
+- 阴影为 Codex 轻投影，含 `--elevation-stroke/prominent/sidebar`、`--scrim`、`--focus-ring`。
+- 布局 token：`--chat-content-max-width: 860px`、`--height-toolbar-sm/pane`、`--spacing-token-button-composer: 28px`、`--conversation-item-gap` 等。
+- 等宽字体栈 SF Mono 优先；聊天正文 13px（`--chat-content-font-size`），markdown 行高 1.62。
+
+> **上游 token 迁移**：上游 0.9.1 用 `--accent` / `--accent-contrast` 表达实心按钮，并全仓移除了 `--primary-bg` 系列。本皮肤保留 `--primary-bg` / `--primary-fg` / `--primary-hover` 作为**单色主操作**语义（这是 Codex 的核心特征），同时在 6 套调色板里都定义了 `--accent-contrast`，保证上游新增组件（`ConfigButton variant="primary"` 等）正常工作。两套 token 并存是有意为之。
 
 ### 骨架 `components/AppShell.tsx`
-- 顶栏按钮改 32px 圆角 chip：去掉 `borderRight` 分隔线与激活态 2px accent 顶边；`TOP_BAR_ICON_BUTTON_SIZE` 36→32。
+
+- 顶栏按钮改 28px 圆角 chip（`TOP_BAR_ICON_BUTTON_SIZE = 28`；上游为 36）：去掉 `borderRight` 分隔线与激活态 2px accent 顶边。
 - 右面板头部 46→40px（`--height-toolbar-pane`），默认宽 384（`lib/panel-layout.ts`）。
 - 背景/遮罩统一 `var(--scrim)`；信任警告改 warning 软底 chip。
+- **顶栏不再有主题/语言按钮**——上游 v0.9.1 已把它们迁到 `SettingsPanel`。这是上游的 IA 决定，不是皮肤回归；如需恢复顶栏快捷切换，属于新增功能，需另立提交。
 
 ### 侧边栏 `components/SessionSidebar.tsx`
+
 - **会话行改为 Codex 单行胶囊**：`SESSION_LIST_ITEM_HEIGHT` 48→32（导出供测试推导）、`borderRadius: var(--radius-pill)`、标题 13px，时间/消息数只在 hover 时出现，running/unread 指示器移到标题前，hover 操作按钮 24px 无边框。
 - 头部：标题 13.5px/600 非等宽；新建/搜索/cwd 选择器改 subtle chip。
 - **文件树整段迁出**（见 ExplorerPanel），SessionSidebar 不再接收 `onOpenFile/onOpenTerminal/explorerRefreshKey/onExplorerRefresh/onAtMention/onAtMentions` 属性。
 
 ### 右侧面板 `components/ExplorerPanel.tsx`（新增）
+
 - 由 SessionSidebar 的 FileExplorer 章节原样搬出，state 与 FileExplorer 回调不变；`ToolbarIconButton` 一并搬入。
-- 无打开 Tab 时由 AppShell 右侧面板渲染，替代原 "files.noneOpen" 空态；`TabBar` 改为 32px 胶囊 Tab（去右边框分隔）。
+- 无打开 Tab 时由 AppShell 右侧面板渲染，替代原 `files.noneOpen` 空态；`TabBar` 改为 32px 胶囊 Tab（去右边框分隔）。
 
 ### 消息 `components/ChatWindow.tsx` / `MessageView.tsx` / `ChatMinimap.tsx`
-- 列宽 768、列内边距 12；空态标题改非等宽 24/20px；通知条 `--radius-xl` + `--bg-elev`。
+
+- 列宽 860、列内边距 12；空态标题改非等宽 24/20px；通知条 `--radius-xl` + `--bg-elev`。
 - 用户气泡 80% 宽、13px、20px 圆角；时间戳 11px；工具卡/思考块沿用 token 化圆角与状态色；diff 行高 1.7。
+- **模型标签仅在 `isStreaming` 时显示**（Codex 的"安静表面"）；渲染走 `getModelDisplayName()`。
 - Minimap 圆点改 22×3 圆角 marker（scaleX 渐进）。
 
 ### Composer `components/ChatInput.tsx` / `ModelSelector.tsx`
+
 - 控件统一 28px（`--spacing-token-button-composer`）、gap/padding 收紧、圆角 `--radius-md`。
-- 发送键改 28px 圆形图标键（`aria-label` 保留，测试断言 `aria-label="Send"`）；Steer/Follow-up 改 12px 紧凑键。
+- 发送键改 32px 圆形图标键，位于**底部栏右侧**（`{!isMobile && (isStreaming ? stopButton : sendButton)}`）；`aria-label` 保留，测试断言 `aria-label="Send"`。Steer/Follow-up 改 12px 紧凑键。
+- @ 菜单挂 `ref={atMenuRef}`（上游 v0.9.1 新增，用于定位/外点关闭）+ `className="anim-popover"`。
 
 ### 设置与弹窗 `app/settings.css` + `Settings*` / `ModelsConfig` / `SkillsConfig` / `PluginsConfig` / `AgentsConfig` / `ProjectTrustDialog` / `DirectoryPicker`
+
 - 遮罩统一 `var(--scrim)`；半径/阴影走 token；硬编码色（红/蓝/琥珀）全部换成 `--danger/--accent/--warning` 及 color-mix 变体。
+- `ModelsConfig` 的按钮由 `SettingsUi.tsx` 的 `ConfigButton` 渲染，样式落在 `app/settings.css` 的 `.config-button-*`——**改按钮外观请改 CSS，不要回到内联样式**。
+- `ModelsConfig` 内联样式仍保留本地 token 约定：主操作按钮用 `--primary-bg`/`--primary-fg`，圆角一律 `var(--radius-*)`。
 
 ### 行为常量（皮肤相关，合并时注意）
+
 - `hooks/useChatAppearance.ts`：宽度默认 768、下限 640；字号默认 13。`clampChatContentWidth(null)` 视为默认值（修复了 `Number(null)=0` 被钳到下限的边界）。
 - `lib/file-explorer-state.ts`：折叠状态 key 不变，由 ExplorerPanel 继续使用。
+
+---
+
+## 本 fork 的有意偏离（非皮肤）
+
+### Electron 桌面端已剔除（`6bd923f`）
+
+上游 v0.9.1 新增 Electron 桌面端。本 fork 保持纯 Web，已移除：
+
+- `electron/main.js`、`scripts/gen-icons.mjs`、`scripts/after-pack.mjs`、`build/` 图标
+- `package.json`：`productName`、`main`、`desktop` / `desktop:icons` 脚本、`electron` / `electron-builder` / `@resvg/resvg-js` 依赖、electron-builder 的 `build` 配置块
+- `.gitignore`：忽略 `/release`（electron-builder 输出目录）
+
+`upstream` 分支上的快照仍完整保留这些内容，需要时可从那里取回。
+
+### 依赖变化
+
+`node-pty` 1.1.0 → **1.2.0-beta.15**（上游 v0.9.1 变更）。上游同时新增的 `electron` / `electron-builder` / `@resvg/resvg-js` 已被剔除。
+
+---
 
 ## 已知测试断言同步
 
 以下测试断言的是皮肤数值，合并上游若覆盖需同步：
-`ChatAppearance`（768/13）、`SessionSidebar`（行高常量推导）、`AgentSessionPanel`（`--radius-md` 圆角）、`ImagePreview`（`--radius-md`/`--bg-elev`）、`MessageView`（`--border` 工具卡）、`MobilePwaLayout`（`--height-toolbar`/`--height-toolbar-pane`）、`panel-layout`（384 默认宽）。
+`ChatAppearance`（768/13）、`SessionSidebar`（行高常量推导）、`AgentSessionPanel`（`--radius-md` 圆角）、`ImagePreview`（`--radius-md`/`--bg-elev`）、`MessageView`（`--border` 工具卡）、`MobilePwaLayout`（`--height-toolbar`/`--height-toolbar-pane`）、`panel-layout`（384 默认宽）、`SettingsPanel`（`THEME_OPTIONS.map` / `setThemePreference(option.id)` / `setLocale(plugin.id)`）。
+
+## 合并后自检清单
+
+```bash
+node_modules/.bin/tsc --noEmit          # 必过；JSX 失配会在这里暴露
+npm run lint                            # 0 error
+npm test                                # 除 CLI global lock 外全过
+node docs/codex-skin/audit-tokens.mjs   # 必过；自造 token 与 6 套色板完整性
+```
