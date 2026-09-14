@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendAgentCommand } from "@/lib/agent-client";
-import type { PluginPackageInfo, PluginStandaloneExtensionInfo, PluginUpdateResult, PluginsResponse } from "@/lib/api-types";
+import type { McpResponse, McpScope, McpServerInfo, PluginPackageInfo, PluginStandaloneExtensionInfo, PluginUpdateResult, PluginsResponse } from "@/lib/api-types";
 import { useI18n } from "@/hooks/useI18n";
 import {
   getLastSettingsSelection,
@@ -650,6 +650,366 @@ function StandaloneExtensionDetail({ extension }: { extension: PluginStandaloneE
   );
 }
 
+function McpServerDetail({
+  server,
+  cwd,
+  busy,
+  actionError,
+  actionMessage,
+  onToggle,
+  onRemove,
+  onMove,
+  onTest,
+  onEdit,
+}: {
+  server: McpServerInfo;
+  cwd: string;
+  busy: boolean;
+  actionError: string | null;
+  actionMessage: string | null;
+  onToggle: () => void;
+  onRemove: () => void;
+  onMove: () => void;
+  onTest: () => void;
+  onEdit: () => void;
+}) {
+  const { t } = useI18n();
+  const enabled = !server.disabled;
+  const otherScope: McpScope = server.scope === "project" ? "global" : "project";
+  const target =
+    server.kind === "url" ? server.url : server.kind === "socket" ? server.socket : server.command;
+  const row: React.CSSProperties = { color: "var(--text-dim)" };
+  const val: React.CSSProperties = {
+    color: "var(--text-muted)",
+    fontFamily: "var(--font-mono)",
+    overflowWrap: "anywhere",
+  };
+
+  return (
+    <ConfigDetailStack>
+      <ConfigDetailHeader className="is-top-aligned">
+        <ConfigDetailHeaderInfo>
+          <ScopeTag scope={server.scope} />
+          {server.disabled && (
+            <span
+              style={{
+                fontSize: 10,
+                padding: "1px 5px",
+                borderRadius: 3,
+                background: "rgba(120,120,120,0.12)",
+                color: "var(--text-dim)",
+              }}
+            >
+              {t("mcp.disabledBadge")}
+            </span>
+          )}
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              color: "var(--text)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {server.name}
+          </span>
+        </ConfigDetailHeaderInfo>
+
+        <ConfigDetailActions>
+          <ConfigButton size="small" onClick={onTest} disabled={busy}>
+            {busy ? t("mcp.testing") : t("mcp.test")}
+          </ConfigButton>
+          <ConfigButton size="small" onClick={onEdit} disabled={busy}>
+            {t("mcp.edit")}
+          </ConfigButton>
+          <ConfigButton size="small" onClick={onMove} disabled={busy}>
+            {otherScope === "project" ? t("mcp.moveToProject") : t("mcp.moveToGlobal")}
+          </ConfigButton>
+          <ConfigButton variant="danger" size="small" onClick={onRemove} disabled={busy}>
+            {t("mcp.delete")}
+          </ConfigButton>
+          <ConfigSwitch
+            checked={enabled}
+            loading={busy}
+            onChange={() => onToggle()}
+            label={enabled ? t("mcp.disable") : t("mcp.enable")}
+          />
+        </ConfigDetailActions>
+      </ConfigDetailHeader>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(96px, 130px) minmax(0, 1fr)",
+          gap: "9px 14px",
+          fontSize: 12,
+          lineHeight: 1.45,
+        }}
+      >
+        <div style={row}>{t("mcp.fieldType")}</div>
+        <div style={val}>{server.kind}</div>
+        <div style={row}>
+          {server.kind === "url"
+            ? t("mcp.kindUrl")
+            : server.kind === "socket"
+              ? t("mcp.kindSocket")
+              : t("mcp.kindCommand")}
+        </div>
+        <div style={val}>{target ?? "—"}</div>
+        {server.kind === "command" && (
+          <>
+            <div style={row}>{t("mcp.fieldArgs")}</div>
+            <div style={val}>{server.args.length ? server.args.join(" ") : "—"}</div>
+          </>
+        )}
+        <div style={row}>{t("mcp.fieldEnv")}</div>
+        <div style={val}>{server.envKeys.length ? server.envKeys.join(", ") : "—"}</div>
+        <div style={row}>{t("mcp.fieldOptions")}</div>
+        <div style={val}>{Object.keys(server.options).length ? JSON.stringify(server.options) : "—"}</div>
+        <div style={row}>{t("mcp.fieldSource")}</div>
+        <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+          {shortenPath(server.source)}
+        </div>
+        <div style={row}>{t("mcp.fieldCwd")}</div>
+        <div style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflowWrap: "anywhere" }}>
+          {shortenPath(cwd)}
+        </div>
+      </div>
+
+      {actionMessage && (
+        <div style={{ fontSize: 12, color: "var(--success)" }}>{actionMessage}</div>
+      )}
+      {actionError && (
+        <div style={{ fontSize: 12, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{actionError}</div>
+      )}
+    </ConfigDetailStack>
+  );
+}
+
+function AddMcpServer({
+  cwd,
+  scope,
+  projectResourcesLoaded,
+  busy,
+  actionError,
+  initial,
+  onScopeChange,
+  onSave,
+  onFetchDef,
+  onCancel,
+}: {
+  cwd: string;
+  scope: McpScope;
+  projectResourcesLoaded: boolean;
+  busy: boolean;
+  actionError: string | null;
+  initial?: McpServerInfo | null;
+  onScopeChange: (scope: McpScope) => void;
+  onSave: (name: string, def: Record<string, unknown>) => void;
+  onFetchDef: (name: string, serverScope: McpScope) => Promise<Record<string, unknown> | null>;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  const isEdit = !!initial;
+  const [name, setName] = useState(isEdit && initial ? initial.name : "");
+  const [spec, setSpec] = useState(() => {
+    if (!initial) return "";
+    if (initial.kind === "command") return [initial.command, ...initial.args].join(" ");
+    return initial.url ?? initial.socket ?? "";
+  });
+  const [argsText, setArgsText] = useState("");
+  const [mode, setMode] = useState<"basic" | "json">("basic");
+  const [jsonText, setJsonText] = useState<string | null>(null);
+  const [jsonError, setJsonError] = useState<string | null>(null);
+  const [loadingJson, setLoadingJson] = useState(false);
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    height: 36,
+    padding: "0 11px",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-panel)",
+    color: "var(--text)",
+    fontFamily: "var(--font-mono)",
+    fontSize: 12,
+    outline: "none",
+  };
+  const jsonEditorStyle: React.CSSProperties = {
+    width: "100%",
+    minHeight: 200,
+    padding: "9px 11px",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    background: "var(--bg-panel)",
+    color: "var(--text)",
+    fontFamily: "var(--font-mono)",
+    fontSize: 12,
+    lineHeight: 1.5,
+    outline: "none",
+    resize: "vertical",
+    whiteSpace: "pre",
+    overflow: "auto",
+  };
+  const isUrl = /^https?:\/\//.test(spec.trim());
+
+  const buildBasicDef = (): Record<string, unknown> => {
+    const specTrim = spec.trim();
+    if (/^https?:\/\//.test(specTrim)) return { url: specTrim };
+    const tokens = specTrim.split(/\s+/);
+    const command = tokens[0] ?? "";
+    const extra = argsText.trim() ? argsText.trim().split(/\s+/) : [];
+    return { command, args: [...tokens.slice(1), ...extra] };
+  };
+
+  const switchToJson = async (): Promise<void> => {
+    setJsonError(null);
+    if (jsonText !== null) {
+      setMode("json");
+      return;
+    }
+    if (isEdit && initial) {
+      setMode("json");
+      setLoadingJson(true);
+      try {
+        const def = await onFetchDef(initial.name, initial.scope);
+        setJsonText(JSON.stringify(def ?? buildBasicDef(), null, 2));
+      } finally {
+        setLoadingJson(false);
+      }
+    } else {
+      setJsonText(JSON.stringify(buildBasicDef(), null, 2));
+      setMode("json");
+    }
+  };
+
+  const handleSave = (): void => {
+    setJsonError(null);
+    if (mode === "json") {
+      const text = jsonText ?? "";
+      if (!text.trim()) {
+        setJsonError(t("mcp.jsonEmpty"));
+        return;
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch (error) {
+        setJsonError(t("mcp.jsonParseError", { message: error instanceof Error ? error.message : String(error) }));
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setJsonError(t("mcp.jsonNotObject"));
+        return;
+      }
+      const def = parsed as Record<string, unknown>;
+      if (!def.command && !def.url && !def.socket) {
+        setJsonError(t("mcp.jsonNeedsEntry"));
+        return;
+      }
+      onSave(name, def);
+      return;
+    }
+    onSave(name, buildBasicDef());
+  };
+
+  const canSave = Boolean(
+    name.trim() && (mode === "json" ? (jsonText ?? "").trim().length > 0 : spec.trim().length > 0),
+  );
+
+  return (
+    <ConfigDetailStack className="is-fill">
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        <ConfigDetailTitle>
+          {isEdit ? t("mcp.editTitle", { name: initial?.name ?? "" }) : t("mcp.addTitle")}
+        </ConfigDetailTitle>
+        <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+          {scope === "project" ? `${shortenPath(cwd)}/.pi/mcp.json` : "~/.pi/agent/mcp.json"}
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8 }}>
+        {(["basic", "json"] as const).map((m) => (
+          <ConfigButton
+            key={m}
+            size="small"
+            variant={mode === m ? "primary" : undefined}
+            onClick={() => (m === "json" ? void switchToJson() : setMode("basic"))}
+          >
+            {m === "basic" ? t("mcp.modeBasic") : t("mcp.modeJson")}
+          </ConfigButton>
+        ))}
+      </div>
+
+      <ConfigField label={t("mcp.nameLabel")}>
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("mcp.namePlaceholder")}
+          style={inputStyle}
+        />
+      </ConfigField>
+
+      {mode === "json" ? (
+        <ConfigField label={t("mcp.jsonLabel")}>
+          {loadingJson ? (
+            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("mcp.loadingDef")}</div>
+          ) : (
+            <textarea
+              value={jsonText ?? ""}
+              onChange={(e) => setJsonText(e.target.value)}
+              spellCheck={false}
+              placeholder={
+                '{\n  "command": "npx",\n  "args": ["-y", "@modelcontextprotocol/server-github"],\n  "env": {}\n}'
+              }
+              style={jsonEditorStyle}
+            />
+          )}
+        </ConfigField>
+      ) : (
+        <>
+          <ConfigField label={t("mcp.specLabel")}>
+            <input
+              value={spec}
+              onChange={(e) => setSpec(e.target.value)}
+              placeholder={t("mcp.specPlaceholder")}
+              style={inputStyle}
+            />
+          </ConfigField>
+
+          {!isUrl && (
+            <ConfigField label={t("mcp.argsLabel")}>
+              <input value={argsText} onChange={(e) => setArgsText(e.target.value)} style={inputStyle} />
+            </ConfigField>
+          )}
+        </>
+      )}
+
+      {jsonError && (
+        <div style={{ fontSize: 12, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{jsonError}</div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <SegmentedScope
+          value={scope}
+          projectResourcesLoaded={projectResourcesLoaded}
+          onChange={onScopeChange}
+        />
+        <ConfigButton variant="primary" onClick={handleSave} disabled={busy || !canSave}>
+          {busy ? t("mcp.saving") : isEdit ? t("mcp.saveEdit") : t("mcp.save")}
+        </ConfigButton>
+        <ConfigButton onClick={onCancel}>{t("mcp.cancel")}</ConfigButton>
+      </div>
+
+      {actionError && (
+        <div style={{ fontSize: 12, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{actionError}</div>
+      )}
+    </ConfigDetailStack>
+  );
+}
+
 export function PluginsConfig({
   cwd,
   sessionId,
@@ -679,12 +1039,32 @@ export function PluginsConfig({
   const [checkingAll, setCheckingAll] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
+  // MCP server state
+  const [view, setView] = useState<"plugins" | "mcp">("plugins");
+  const [mcpData, setMcpData] = useState<McpResponse | null>(null);
+  const [mcpLoading, setMcpLoading] = useState(true);
+  const [mcpSelected, setMcpSelected] = useState<string | null>(null);
+  const [mcpAddMode, setMcpAddMode] = useState(false);
+  const [mcpScope, setMcpScope] = useState<McpScope>("global");
+  const [mcpEditTarget, setMcpEditTarget] = useState<McpServerInfo | null>(null);
+  const [mcpActionError, setMcpActionError] = useState<string | null>(null);
+  const [mcpActionMessage, setMcpActionMessage] = useState<string | null>(null);
+  const [mcpTesting, setMcpTesting] = useState<string | null>(null);
 
   const packages = useMemo(() => data?.packages ?? [], [data?.packages]);
   const standaloneExtensions = useMemo(() => data?.standaloneExtensions ?? [], [data?.standaloneExtensions]);
   const selectedPackage = packages.find((pkg) => packageKey(pkg) === selected) ?? null;
   const selectedExtension = standaloneExtensions.find((extension) => extensionKey(extension) === selected) ?? null;
   const projectResourcesLoaded = data?.projectResourcesLoaded ?? true;
+  const selectedMcp = useMemo(
+    () => mcpData?.servers.find((s) => s.name === mcpSelected) ?? null,
+    [mcpData, mcpSelected],
+  );
+  const groupedMcp = useMemo(() => {
+    return (["project", "global"] as McpScope[])
+      .map((scope) => ({ scope, servers: (mcpData?.servers ?? []).filter((s) => s.scope === scope) }))
+      .filter((group) => group.servers.length > 0);
+  }, [mcpData]);
 
   const groupedPackages = useMemo(() => {
     return (["project", "global"] as PluginScope[])
@@ -724,6 +1104,163 @@ export function PluginsConfig({
     setUpdateError(null);
     void loadPlugins();
   }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const loadMcp = useCallback(async () => {
+    setMcpLoading(true);
+    setMcpActionError(null);
+    try {
+      const res = await fetch(`/api/mcp?cwd=${encodeURIComponent(cwd)}`);
+      const next = (await res.json()) as McpResponse & { error?: string };
+      if (!res.ok || next.error) throw new Error(next.error ?? `HTTP ${res.status}`);
+      setMcpData(next);
+      setMcpSelected((current) =>
+        current && next.servers.some((s) => s.name === current)
+          ? current
+          : next.servers[0]?.name ?? null,
+      );
+    } catch (err) {
+      setMcpActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setMcpLoading(false);
+    }
+  }, [cwd]);
+
+  useEffect(() => {
+    void loadMcp();
+  }, [loadMcp]);
+
+  const runMcpAction = useCallback(
+    async (action: string, payload: Record<string, unknown>): Promise<McpResponse | null> => {
+      setBusyKey(`mcp:${action}`);
+      setMcpActionError(null);
+      setMcpActionMessage(null);
+      try {
+        const res = await fetch("/api/mcp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cwd, action, ...payload }),
+        });
+        const next = (await res.json()) as McpResponse & { error?: string };
+        if (!res.ok || next.error) throw new Error(next.error ?? `HTTP ${res.status}`);
+        setMcpData(next);
+        return next;
+      } catch (err) {
+        setMcpActionError(err instanceof Error ? err.message : String(err));
+        return null;
+      } finally {
+        setBusyKey(null);
+      }
+    },
+    [cwd],
+  );
+
+  const toggleMcp = useCallback(
+    async (server: McpServerInfo) => {
+      const next = await runMcpAction(server.disabled ? "enable" : "disable", {
+        name: server.name,
+        scope: server.scope,
+      });
+      if (next) {
+        setMcpActionMessage(
+          server.disabled
+            ? t("mcp.msgEnabled", { name: server.name })
+            : t("mcp.msgDisabled", { name: server.name }),
+        );
+      }
+    },
+    [runMcpAction], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const removeMcp = useCallback(
+    async (server: McpServerInfo) => {
+      const next = await runMcpAction("remove", { name: server.name, scope: server.scope });
+      if (next) {
+        setMcpSelected(next.servers[0]?.name ?? null);
+        setMcpActionMessage(t("mcp.msgDeleted", { name: server.name }));
+        if (next.servers.length === 0) setMcpAddMode(true);
+      }
+    },
+    [runMcpAction], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const moveMcp = useCallback(
+    async (server: McpServerInfo) => {
+      const to = server.scope === "project" ? "global" : "project";
+      const next = await runMcpAction("move", {
+        name: server.name,
+        fromScope: server.scope,
+        toScope: to,
+      });
+      if (next) setMcpActionMessage(t("mcp.msgMoved", { name: server.name, scope: to }));
+    },
+    [runMcpAction], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const saveMcp = useCallback(
+    async (name: string, def: Record<string, unknown>) => {
+      const isEdit = !!mcpEditTarget;
+      const action = isEdit ? "update" : "add";
+      const nameFinal = isEdit && mcpEditTarget ? mcpEditTarget.name : name.trim();
+      const next = await runMcpAction(action, { name: nameFinal, scope: mcpScope, def });
+      if (next) {
+        setMcpSelected(nameFinal);
+        setMcpAddMode(false);
+        setMcpEditTarget(null);
+        setMcpActionMessage(
+          isEdit
+            ? t("mcp.msgUpdated", { name: nameFinal })
+            : t("mcp.msgAdded", { name: nameFinal }),
+        );
+      }
+    },
+    [mcpScope, mcpEditTarget, runMcpAction], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const fetchMcpDef = useCallback(
+    async (name: string, serverScope: McpScope): Promise<Record<string, unknown> | null> => {
+      try {
+        const res = await fetch("/api/mcp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cwd, action: "get", name, scope: serverScope }),
+        });
+        const json = (await res.json()) as { def?: Record<string, unknown>; error?: string };
+        if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
+        return json.def ?? null;
+      } catch {
+        return null;
+      }
+    },
+    [cwd],
+  );
+
+  const testMcp = useCallback(
+    async (server: McpServerInfo) => {
+      setMcpTesting(server.name);
+      setMcpActionError(null);
+      setMcpActionMessage(null);
+      try {
+        const res = await fetch("/api/mcp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cwd, action: "test", name: server.name, scope: server.scope }),
+        });
+        const json = (await res.json()) as { ok?: boolean; message?: string; error?: string };
+        if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
+        setMcpActionMessage(t("mcp.msgTestResult", { name: server.name, result: json.message ?? "" }));
+      } catch (err) {
+        setMcpActionError(
+          t("mcp.msgTestError", {
+            name: server.name,
+            error: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      } finally {
+        setMcpTesting(null);
+      }
+    },
+    [cwd], // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   useEffect(() => {
     if (selected) setLastSettingsSelection("plugins", selected, cwd);
@@ -894,6 +1431,7 @@ export function PluginsConfig({
   }, [loadPlugins, onReloaded, sessionId]);
 
   const addBusy = busyKey?.startsWith("install:") ?? false;
+  const mcpBusy = busyKey?.startsWith("mcp:") ?? false;
   const availableUpdateCount = Object.values(updateStatuses).filter(
     (status) => status.state === "update-available",
   ).length;
@@ -965,6 +1503,7 @@ export function PluginsConfig({
                             key={key}
                             active={isSelected}
                             onClick={() => {
+                              setView("plugins");
                               setSelected(key);
                               setAddMode(false);
                               setActionError(null);
@@ -987,10 +1526,64 @@ export function PluginsConfig({
                   ))}
                 </>
               )}
+                  <div className="config-sidebar-group">
+                    <ConfigSidebarGroupLabel>
+                      {t("mcp.sectionTitle")}
+                    </ConfigSidebarGroupLabel>
+                    {mcpLoading ? (
+                      <div style={{ padding: "4px 8px", fontSize: 12, color: "var(--text-dim)" }}>
+                        {t("i18n.loading")}
+                      </div>
+                    ) : !mcpData && mcpActionError ? (
+                      <div style={{ padding: "4px 8px", fontSize: 12, color: "var(--danger)" }}>
+                        {mcpActionError}
+                      </div>
+                    ) : (mcpData?.servers.length ?? 0) === 0 ? (
+                      <div style={{ padding: "4px 8px", fontSize: 12, color: "var(--text-dim)" }}>
+                        {t("mcp.emptyList")}
+                      </div>
+                    ) : (
+                      <>
+                        {groupedMcp.map((group) => (
+                          <div key={group.scope} className="config-sidebar-group">
+                            <ConfigSidebarGroupLabel>{group.scope}</ConfigSidebarGroupLabel>
+                            {group.servers.map((server) => {
+                              const isMcpSelected =
+                                view === "mcp" && !mcpAddMode && mcpSelected === server.name;
+                              return (
+                                <ConfigSidebarItem
+                                  key={server.name}
+                                  active={isMcpSelected}
+                                  title={shortenPath(server.source)}
+                                  onClick={() => {
+                                    setView("mcp");
+                                    setMcpSelected(server.name);
+                                    setMcpAddMode(false);
+                                    setMcpEditTarget(null);
+                                    setMcpActionError(null);
+                                    setMcpActionMessage(null);
+                                  }}
+                                >
+                                  <ConfigStatusDot
+                                    active={!server.disabled}
+                                    color={server.disabled ? undefined : "var(--accent)"}
+                                  />
+                                  <ConfigSidebarText className={`is-grow${server.disabled ? " is-muted" : ""}`}>
+                                    {server.name}
+                                  </ConfigSidebarText>
+                                </ConfigSidebarItem>
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
             </ConfigSidebarList>
             <ConfigListAction
-                active={addMode}
+                active={view === "plugins" && addMode}
                 onClick={() => {
+                  setView("plugins");
                   setAddMode(true);
                   setActionError(null);
                   setActionMessage(null);
@@ -998,11 +1591,62 @@ export function PluginsConfig({
               >
                  {t("i18n.addPlugin")}
             </ConfigListAction>
+            <ConfigListAction
+                active={view === "mcp" && mcpAddMode}
+                onClick={() => {
+                  setView("mcp");
+                  setMcpAddMode(true);
+                  setMcpEditTarget(null);
+                  setMcpActionError(null);
+                  setMcpActionMessage(null);
+                }}
+              >
+                 {t("mcp.addButton")}
+            </ConfigListAction>
           </ConfigSidebar>
 
           <ConfigDetail>
             <ConfigDetailStack className="is-fill">
-              {addMode ? (
+              {view === "mcp" ? (
+                mcpAddMode ? (
+                  <AddMcpServer
+                    cwd={cwd}
+                    scope={mcpScope}
+                    projectResourcesLoaded={projectResourcesLoaded}
+                    busy={mcpBusy}
+                    actionError={mcpActionError}
+                    initial={mcpEditTarget}
+                    onScopeChange={setMcpScope}
+                    onSave={(name, def) => void saveMcp(name, def)}
+                    onFetchDef={fetchMcpDef}
+                    onCancel={() => {
+                      setMcpAddMode(false);
+                      setMcpEditTarget(null);
+                    }}
+                  />
+                ) : selectedMcp ? (
+                  <McpServerDetail
+                    key={selectedMcp.name}
+                    server={selectedMcp}
+                    cwd={cwd}
+                    busy={mcpBusy || mcpTesting === selectedMcp.name}
+                    actionError={mcpActionError}
+                    actionMessage={mcpActionMessage}
+                    onToggle={() => void toggleMcp(selectedMcp)}
+                    onRemove={() => void removeMcp(selectedMcp)}
+                    onMove={() => void moveMcp(selectedMcp)}
+                    onTest={() => void testMcp(selectedMcp)}
+                    onEdit={() => {
+                      setMcpEditTarget(selectedMcp);
+                      setMcpAddMode(true);
+                      setMcpActionError(null);
+                      setMcpActionMessage(null);
+                    }}
+                  />
+                ) : (
+                  <ConfigEmptyState>{t("mcp.emptyDetail")}</ConfigEmptyState>
+                )
+              ) : addMode ? (
               <AddPluginPanel
                 cwd={cwd}
                 source={installSource}
