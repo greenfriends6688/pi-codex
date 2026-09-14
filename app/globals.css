@@ -24,63 +24,22 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Design tokens — mirrors the OpenAI Codex app palette: layered near-black
-   surfaces, translucent white hairlines, three-step foreground alpha, and
-   monochrome primary actions. Values are lifted from the Codex design tokens
-   (gray/surface/border/text scales) so the two apps read as one product.
-   Keep the semantic names stable; they cascade through every component.
+   Design tokens — the Codex skin laid over upstream v0.9.1's six-palette
+   theme system.
+
+   hooks/useTheme.ts writes `data-theme` on <html> and keeps the `.dark` class
+   in sync for the dark-family palettes (dark, pine). Every palette below is
+   authored in the Codex design language: layered surfaces, translucent
+   hairlines instead of solid greys, a three-step foreground alpha, and a
+   single monochrome primary action. Only the accent hue and the faint cast of
+   the neutrals differ between palettes.
+
+   Geometry / layout / motion are theme-independent and live in the bare
+   `:root` block, so each palette block only restates colours.
 --------------------------------------------------------------------------- */
 
+/* Theme-independent: geometry, elevation, layout metrics, motion. */
 :root {
-  color-scheme: light;
-
-  /* Surfaces, lightest → deepest separation (Codex: surface / surface-under) */
-  --bg: #ffffff;
-  --bg-panel: #f9f9f9;
-  --bg-elev: #ffffff;
-  --bg-hover: rgba(26, 28, 31, 0.05);
-  --bg-selected: rgba(26, 28, 31, 0.08);
-  --bg-subtle: rgba(26, 28, 31, 0.03);
-
-  /* Lines: translucent foreground, never a solid gray */
-  --border: rgba(26, 28, 31, 0.08);
-  --border-strong: rgba(26, 28, 31, 0.12);
-  --border-faint: rgba(26, 28, 31, 0.05);
-
-  /* Text: one ink, three alpha steps */
-  --text: #1a1c1f;
-  --text-muted: rgba(26, 28, 31, 0.7);
-  --text-dim: rgba(26, 28, 31, 0.5);
-
-  /* Interactive accent: Codex blue-300 on blue-50 */
-  --accent: #339cff;
-  --accent-hover: #1a8cff;
-  --accent-soft: #e5f3ff;
-  --accent-border: rgba(51, 156, 255, 0.5);
-
-  /* Primary action — monochrome by design */
-  --primary-bg: #1a1c1f;
-  --primary-fg: #ffffff;
-  --primary-hover: #303030;
-
-  /* Message + code surfaces */
-  --user-bg: rgba(26, 28, 31, 0.05);
-  --assistant-bg: transparent;
-  --tool-bg: #f9f9f9;
-  --code-bg: #f9f9f9;
-
-  /* Status (Codex red-600 / green-500 / orange-400) */
-  --danger: #ba2623;
-  --danger-soft: rgba(186, 38, 35, 0.1);
-  --success: #00a240;
-  --success-soft: rgba(0, 162, 64, 0.1);
-  --warning: #fb6a22;
-  --warning-soft: rgba(251, 106, 34, 0.1);
-
-  /* Diff surfaces (Codex editor-added / editor-deleted) */
-  --diff-added: rgba(0, 162, 64, 0.15);
-  --diff-removed: rgba(186, 38, 35, 0.15);
-
   /* Geometry — Codex corner-radius scale (base × 1.25) */
   --corner-radius-scale: 1.25;
   --radius-xs: calc(4px * var(--corner-radius-scale));
@@ -100,9 +59,9 @@
   --elevation-prominent: var(--elevation-stroke), 0 3px 7.5px rgba(0, 0, 0, 0.04), 0 0 20px rgba(0, 0, 0, 0.05);
   --elevation-sidebar: var(--elevation-stroke), 0 3px 7.5px rgba(0, 0, 0, 0.03), 0 0 16px rgba(0, 0, 0, 0.02);
 
-  /* Layout metrics lifted from the Codex app:
-     thread content 860px, toolbar 46px, composer radius 5.5×spacing,
-     and a 16px inline overhang that lets the composer sit wider than the thread. */
+  /* Layout metrics lifted from the Codex app: thread content 860px, toolbar
+     46px, composer radius 5.5×spacing, and a 16px inline overhang that lets
+     the composer sit wider than the thread. */
   --chat-content-max-width: 860px;
   --composer-max-width: calc(var(--chat-content-max-width) + 32px);
   --radius-composer: 22px;
@@ -114,9 +73,6 @@
   --conversation-item-gap: 16px;
   --conversation-grouped-item-gap: 4px;
   --chat-content-font-size: 13px;
-  /* Focus + scrim */
-  --focus-ring: color-mix(in oklab, #339cff 70%, transparent);
-  --scrim: rgba(0, 0, 0, 0.4);
 
   /* Motion — single source of truth for durations/easings.
      fast: hover/press, base: menus/popovers, med: toasts/dialogs, slow: panels. */
@@ -128,54 +84,261 @@
   --ease-standard: cubic-bezier(0.32, 0, 0.24, 1);
 }
 
-html.dark {
-  color-scheme: dark;
+/* light — Codex light: white surfaces, near-black ink, blue accent */
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-panel: #f9f9f9;
+  --bg-elev: #ffffff;
+  --bg-hover: rgba(26, 28, 31, 0.05);
+  --bg-selected: rgba(26, 28, 31, 0.08);
+  --bg-subtle: rgba(26, 28, 31, 0.03);
+  --border: rgba(26, 28, 31, 0.08);
+  --border-strong: rgba(26, 28, 31, 0.12);
+  --border-faint: rgba(26, 28, 31, 0.05);
+  --text: #1a1c1f;
+  --text-muted: rgba(26, 28, 31, 0.7);
+  --text-dim: rgba(26, 28, 31, 0.5);
+  --accent: #339cff;
+  --accent-hover: #1a8cff;
+  --accent-contrast: #ffffff;
+  --accent-soft: #e5f3ff;
+  --accent-border: rgba(51, 156, 255, 0.5);
+  --primary-bg: #1a1c1f;
+  --primary-fg: #ffffff;
+  --primary-hover: #303030;
+  --user-bg: rgba(26, 28, 31, 0.05);
+  --assistant-bg: transparent;
+  --tool-bg: #f9f9f9;
+  --code-bg: #f9f9f9;
+  --danger: #ba2623;
+  --danger-soft: rgba(186, 38, 35, 0.1);
+  --success: #00a240;
+  --success-soft: rgba(0, 162, 64, 0.1);
+  --warning: #fb6a22;
+  --warning-soft: rgba(251, 106, 34, 0.1);
+  --diff-added: rgba(0, 162, 64, 0.15);
+  --diff-removed: rgba(186, 38, 35, 0.15);
+  --focus-ring: color-mix(in oklab, #339cff 70%, transparent);
+  --scrim: rgba(0, 0, 0, 0.4);
+}
 
-  /* Codex dark: surface #181818, surface-under near-black, elevated #212121 */
+/* dark — Codex dark: layered near-black, white ink, blue accent */
+html.dark,
+[data-theme="dark"] {
+  color-scheme: dark;
   --bg: #181818;
   --bg-panel: #0d0d0d;
   --bg-elev: #212121;
   --bg-hover: rgba(255, 255, 255, 0.06);
   --bg-selected: rgba(255, 255, 255, 0.1);
   --bg-subtle: rgba(255, 255, 255, 0.03);
-
   --border: rgba(255, 255, 255, 0.08);
   --border-strong: rgba(255, 255, 255, 0.16);
   --border-faint: rgba(255, 255, 255, 0.04);
-
   --text: #ffffff;
   --text-muted: rgba(255, 255, 255, 0.7);
   --text-dim: rgba(255, 255, 255, 0.5);
-
   --accent: #99ceff;
   --accent-hover: #c2e2ff;
+  --accent-contrast: #0d0d0d;
   --accent-soft: rgba(51, 156, 255, 0.14);
   --accent-border: rgba(51, 156, 255, 0.5);
-
   --primary-bg: #ffffff;
   --primary-fg: #0d0d0d;
   --primary-hover: #ededed;
-
   --user-bg: rgba(255, 255, 255, 0.05);
   --assistant-bg: transparent;
   --tool-bg: #212121;
   --code-bg: #212121;
-
   --danger: #ff6764;
   --danger-soft: rgba(250, 66, 62, 0.16);
   --success: #40c977;
   --success-soft: rgba(64, 201, 119, 0.16);
   --warning: #ff8549;
   --warning-soft: rgba(255, 133, 73, 0.16);
-
-  /* Diff surfaces (Codex editor-added / editor-deleted) */
   --diff-added: rgba(64, 201, 119, 0.23);
   --diff-removed: rgba(250, 66, 62, 0.23);
+  --focus-ring: color-mix(in oklab, #99ceff 70%, transparent);
+  --scrim: rgba(0, 0, 0, 0.6);
+}
 
-  --shadow-sm: 0px 1px 2px -1px #00000014;
-  --shadow-md: 0px 2px 4px -1px #00000014;
-  --shadow-lg: 0px 4px 8px -2px #0000001a;
-  --shadow-xl: 0px 8px 16px -4px #0000001f;
+/* mist — Codex light surfaces with a faint cool-green cast, teal accent */
+[data-theme="mist"] {
+  color-scheme: light;
+  --bg: #fbfdfc;
+  --bg-panel: #f1f6f4;
+  --bg-elev: #ffffff;
+  --bg-hover: rgba(20, 60, 50, 0.05);
+  --bg-selected: rgba(20, 60, 50, 0.08);
+  --bg-subtle: rgba(20, 60, 50, 0.03);
+  --border: rgba(20, 60, 50, 0.1);
+  --border-strong: rgba(20, 60, 50, 0.16);
+  --border-faint: rgba(20, 60, 50, 0.05);
+  --text: #16241f;
+  --text-muted: rgba(22, 36, 31, 0.7);
+  --text-dim: rgba(22, 36, 31, 0.5);
+  --accent: #1e6559;
+  --accent-hover: #174f46;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(30, 101, 89, 0.12);
+  --accent-border: rgba(30, 101, 89, 0.5);
+  --primary-bg: #16241f;
+  --primary-fg: #ffffff;
+  --primary-hover: #2a3b34;
+  --user-bg: rgba(20, 60, 50, 0.05);
+  --assistant-bg: transparent;
+  --tool-bg: #f1f6f4;
+  --code-bg: #f1f6f4;
+  --danger: #ba2623;
+  --danger-soft: rgba(186, 38, 35, 0.1);
+  --success: #00794f;
+  --success-soft: rgba(0, 121, 79, 0.1);
+  --warning: #b45309;
+  --warning-soft: rgba(180, 83, 9, 0.1);
+  --diff-added: rgba(0, 121, 79, 0.15);
+  --diff-removed: rgba(186, 38, 35, 0.15);
+  --focus-ring: color-mix(in oklab, #1e6559 70%, transparent);
+  --scrim: rgba(0, 0, 0, 0.4);
+}
+
+/* rose — Codex light surfaces with a faint warm cast, rose accent */
+[data-theme="rose"] {
+  color-scheme: light;
+  --bg: #fdfbfb;
+  --bg-panel: #f8f2f4;
+  --bg-elev: #ffffff;
+  --bg-hover: rgba(60, 25, 40, 0.05);
+  --bg-selected: rgba(60, 25, 40, 0.08);
+  --bg-subtle: rgba(60, 25, 40, 0.03);
+  --border: rgba(60, 25, 40, 0.1);
+  --border-strong: rgba(60, 25, 40, 0.16);
+  --border-faint: rgba(60, 25, 40, 0.05);
+  --text: #2a1f24;
+  --text-muted: rgba(42, 31, 36, 0.7);
+  --text-dim: rgba(42, 31, 36, 0.5);
+  --accent: #914360;
+  --accent-hover: #76324d;
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(145, 67, 96, 0.12);
+  --accent-border: rgba(145, 67, 96, 0.5);
+  --primary-bg: #2a1f24;
+  --primary-fg: #ffffff;
+  --primary-hover: #3d2f36;
+  --user-bg: rgba(60, 25, 40, 0.05);
+  --assistant-bg: transparent;
+  --tool-bg: #f8f2f4;
+  --code-bg: #f8f2f4;
+  --danger: #ba2623;
+  --danger-soft: rgba(186, 38, 35, 0.1);
+  --success: #00a240;
+  --success-soft: rgba(0, 162, 64, 0.1);
+  --warning: #b45309;
+  --warning-soft: rgba(180, 83, 9, 0.1);
+  --diff-added: rgba(0, 162, 64, 0.15);
+  --diff-removed: rgba(186, 38, 35, 0.15);
+  --focus-ring: color-mix(in oklab, #914360 70%, transparent);
+  --scrim: rgba(0, 0, 0, 0.4);
+}
+
+/* pine — Codex dark surfaces with a faint green cast, pale-green accent */
+html[data-theme="pine"],
+[data-theme="pine"] {
+  color-scheme: dark;
+  --bg: #181c1a;
+  --bg-panel: #0d100f;
+  --bg-elev: #212724;
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-selected: rgba(255, 255, 255, 0.1);
+  --bg-subtle: rgba(255, 255, 255, 0.03);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --border-faint: rgba(255, 255, 255, 0.04);
+  --text: #f2f7f4;
+  --text-muted: rgba(242, 247, 244, 0.7);
+  --text-dim: rgba(242, 247, 244, 0.5);
+  --accent: #acccb7;
+  --accent-hover: #d0e2d3;
+  --accent-contrast: #0d100f;
+  --accent-soft: rgba(172, 204, 183, 0.14);
+  --accent-border: rgba(172, 204, 183, 0.5);
+  --primary-bg: #f2f7f4;
+  --primary-fg: #0d100f;
+  --primary-hover: #dbe5df;
+  --user-bg: rgba(255, 255, 255, 0.05);
+  --assistant-bg: transparent;
+  --tool-bg: #212724;
+  --code-bg: #212724;
+  --danger: #ff6764;
+  --danger-soft: rgba(250, 66, 62, 0.16);
+  --success: #40c977;
+  --success-soft: rgba(64, 201, 119, 0.16);
+  --warning: #ff8549;
+  --warning-soft: rgba(255, 133, 73, 0.16);
+  --diff-added: rgba(64, 201, 119, 0.23);
+  --diff-removed: rgba(250, 66, 62, 0.23);
+  --focus-ring: color-mix(in oklab, #acccb7 70%, transparent);
+  --scrim: rgba(0, 0, 0, 0.6);
+}
+}
+
+[data-theme="mist"] {
+  color-scheme: light;
+  --bg: #f4f8f7;
+  --bg-panel: #e9f0ee;
+  --bg-hover: #e0eae7;
+  --bg-selected: #d7e4df;
+  --border: #afc4ba;
+  --text: #202e2b;
+  --text-muted: #455f56;
+  --text-dim: #52685f;
+  --accent: #1e6559;
+  --accent-hover: #174f46;
+  --accent-contrast: #ffffff;
+  --user-bg: #e0efeb;
+  --assistant-bg: #f4f8f7;
+  --tool-bg: #ecf3f0;
+  --bg-subtle: rgba(24,65,50,0.04);
+}
+
+[data-theme="rose"] {
+  color-scheme: light;
+  --bg: #fcf7f8;
+  --bg-panel: #f3edef;
+  --bg-hover: #eee3e7;
+  --bg-selected: #e8dce1;
+  --border: #cdb5bf;
+  --text: #34282e;
+  --text-muted: #65505a;
+  --text-dim: #705b65;
+  --accent: #914360;
+  --accent-hover: #76324d;
+  --accent-contrast: #ffffff;
+  --user-bg: #f3e4eb;
+  --assistant-bg: #fcf7f8;
+  --tool-bg: #f7eef2;
+  --bg-subtle: rgba(89,39,62,0.04);
+}
+
+html[data-theme="pine"],
+[data-theme="pine"] {
+  color-scheme: dark;
+  --bg: #19201f;
+  --bg-panel: #212b28;
+  --bg-hover: #2b3632;
+  --bg-selected: #35433c;
+  --border: #4a5f52;
+  --text: #e6ede8;
+  --text-muted: #c3d0c6;
+  --text-dim: #afc2b5;
+  --accent: #acccb7;
+  --accent-hover: #d0e2d3;
+  --accent-contrast: #182b20;
+  --user-bg: #25382f;
+  --assistant-bg: #19201f;
+  --tool-bg: #222d29;
+  --bg-subtle: rgba(210,236,219,0.04);
 }
 
 /* WebKit reports dvh/innerHeight without the status-bar strip for installed
@@ -251,6 +414,139 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
+}
+
+.web-login-page {
+  display: grid;
+  min-height: 100%;
+  padding: max(24px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  place-items: center;
+  background: var(--bg);
+}
+
+.web-login-shell {
+  width: min(100%, 360px);
+}
+
+.web-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.web-login-brand img {
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+
+.web-login-brand h1 {
+  margin: 0 0 3px;
+  color: var(--text);
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.web-login-brand p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.web-login-form {
+  width: 100%;
+}
+
+.web-login-composer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px 10px 10px 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 14px;
+  background: var(--bg);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 8px 24px -12px rgba(15, 23, 42, 0.10);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.web-login-composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent), 0 8px 24px -12px rgba(15, 23, 42, 0.10);
+}
+
+.web-login-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.web-login-form input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  border: none;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+}
+
+.web-login-form input::placeholder {
+  color: var(--text-dim);
+}
+
+.web-login-error {
+  min-height: 17px;
+  margin: 7px 4px 0;
+  color: #dc2626;
+  font-size: 11px;
+  line-height: 17px;
+}
+
+html.dark .web-login-error {
+  color: #f87171;
+}
+
+.web-login-form button {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 7px 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.web-login-form button:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+.web-login-form button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.web-login-form button:disabled {
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: not-allowed;
 }
 
 .terminal-panel {
@@ -1222,6 +1518,17 @@ pre, code {
 
 .file-viewer-mode-button:hover {
   filter: brightness(1.08);
+}
+
+.file-viewer-load-more {
+  position: absolute;
+  z-index: 2;
+  right: 12px;
+  bottom: 12px;
+  max-width: calc(100% - 24px);
+  background: var(--bg-panel);
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--text) 18%, transparent);
+  pointer-events: auto;
 }
 
 .file-viewer-icon-button {
