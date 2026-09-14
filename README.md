@@ -2,15 +2,29 @@
 
 > Special thanks to [@agegr](https://github.com/agegr/pi-web), the author of Pi Web, for the excellent original project.
 >
-> This is a Codex-style UI optimization based on Pi Web. Functionality is unchanged — only the visual style and UX were adjusted to match Codex aesthetics.
+> This is a Codex-style fork of Pi Web. It keeps the upstream feature set, restyles the whole UI to match Codex aesthetics, and picks a few upstream pull requests that have not shipped in any release yet.
 >
-> 感谢 [Pi Web 作者 @agegr](https://github.com/agegr/pi-web) 的优秀开源项目。本项目是基于 Pi Web 做的 Codex 风格 UI 优化，功能没有改变，仅调整了视觉样式与交互体验。
+> 感谢 [Pi Web 作者 @agegr](https://github.com/agegr/pi-web) 的优秀开源项目。本项目是基于 Pi Web 的 Codex 风格分支：保留上游功能，把整套 UI 重排为 Codex 设计语言，并摘取了若干尚未进入上游正式版的 PR。
 
 [中文文档](./README.zh-CN.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
 
-Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web uses the same local configuration and session files as pi, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
+Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi). Pi Web shares pi's local configuration and session files, so you can browse and resume conversations, run agent turns, configure models and resources, and inspect project files from a browser.
 
-![Pi Web displaying a pi session with structured Markdown, tool calls, and project navigation](https://raw.githubusercontent.com/agegr/pi-web/main/docs/screenshot2.png)
+![Pi Web displaying a pi session with structured Markdown, tool calls, and project navigation](./docs/screenshot2.png)
+
+## What is different from upstream
+
+| | Upstream Pi Web | This fork |
+| --- | --- | --- |
+| Visual language | Upstream design | Codex skin — layered surfaces, hairline translucent borders, three-level foreground alpha, a single monochrome primary action, 13px chat type, SF Mono |
+| Themes | 6 palettes | Same 6 palettes (`light` / `dark` / `mist` / `rose` / `pine` / `auto`), all repainted in the Codex palette |
+| File tree | Left sidebar | Right-hand panel, so the sidebar stays a pure session list |
+| Message actions | Shown on hover | Always visible |
+| MCP servers | Not available | Managed from the Plugins panel (picked from [#470](https://github.com/agegr/pi-web/pull/470)) |
+| Workspace editor | Not available | Markdown editor with a switchable main/secondary layout (picked from [#838](https://github.com/agegr/pi-web/pull/838)) |
+| Provider usage | Not available | OpenCode Go quota display (picked from [#844](https://github.com/agegr/pi-web/pull/844)) |
+
+Every intentional deviation from upstream — and the exact procedure for merging a new upstream release without losing the skin — is recorded in [`docs/codex-skin/delta.md`](./docs/codex-skin/delta.md). Read that before touching theme or layout code.
 
 ## Features
 
@@ -18,29 +32,41 @@ Local browser UI for the [pi coding agent](https://github.com/earendil-works/pi)
 - **Two ways to branch**: **New session** creates an independent session file from an earlier message; **Edit from here** creates a branch inside the current session.
 - **Project file tools**: browse and upload files, inspect Git diffs, and preview source, Markdown, images, audio, PDFs, and DOCX files with automatic refresh.
 - **Git worktrees**: switch checkouts from the sidebar while keeping sessions from the same repository grouped together.
+- **MCP server management**: view, add, edit, enable/disable, move between scopes, test, and delete MCP servers from the Plugins panel — no hand-editing JSON.
 - **Web-based configuration**: manage provider login and API keys, models, model tests, plugin packages, and skills without leaving Pi Web.
-- **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the top bar.
+- **English, Simplified Chinese, and Traditional Chinese UI**: Pi Web follows the browser language initially and provides a language switcher in the settings panel.
 
 ## Quick Start
 
-Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then run:
+Pi Web requires Node.js 22.19.0 or newer. Check your version with `node --version`, then:
 
 ```bash
-npx @agegr/pi-web@latest
+git clone https://github.com/greenfriends6688/pi-codex.git
+cd pi-codex
+npm install
+npm run prod
 ```
 
-The CLI opens a browser after the server is ready. If it does not, open [http://127.0.0.1:30141](http://127.0.0.1:30141). Pi Web listens only on `127.0.0.1` by default.
+`npm run prod` builds for production and serves it at [http://127.0.0.1:30141](http://127.0.0.1:30141). Pi Web listens only on `127.0.0.1` by default.
+
+> The upstream `npx @agegr/pi-web` command installs the upstream package, **not** this fork — it has neither the Codex skin nor the MCP panel. Install this fork from source.
 
 If no model provider is configured yet, open the **Models** panel to sign in or add an API key.
 
-To install the `pi-web` command globally:
+## MCP servers
 
-```bash
-npm install -g @agegr/pi-web@latest
-pi-web
-```
+The Plugins panel has an **MCP servers** section alongside the plugin list. It reads and writes the same two files pi's MCP tooling uses:
 
-To update, stop the running process with `Ctrl+C` and run the same install command again. To uninstall, run `npm uninstall -g @agegr/pi-web`.
+| Scope | File |
+| --- | --- |
+| Global | `~/.pi/agent/mcp.json` |
+| Project | `<project>/.pi/mcp.json` |
+
+Global acts as the base and project entries override it by name. Writing to project scope requires the project to be trusted, exactly like plugin installation. The detail view lists environment variable **names only** — values are never returned by the list endpoint; the advanced JSON editor fetches the full definition (including values) only while you are editing.
+
+The **Test connection** button spawns a stdio server (or POSTs `initialize` for HTTP servers) and reports the server name, version, and tool count; stdio tests time out after 20 seconds.
+
+> **Important:** pi core ships **no built-in MCP**. The upstream documentation states it "intentionally does not include built-in MCP" — MCP support has to come from a pi extension or package. This panel manages the configuration such a package consumes; it does not by itself wire MCP servers into the agent.
 
 ## Configuration
 
@@ -84,7 +110,7 @@ On macOS or Linux:
 HTTP_PROXY=http://127.0.0.1:7890 \
 HTTPS_PROXY=http://127.0.0.1:7890 \
 NO_PROXY=localhost,127.0.0.1 \
-npx @agegr/pi-web@latest
+npm run prod
 ```
 
 On Windows PowerShell:
@@ -93,8 +119,74 @@ On Windows PowerShell:
 $env:HTTP_PROXY = "http://127.0.0.1:7890"
 $env:HTTPS_PROXY = "http://127.0.0.1:7890"
 $env:NO_PROXY = "localhost,127.0.0.1"
-npx @agegr/pi-web@latest
+npm run prod
 ```
+
+## Development
+
+**Everyday use — precompiled and fast:**
+
+```bash
+npm run prod        # clear the dev cache -> next build -> next start, port 30141
+```
+
+Production mode is precompiled and roughly 10x faster per request than development mode, where Turbopack compiles each route on first visit (10–15 s measured) and `reactStrictMode` double-invokes effects. Use `npm run prod` for daily work and demos.
+
+**Editing code:**
+
+```bash
+npm run dev:clean   # clear the production cache -> next dev, port 30141
+npm run mode:status # report which mode .next currently belongs to
+```
+
+`dev` and `prod` share `.next/` and their outputs are incompatible; mixing them by hand produces bogus `Failed to compile` or `Module ... factory is not available` errors. `prod` and `dev:clean` move the mismatched cache to the system temp directory before starting, so always switch through those two commands rather than running a bare `next build` followed by `next dev`.
+
+Checks:
+
+```bash
+node_modules/.bin/tsc --noEmit
+npm run lint
+npm test
+```
+
+`npm test` currently reports two pre-existing failures unrelated to feature work: a `SessionSidebar` structural assertion that the Codex skin refactor invalidated, and a `model-discovery` test that needs to create a lock file under `~/.pi/agent/`. Everything else passes.
+
+After touching the theme layer, also run:
+
+```bash
+node docs/codex-skin/audit-tokens.mjs   # self-invented tokens, 6-palette completeness, CSS brace balance
+node docs/codex-skin/verify-themes.mjs  # duplicate theme blocks + the token values actually rendered
+```
+
+The static checks cannot catch a duplicated theme selector; only the render check can.
+
+Contributor guides: [Internationalization](./docs/i18n.md), [Release process](./docs/release.md), and the [skin delta ledger](./docs/codex-skin/delta.md).
+
+## Repository Layout
+
+```text
+app/             Next.js UI and API routes
+components/      React UI components
+hooks/           Client state and interaction hooks
+lib/             Session, agent, model, file, Git, and security logic
+public/          Static assets and PWA files
+bin/             npm CLI entrypoint and launch option parsing
+scripts/         Build and mode-switching helpers
+docs/            Focused user and contributor guides
+docs/codex-skin/ Skin delta ledger, token audit, theme render check
+```
+
+See [AGENTS.md](./AGENTS.md) for the architecture notes and detailed file map.
+
+## Merging a new upstream release
+
+This fork's `upstream` branch holds **pristine upstream source tarballs**, not the real upstream git history, so it shares no ancestry with upstream's own commits. The sync procedure is therefore:
+
+1. Unpack the new release into the `upstream` worktree (`../pi-web-upstream`) and commit it there as `upstream vX.Y.Z`.
+2. Run `git merge upstream` on `main`. Conflicts should only appear in the files the ledger lists.
+3. Resolve logic conflicts in favour of upstream and re-apply the skin per the ledger, then run the full check list above.
+
+Never `git merge` an upstream pull request branch. Pick it as a patch against its own base release instead — the exact commands are in the ledger.
 
 ## Notes
 
@@ -151,39 +243,6 @@ must be synchronous, cheap, and scoped to the supplied exact session id or
 file. Provider errors fail safe by preserving that session. This lease only
 affects automatic idle eviction; explicit shutdown and Stop fallback cleanup
 still take precedence.
-
-## Development
-
-```bash
-npm install
-npm run dev
-```
-
-The development server runs at [http://127.0.0.1:30141](http://127.0.0.1:30141). Run the common checks with:
-
-```bash
-npm test
-node_modules/.bin/tsc --noEmit
-npm run lint
-```
-
-Do not run `next build` or `npm run build` during normal development. It writes to `.next/` and can interfere with the development server; leave builds for release work.
-
-Contributor guides: [Internationalization](./docs/i18n.md) and [Release process](./docs/release.md).
-
-## Repository Layout
-
-```text
-app/             Next.js UI and API routes
-components/      React UI components
-hooks/           Client state and interaction hooks
-lib/             Session, agent, model, file, Git, and security logic
-public/          Static assets and PWA files
-bin/             npm CLI entrypoint and launch option parsing
-docs/            Focused user and contributor guides
-```
-
-See [AGENTS.md](./AGENTS.md) for the architecture notes and detailed file map.
 
 ## License
 
