@@ -875,7 +875,16 @@ function AddMcpServer({
       setLoadingJson(true);
       try {
         const def = await onFetchDef(initial.name, initial.scope);
-        setJsonText(JSON.stringify(def ?? buildBasicDef(), null, 2));
+        // Do NOT fall back to the basic form here: that definition is lossy (no env,
+        // timeout, lifecycle, …), and saving it would overwrite the real config entry.
+        // Leave the editor empty so Save stays disabled until a refetch succeeds.
+        if (!def) {
+          setJsonText(null);
+          setJsonError(t("mcp.loadDefFailed"));
+          return;
+        }
+        setJsonError(null);
+        setJsonText(JSON.stringify(def, null, 2));
       } finally {
         setLoadingJson(false);
       }
@@ -1247,7 +1256,16 @@ export function PluginsConfig({
         });
         const json = (await res.json()) as { ok?: boolean; message?: string; error?: string };
         if (!res.ok || json.error) throw new Error(json.error ?? `HTTP ${res.status}`);
-        setMcpActionMessage(t("mcp.msgTestResult", { name: server.name, result: json.message ?? "" }));
+        // The route answers 200 with { ok: false } when the MCP handshake itself fails
+        // (e.g. the command is not an MCP server). `ok` has to be honoured explicitly,
+        // otherwise a failed probe is rendered as a green success message.
+        if (json.ok === false) {
+          setMcpActionError(
+            t("mcp.msgTestError", { name: server.name, error: json.message ?? "" }),
+          );
+        } else {
+          setMcpActionMessage(t("mcp.msgTestResult", { name: server.name, result: json.message ?? "" }));
+        }
       } catch (err) {
         setMcpActionError(
           t("mcp.msgTestError", {
@@ -1638,6 +1656,11 @@ export function PluginsConfig({
                     onTest={() => void testMcp(selectedMcp)}
                     onEdit={() => {
                       setMcpEditTarget(selectedMcp);
+                      // The scope switch has to follow the server being edited: `update`
+                      // writes into whichever scope the switch reports, so leaving it at the
+                      // default would silently COPY the definition (env values included) into
+                      // the other scope's mcp.json while the original stayed untouched.
+                      setMcpScope(selectedMcp.scope);
                       setMcpAddMode(true);
                       setMcpActionError(null);
                       setMcpActionMessage(null);

@@ -720,6 +720,7 @@ export const zhTWLocale: LocalePlugin = {
     "mcp.argsLabel": "附加參數（選填，以空格分隔）",
     "mcp.jsonLabel": "伺服器定義（JSON）—— 支援 command/url/socket、args、env、lifecycle、directTools、timeout 等全部欄位",
     "mcp.loadingDef": "載入設定中...",
+    "mcp.loadDefFailed": "讀取伺服器定義失敗，已停用進階編輯。請切回「基本設定」後重試。",
     "mcp.jsonEmpty": "JSON 不能為空",
     "mcp.jsonParseError": "JSON 解析失敗：{message}",
     "mcp.jsonNotObject": "JSON 必須是物件，例如 {\"command\":\"npx\",\"args\":[\"-y\",\"...\"]}",

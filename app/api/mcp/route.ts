@@ -313,6 +313,15 @@ export async function POST(req: Request) {
       const file = mcpFilePath(cwd, scope);
       const data = readMcpFile(file);
       data.mcpServers ??= {};
+      // `update` must not silently create a copy in another scope: if the client reports a
+      // scope that does not hold this server, fail loudly instead of writing a shadow entry
+      // (which would also duplicate any env values into the other mcp.json).
+      if (body.action === "update" && !data.mcpServers[name]) {
+        return NextResponse.json(
+          { error: `Server "${name}" not found in ${scope} scope` },
+          { status: 404 },
+        );
+      }
       data.mcpServers[name] = def;
       writeMcpFile(file, data);
     } else if (body.action === "remove") {

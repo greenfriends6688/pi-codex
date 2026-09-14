@@ -720,6 +720,7 @@ export const zhCNLocale: LocalePlugin = {
     "mcp.argsLabel": "附加参数（可选，空格分隔）",
     "mcp.jsonLabel": "服务器定义（JSON）—— 支持 command/url/socket、args、env、lifecycle、directTools、timeout 等全部字段",
     "mcp.loadingDef": "加载配置中...",
+    "mcp.loadDefFailed": "读取服务器定义失败，已禁用高级编辑。请切回「基础配置」后重试。",
     "mcp.jsonEmpty": "JSON 不能为空",
     "mcp.jsonParseError": "JSON 解析失败：{message}",
     "mcp.jsonNotObject": "JSON 必须是对象，如 {\"command\":\"npx\",\"args\":[\"-y\",\"...\"]}",

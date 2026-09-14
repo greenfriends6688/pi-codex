@@ -720,6 +720,7 @@ export const enLocale: LocalePlugin = {
     "mcp.argsLabel": "Extra args (optional, space separated)",
     "mcp.jsonLabel": "Server definition (JSON) - all fields supported: command/url/socket, args, env, lifecycle, directTools, timeout",
     "mcp.loadingDef": "Loading config...",
+    "mcp.loadDefFailed": "Failed to load the server definition — advanced editing is disabled. Switch back to Basic and retry.",
     "mcp.jsonEmpty": "JSON cannot be empty",
     "mcp.jsonParseError": "JSON parse failed: {message}",
     "mcp.jsonNotObject": "JSON must be an object, e.g. {\"command\":\"npx\",\"args\":[\"-y\",\"...\"]}",
