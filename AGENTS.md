@@ -2,21 +2,48 @@
 
 ## Quick Start
 
+**日常使用（快）**：
+
 ```bash
-npm run dev   # port 30141
+npm run prod        # 清 dev 缓存 → next build → next start，端口 30141
+```
+
+生产模式是预编译的：接口实测比 dev 快约 10 倍，切会话平均 142ms
+（dev 下同一路径的关键接口要 2-4 秒，因为 dev 每条路由首次访问都要现编）。
+日常使用、演示、给别人看，一律用 `npm run prod`。
+
+**改代码（dev）**：
+
+```bash
+npm run dev:clean   # 清生产缓存 → next dev，端口 30141
 ```
 
 Typecheck: `node_modules/.bin/tsc --noEmit`  
 Lint: `npm run lint`  
-**Never run `next build` during dev** — pollutes `.next/` and breaks `npm run dev`.
+查看当前 `.next` 属于哪种模式：`npm run mode:status`
+
+**dev 与生产构建共用 `.next`，两者产物不兼容**，直接混用会报
+`Failed to compile` 或浏览器里 `Module ... factory is not available` 的假故障。
+`prod` / `dev:clean` 会在启动前自动把不匹配的缓存挪到系统临时目录，
+所以来回切换请走这两个命令，不要直接 `npm run build` 再 `npm run dev`。
 
 ### Dev server troubleshooting
 
 - Before starting a server, run `lsof -nP -iTCP:30141 -sTCP:LISTEN` and reuse the existing Pi Web process when it is healthy. A second `next dev` for the same checkout cannot use a different port as a workaround because both processes contend for `.next/dev/lock`.
 - A browser-only `Module ... factory is not available` overlay usually means that tab has a stale Turbopack/HMR graph; it does not prove the server or source is broken. First call the browser's explicit reload action, then compare the current server log and a direct HTTP/API request.
-- Restart only after the failure reproduces from a fresh page and the server-side checks also fail. Stop the exact dev process gracefully, move `.next` into a `mktemp -d` backup, and restart with the standard `npm run dev` command.
+- Restart only after the failure reproduces from a fresh page and the server-side checks also fail. Stop the exact dev process gracefully, move `.next` into a `mktemp -d` backup, and restart with `npm run dev:clean`.
 - Do not use `next dev --webpack` as a fallback. This repository's development graph can fail on `undici` imports such as `node:console`; development is expected to use Turbopack.
 - Next.js may append a generated `BEGIN:nextjs-agent-rules` block to `AGENTS.md` when `next dev` starts. Treat that as generated tooling output, verify it with `git status`, and do not include it in an unrelated feature commit.
+
+### 为什么 dev 模式感觉「超级慢」
+
+dev 模式（Turbopack）每条路由**首次**访问都要现场编译，实测单次 10-15 秒；
+且 Next 默认 `reactStrictMode: true`，dev 下 effect 会被双调用，
+切一次会话会并发轰出 **15 个 API 请求**（含重复的 `/api/sessions/<id>`），
+在 Node 单线程上互相排队，实测最慢的接口要 3.9 秒。
+生产构建下同一操作只剩 **3-5 个请求、最慢 106ms、平均 142ms**。
+
+如果觉得慢，先确认自己在哪种模式（`npm run mode:status`），不要急着优化代码。
 
 ---
 
