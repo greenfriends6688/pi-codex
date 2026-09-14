@@ -1876,18 +1876,6 @@ a.file-viewer-icon-button:active {
 .phase-dots > span:nth-child(2) { animation-delay: 0.15s; }
 .phase-dots > span:nth-child(3) { animation-delay: 0.3s; }
 
-/* Hover-only action bars also reveal on keyboard focus so Tab users and
-   touch readers are not locked out of copy/fork/edit affordances. */
-.reveal-on-hover:focus-within {
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
-
-.reveal-on-hover:focus-within button {
-  opacity: 1 !important;
-  pointer-events: auto !important;
-}
-
 /* Global reduced-motion safety net: decorative motion collapses to instant
    state changes while content (text, layout) still updates. */
 @media (prefers-reduced-motion: reduce) {

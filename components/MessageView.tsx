@@ -623,8 +623,6 @@ function AssistantMessageView({
     .filter(({ block }) => !isEmptyThinkingBlock(block, { isStreaming })), [message.content, isStreaming]);
   const blocks = useMemo(() => blockItems.map(({ block }) => block), [blockItems]);
   const providerError = getAssistantErrorMessage(message, { isStreaming });
-  const [hovered, setHovered] = useState(false);
-  const [focused, setFocused] = useState(false);
   const [copied, setCopied] = useState(false);
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
@@ -749,12 +747,6 @@ function AssistantMessageView({
       data-entry-id={entryId}
       className="anim-message-in"
       style={{ marginBottom: 20 }}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      onFocus={() => setFocused(true)}
-      onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node)) setFocused(false);
-      }}
     >
       {/* Codex keeps the response surface quiet; model metadata is only useful
           while a response is actively generating. */}
@@ -837,11 +829,11 @@ function AssistantMessageView({
         <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
       )}
 
-      <div className="reveal-on-hover" style={{
+      {/* Usage / copy / timestamp row — always visible, same rule as the user
+          message's action row. Upstream reveals it on hover, but the fork wants
+          token counts and copy reachable without hovering every message. */}
+      <div style={{
         display: "flex", alignItems: "center", gap: 8, marginTop: 4,
-        opacity: hovered || focused || copied ? 1 : 0,
-        pointerEvents: hovered || focused || copied ? "auto" : "none",
-        transition: "opacity var(--motion-fast) ease",
       }}>
         {message.usage && !isStreaming && (
           <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
@@ -861,9 +853,7 @@ function AssistantMessageView({
               cursor: "pointer",
               fontSize: 11, fontWeight: 400,
               whiteSpace: "nowrap",
-              opacity: hovered || focused ? 1 : 0,
-              pointerEvents: hovered || focused ? "auto" : "none",
-              transition: "opacity var(--motion-fast) ease, color var(--motion-fast) ease",
+              transition: "color var(--motion-fast) ease",
             }}
             onMouseEnter={(e) => { if (!copied) e.currentTarget.style.color = "var(--accent)"; }}
             onMouseLeave={(e) => { if (!copied) e.currentTarget.style.color = "var(--text-dim)"; }}
