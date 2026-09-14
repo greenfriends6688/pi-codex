@@ -190,6 +190,36 @@ html[data-theme="pine"],
 
 ## 本 fork 的有意偏离（非皮肤）
 
+### 从上游 PR 摘取的功能（不属于任何上游 release）
+
+这些功能来自 `agegr/pi-web` 的开放 PR，**不在任何上游 release 里**。合上游新版本时
+它们会被当作「本地改动」参与三方合并，冲突是正常的；不要误删。
+
+| PR | 内容 | 提交 | 基点 |
+|---|---|---|---|
+| #844 | OpenCode Go 供应商用量配额 | `a7f1d11` | v0.9.1 |
+| #838 | 工作区 Markdown 编辑器 + 可切换主/副区布局 + Composer 选区上下文 | `1f4d45a` | v0.9.1 |
+
+**摘取方法（重要）**：本 fork 的 `upstream` 分支是**源码包快照**，与真实上游 git 历史
+**没有共同祖先**，PR 分支却带着完整上游历史（数百提交）。所以**不能 merge PR 分支**，
+只能把 PR 相对其基点的 diff 用 `git apply -3 --binary` 打进来：
+
+```bash
+git remote add agegr https://github.com/agegr/pi-web.git
+git fetch --no-tags agegr pull/838/head:pr-838
+base=$(git log --format='%h %s' pr-838 | grep -m1 'Release v' | cut -d' ' -f1)  # 找到 PR 的真实基点
+git diff --binary "$base" pr-838 > /tmp/pr838.patch
+git apply -3 --binary --whitespace=nowarn /tmp/pr838.patch
+```
+
+这样 `upstream` 分支保持纯净，后续快照式合并流程完全不受影响。
+
+**#838 的移植要点**：PR 给 `SessionSidebar` 的文件树区域加 CSS 类名，但本皮肤已把文件树
+搬到 `ExplorerPanel`——所以那些 `file-explorer-*` 类名和 `@container` 响应式规则
+（含 `file-explorer-compact-icon`）要打在 `ExplorerPanel` 上，不能跟着 PR 放回侧栏。
+另外 PR 把 `modeHint` 从 `"diff"` 拓宽为 `"preview" | "diff"`，
+`ExplorerPanel` 的 `onOpenFile` prop 类型要同步拓宽。
+
 ### Electron 桌面端已剔除（`6bd923f`）
 
 上游 v0.9.1 新增 Electron 桌面端。本 fork 保持纯 Web，已移除：
