@@ -42,3 +42,6 @@ yarn-error.log*
 next-env.d.ts
 .factory
 e2e_*.mjs
+
+# electron-builder output (upstream desktop target)
+/release

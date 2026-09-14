@@ -1,9 +1,7 @@
 {
   "name": "@agegr/pi-web",
-  "productName": "pi-web",
   "version": "0.9.1",
   "description": "Web UI for the pi coding agent",
-  "main": "electron/main.js",
   "homepage": "https://github.com/agegr/pi-web#readme",
   "repository": {
     "type": "git",
@@ -36,8 +34,6 @@
     "build": "next build --webpack",
     "start": "next start -H 127.0.0.1 -p 30141",
     "start:lan": "next start -H 0.0.0.0 -p 30141",
-    "desktop": "electron .",
-    "desktop:icons": "node scripts/gen-icons.mjs",
     "lint": "eslint .",
     "test:terminal": "node e2e/terminal.mjs",
     "test:e2e": "node e2e/run.mjs",
@@ -89,39 +85,6 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5",
-    "@resvg/resvg-js": "^2.6.2",
-    "electron": "^39.0.0",
-    "electron-builder": "^25.1.8"
-  },
-  "build": {
-    "appId": "com.agegr.piweb",
-    "productName": "pi-web",
-    "asar": false,
-    "npmRebuild": false,
-    "files": [
-      "**/*",
-      "!e2e/**",
-      "!docs/**",
-      "!release/**",
-      "!**/*.map",
-      "!**/*.test.*",
-      "!**/*.tsbuildinfo",
-      "!**/tsconfig.json",
-      "!**/.DS_Store"
-    ],
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "target": ["dir"]
-    },
-    "extraResources": [
-      { "from": "build/trayTemplate.png", "to": "trayTemplate.png" },
-      { "from": "build/trayTemplate@2x.png", "to": "trayTemplate@2x.png" }
-    ],
-    "afterPack": "scripts/after-pack.mjs"
+    "typescript": "^5"
   }
 }
