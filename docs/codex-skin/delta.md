@@ -77,10 +77,37 @@
 本地刻意在非流式时隐藏模型标签（Codex 的"安静表面"），上游改为始终显示、只把 token 估算放进 `isStreaming` 分支。
 → 保留本地的 `{isStreaming && (...)}` 包裹，但采用上游新抽出的 `getModelDisplayName()` helper 替换本地原来的内联 `modelNames?.[...]` 查找。
 
-### 两个必查陷阱
+### 三个必查陷阱
 
 1. **自造 token 必须存活。** `--primary-bg` / `--primary-fg` / `--primary-hover` 以及整套 `--radius-*`（含 `--corner-radius-scale`）**是本地发明的，上游 0.9.0 和 0.9.1 都没有**。本地 8 个文件依赖它们（`globals.css`、`settings.css`、`ModelsConfig`、`SessionSidebar`、`DirectoryPicker`、`ChatWindow`、`ProjectTrustDialog`、`ChatInput`）。一旦 `app/globals.css` 的主题块取了上游那侧，这些 token 会全部 undefined，样式大面积塌掉。**合并后务必跑 `audit-tokens.mjs`。**
-2. **上游会重新引入硬编码色。** 除 ModelsConfig 外，`settings.css` 等文件也可能被上游改回字面量。取上游结构后逐文件确认硬编码色是否已 token 化。
+
+2. **重复主题块会静默覆盖重打结果。** 这次踩到了：冲突区只覆盖 `:root` 与 `html.dark` 两块，上游新增的 `[data-theme="mist"]` / `[data-theme="rose"]` / `[data-theme="pine"]` 是**冲突区之外**的上下文，会自动合并保留。如果重打时在冲突区内又写了一遍这三套调色板，文件里就会出现**两份同名选择器**，后一份（上游原色）胜出——`tsc`、`lint`、`audit-tokens.mjs` 全都发现不了，只有真实渲染才暴露。
+   **对策**：重打完主题层后 `grep -c 'data-theme="mist"' app/globals.css`，每个主题选择器必须**恰好出现 1 次**。同时跑下面的渲染核对。
+
+3. **上游会重新引入硬编码色。** 除 ModelsConfig 外，`settings.css` 等文件也可能被上游改回字面量。取上游结构后逐文件确认硬编码色是否已 token 化。
+
+### 渲染核对（改过主题层后必跑）
+
+仅靠静态检查不够，必须让浏览器实际解析一遍 CSS 并读回 computed value：
+
+```js
+// 逐主题写入 localStorage 的 pi-theme，reload 后读 documentElement 上的 token
+// 期望：data-theme 与 pi-theme 一致；dark 类只对 dark/pine 为 true；
+//       --bg / --text / --accent / --primary-bg 取自本皮肤的调色板（而非上游原色）
+//       --radius-md 解析为 calc(8px * 1.25) 形态
+```
+
+参考值（本皮肤 v0.9.1）：
+
+| theme | dark 类 | --bg | --text | --accent | --primary-bg |
+|---|---|---|---|---|---|
+| light | false | `#ffffff` | `#1a1c1f` | `#339cff` | `#1a1c1f` |
+| dark | true | `#181818` | `#ffffff` | `#99ceff` | `#ffffff` |
+| mist | false | `#fbfdfc` | `#16241f` | `#1e6559` | `#16241f` |
+| rose | false | `#fdfbfb` | `#2a1f24` | `#914360` | `#2a1f24` |
+| pine | true | `#181c1a` | `#f2f7f4` | `#acccb7` | `#f2f7f4` |
+
+> 本机 Playwright 1.63 不支持 macOS 12 的 chromium 构建（`Playwright does not support chromium on mac12-arm64`），改用系统 Chrome：`chromium.launch({ channel: "chrome" })`。
 
 ---
 
@@ -187,8 +214,12 @@ html[data-theme="pine"],
 ## 合并后自检清单
 
 ```bash
-node_modules/.bin/tsc --noEmit          # 必过；JSX 失配会在这里暴露
-npm run lint                            # 0 error
-npm test                                # 除 CLI global lock 外全过
-node docs/codex-skin/audit-tokens.mjs   # 必过；自造 token 与 6 套色板完整性
+node_modules/.bin/tsc --noEmit              # 必过；JSX 失配会在这里暴露
+npm run lint                                # 0 error
+npm test                                    # 除 CLI global lock 外全过
+node docs/codex-skin/audit-tokens.mjs       # 必过；自造 token、6 套色板完整性、CSS 括号配平
+npm run dev                                 # 然后另开一个终端：
+node docs/codex-skin/verify-themes.mjs      # 必过；重复主题块 + 实际渲染出的 token 值
 ```
+
+> 前四项都是静态检查，**抓不到重复主题块**——那类错误只有第五项（真实渲染）能暴露。改过主题层就一定要跑完第五项。

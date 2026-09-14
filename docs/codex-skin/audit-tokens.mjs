@@ -67,6 +67,33 @@ for (const dir of SCAN_DIRS) {
 const css = CSS_FILES.map((f) => readFileSync(f, "utf8")).join("\n");
 const defined = new Set([...css.matchAll(/(--[a-zA-Z0-9-]+)\s*:/g)].map((m) => m[1]));
 
+// 括号配平。手工解冲突（或脚本拼接主题块）时最容易多留一个 `}`，
+// 而这种错误 tsc 与 token 审计都看不出来，只会在 dev server 里炸成 500。
+let depth = 0;
+let braceError = null;
+for (const f of CSS_FILES) {
+  depth = 0;
+  const lines = readFileSync(f, "utf8").split("\n");
+  for (const [i, line] of lines.entries()) {
+    for (const ch of line) {
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth < 0) {
+          braceError = `${f}:${i + 1}: 多余的 }`;
+          break;
+        }
+      }
+    }
+    if (braceError) break;
+  }
+  if (braceError) break;
+  if (depth !== 0) {
+    braceError = `${f}: 括号未配平（结尾深度 ${depth}）`;
+    break;
+  }
+}
+
 const missing = [...used].filter(([t]) => !defined.has(t) && !RUNTIME_SET.has(t));
 
 // 逐主题块统计色板完整度。选择器可能跨行（`:root,` / `html.dark,`），
@@ -94,6 +121,13 @@ const palettes = [...blocks]
   .map(([selector, b]) => [selector, b.tokens]);
 
 let failed = false;
+
+if (braceError) {
+  failed = true;
+  console.log(`!! CSS 语法: ${braceError}`);
+  console.log("   （手工解冲突后多留一个 } 是最常见的成因；dev server 会 500）");
+  console.log();
+}
 
 console.log(`被引用的 token: ${used.size}  |  CSS 中定义: ${defined.size}`);
 console.log();
