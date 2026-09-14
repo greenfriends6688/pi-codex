@@ -8,9 +8,13 @@ import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
+import { createSelectionContextId, type SelectionContext } from "@/lib/composer-context";
+import type { SessionReference } from "@/lib/composer-context";
+import { clearLocationTextHighlight, LOCATION_HIGHLIGHT_CLASS, setLocationTextHighlight } from "@/lib/location-highlight";
 import { MessageView } from "./MessageView";
 import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
+import type { FileLocationTarget } from "./FileViewer";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
@@ -53,7 +57,7 @@ interface Props {
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, locationTarget?: Omit<FileLocationTarget, "filePath">) => void;
   onOpenSession?: (sessionId: string) => void;
   onAskInNewChat?: (prompt: string, sourceSessionId: string, sourceEntryId: string) => Promise<void>;
   quoteSelectionEnabled?: boolean;
@@ -82,6 +86,50 @@ function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, 
   if (phase?.kind === "waiting_model") return t("chat.waitingModel");
   if (phase?.kind === "running_command") return t("chat.runningCommand");
   return null;
+}
+
+function assistantTextNodes(root: HTMLElement): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: Text[] = [];
+  let current: Node | null = walker.nextNode();
+  while (current) {
+    const parent = current.parentElement;
+    if (parent?.closest("[data-message-text]")) nodes.push(current as Text);
+    current = walker.nextNode();
+  }
+  return nodes;
+}
+
+function rangeFromTextOffsets(root: HTMLElement, startOffset: number, endOffset: number, fallbackText?: string): Range | null {
+  const nodes = assistantTextNodes(root);
+  if (nodes.length === 0) return null;
+  const fullText = nodes.map((node) => node.data).join("");
+  let start = Number.isFinite(startOffset) ? startOffset : -1;
+  let end = Number.isFinite(endOffset) ? endOffset : -1;
+  if (start < 0 || end <= start || end > fullText.length) {
+    if (!fallbackText) return null;
+    const match = fullText.indexOf(fallbackText);
+    if (match < 0) return null;
+    start = match;
+    end = match + fallbackText.length;
+  }
+  const locate = (target: number): [Text, number] | null => {
+    let cursor = 0;
+    for (const node of nodes) {
+      const next = cursor + node.data.length;
+      if (target <= next) return [node, Math.max(0, target - cursor)];
+      cursor = next;
+    }
+    const last = nodes[nodes.length - 1];
+    return last ? [last, last.data.length] : null;
+  };
+  const startPoint = locate(start);
+  const endPoint = locate(end);
+  if (!startPoint || !endPoint) return null;
+  const range = document.createRange();
+  range.setStart(startPoint[0], startPoint[1]);
+  range.setEnd(endPoint[0], endPoint[1]);
+  return range;
 }
 
 const CHAT_MINIMAP_WIDTH = 36;
@@ -296,6 +344,77 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     deferInitialScroll: Boolean(pendingScrollRestore),
   });
   const sessionBusy = agentRunning || bashRunning;
+  const locateSelectionContext = useCallback((context: SelectionContext) => {
+    const clearConversationLocation = () => {
+      scrollContainerRef.current?.querySelectorAll<HTMLElement>(`.${LOCATION_HIGHLIGHT_CLASS}`).forEach((highlight) => {
+        highlight.classList.remove(LOCATION_HIGHLIGHT_CLASS);
+      });
+      // Do this before the workspace starts switching tabs. Otherwise the
+      // source/preview viewer can interpret the old chat selection as a new
+      // workspace selection and open its action popover.
+      window.getSelection()?.removeAllRanges();
+      clearLocationTextHighlight();
+    };
+    clearConversationLocation();
+    if (context.sourceFilePath) {
+      onOpenFile?.(context.sourceAbsolutePath ?? context.sourceFilePath, {
+        sourceSessionId: context.sourceSessionId,
+        startLine: context.sourceStartLine,
+        endLine: context.sourceEndLine,
+        text: context.text,
+      });
+      return;
+    }
+    if (!context.sourceEntryId) return;
+    const selector = `[data-entry-id="${CSS.escape(context.sourceEntryId)}"]`;
+    const element = scrollContainerRef.current?.querySelector<HTMLElement>(selector);
+    if (!element) return;
+    scrollToMessage(element);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    const range = rangeFromTextOffsets(
+      element,
+      context.sourceStartOffset ?? -1,
+      context.sourceEndOffset ?? -1,
+      context.text,
+    );
+    if (!range) return;
+    element.classList.add(LOCATION_HIGHLIGHT_CLASS);
+    setLocationTextHighlight(range);
+    requestAnimationFrame(() => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      const rangeRect = range.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+      const padding = 16;
+      const delta = rangeRect.top < containerRect.top + padding
+        ? rangeRect.top - (containerRect.top + padding)
+        : rangeRect.bottom > containerRect.bottom - padding
+          ? rangeRect.bottom - (containerRect.bottom - padding)
+          : 0;
+      if (delta) container.scrollBy({ top: delta, behavior: "instant" });
+    });
+  }, [onOpenFile, scrollContainerRef, scrollToMessage]);
+
+  useEffect(() => {
+    const clearConversationLocation = () => {
+      scrollContainerRef.current?.querySelectorAll<HTMLElement>(`.${LOCATION_HIGHLIGHT_CLASS}`).forEach((highlight) => {
+        highlight.classList.remove(LOCATION_HIGHLIGHT_CLASS);
+      });
+      clearLocationTextHighlight();
+    };
+    const clearOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clearConversationLocation();
+    };
+    document.addEventListener("pointerdown", clearConversationLocation, true);
+    document.addEventListener("keydown", clearOnKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", clearConversationLocation, true);
+      document.removeEventListener("keydown", clearOnKeyDown, true);
+      clearConversationLocation();
+    };
+  }, [scrollContainerRef]);
+
   const [quotedSelection, setQuotedSelection] = useState<{
     text: string;
     top: number;
@@ -407,14 +526,16 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   const askSelectionHere = useCallback(() => {
     if (!quotedSelection) return;
-    chatInputRef?.current?.insertText(buildQuotedSelection(
-      quotedSelection.text,
-      t("chat.quoteIntro"),
-      t("chat.quoteQuestion"),
-    ));
+    chatInputRef?.current?.addSelectionContext({
+      id: createSelectionContextId(),
+      text: quotedSelection.text,
+      sourceSessionId: sessionIdRef.current ?? session?.id,
+      sourceEntryId: quotedSelection.sourceEntryId,
+      label: t("chat.selectedText"),
+    });
     window.getSelection()?.removeAllRanges();
     closeQuotedSelection();
-  }, [chatInputRef, quotedSelection, closeQuotedSelection, t]);
+  }, [chatInputRef, quotedSelection, closeQuotedSelection, session?.id, sessionIdRef, t]);
 
   const askSelectionInNewChat = useCallback(async (prompt: string) => {
     const sourceSessionId = sessionIdRef.current ?? session?.id;
@@ -751,6 +872,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [messages.length]);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
+  const hasChatMinimap = !isEmptyNew && !isMobile && !pendingScrollRestore;
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
@@ -899,6 +1021,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onSoundToggle={onSoundToggle}
       onAudioUnlock={unlockAudio}
       draftKey={session?.id ?? newSessionDraftKey ?? undefined}
+      onLocateSelectionContext={locateSelectionContext}
+      onOpenSessionReference={onOpenSession ? (reference: SessionReference) => onOpenSession(reference.id) : undefined}
       cwd={session?.cwd ?? newSessionCwd}
     />
   );
@@ -927,8 +1051,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   return (
     <div
-      className="chat-content relative flex h-full min-w-0 flex-col overflow-hidden"
-      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      className={`chat-content relative h-full min-w-0 overflow-hidden${hasChatMinimap ? " grid" : " flex flex-col"}`}
+      style={{
+        paddingBottom: "env(safe-area-inset-bottom)",
+        gridTemplateColumns: hasChatMinimap ? `minmax(0, 1fr) ${CHAT_MINIMAP_WIDTH}px` : undefined,
+        gridTemplateRows: hasChatMinimap ? "minmax(0, 1fr) auto" : undefined,
+      }}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -998,7 +1126,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         <NoticeShelf notices={notices} floating onPauseChange={setNoticePaused} />
       </div>
 
-      <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <div
+        className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
+        style={hasChatMinimap ? { gridColumn: "1", gridRow: "1" } : undefined}
+      >
         {extensionDialog && (
           <ExtensionDialog key={extensionDialog.id} request={extensionDialog} onRespond={respondToExtensionUi} />
         )}
@@ -1247,15 +1378,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             </div>
           </div>
         </div>
-        {isMobile || pendingScrollRestore ? null : (
-          <ChatMinimap
-            messages={messages}
-            streamingMessage={streamState.streamingMessage}
-            scrollContainer={scrollContainerRef}
-            messageRefs={messageRefs}
-            onRevealHistory={revealHistoryForMinimap}
-          />
-        )}
         </>}
       </div>
 
@@ -1339,7 +1461,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         document.body,
       )}
 
-      <div className="relative shrink-0">
+      <div
+        className="relative shrink-0"
+        style={hasChatMinimap ? {
+          gridColumn: "1",
+          gridRow: "2",
+          // The minimap preview may expand leftward, but it must never cover
+          // or intercept the composer at the bottom of the chat.
+          zIndex: 2,
+          background: "var(--bg)",
+        } : undefined}
+      >
         {isEmptyNew && (
           <div className="mx-auto w-full" style={{ maxWidth: "var(--composer-max-width, 892px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
             <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
@@ -1348,6 +1480,15 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         {chatInputElement}
         <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
       </div>
+      {hasChatMinimap && (
+        <ChatMinimap
+          messages={messages}
+          streamingMessage={streamState.streamingMessage}
+          scrollContainer={scrollContainerRef}
+          messageRefs={messageRefs}
+          onRevealHistory={revealHistoryForMinimap}
+        />
+      )}
       {isEmptyNew && <div className="min-h-0 flex-1" />}
     </div>
   );

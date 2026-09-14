@@ -22,6 +22,13 @@ test("chat content keeps the 860px Codex default behind one shared variable", ()
   assert.doesNotMatch(chatInput, /maxWidth: 768/);
 });
 
+test("Markdown reading and editing keep an independent fixed 900px measure", () => {
+  assert.match(globals, /--readable-content-max-width: 900px;/);
+  assert.match(chatAppearanceHook, /--chat-content-max-width/);
+  assert.doesNotMatch(chatAppearanceHook, /setProperty\("--readable-content-max-width"/);
+  assert.match(globals, /\.markdown-readable-column[\s\S]*var\(--readable-content-max-width, 900px\)/);
+});
+
 test("General chat settings own the chat width preference", () => {
   assert.match(chatInput, /useChatAppearance\(\)/);
   assert.match(settingsPanel, /useChatAppearance\(\)/);

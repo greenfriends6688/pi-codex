@@ -15,10 +15,11 @@ import {
   getFileExt,
   getImageMime,
   getVideoMime,
+  isEditableTextPath,
 } from "@/lib/file-types";
 import { resolveDirentIsDirectory } from "@/lib/file-dirent";
 import { isFilePathReferencedBySession } from "@/lib/session-file-references";
-import { isApiRequestAllowed } from "@/lib/request-security";
+import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import {
   inspectUploadTargets,
   parseUploadConflictStrategy,
@@ -27,6 +28,7 @@ import {
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
 import { filePathFromApiSegments, samePath } from "@/lib/paths";
 import { readTextPreviewChunk } from "@/lib/text-preview";
+import { writeTextFile, MarkdownFileError, MAX_TEXT_EDIT_BYTES } from "@/lib/markdown-file";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -113,6 +115,72 @@ async function getUploadDirectory(segments: string[]): Promise<
 function parseUploadFileNames(value: unknown): string[] | null {
   if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) return null;
   return value;
+}
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ path: string[] }> }
+) {
+  if (!isApiRequestAllowed(request)) {
+    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
+  }
+  if (!hasJsonContentType(request)) {
+    return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
+  }
+
+  try {
+    const { path: segments } = await params;
+    const filePath = filePathFromApiSegments(segments);
+    if (!isEditableTextPath(filePath)) {
+      return NextResponse.json({ error: "This file type cannot be edited" }, { status: 400 });
+    }
+
+    const allowedRoots = await getAllowedFileRoots();
+    if (!isFilePathAllowed(filePath, allowedRoots)) {
+      return NextResponse.json({ error: "Access denied" }, { status: 403 });
+    }
+
+    try {
+      const linkStat = fs.lstatSync(filePath);
+      if (linkStat.isSymbolicLink()) {
+        return NextResponse.json({ error: "Symbolic links cannot be edited" }, { status: 400 });
+      }
+      if (!linkStat.isFile()) {
+        return NextResponse.json({ error: "Not a file" }, { status: 400 });
+      }
+      if (!isExistingFilePathAllowed(filePath, allowedRoots)) {
+        return NextResponse.json({ error: "Access denied" }, { status: 403 });
+      }
+    } catch {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    const body = await request.json().catch(() => null) as { content?: unknown; baseContent?: unknown } | null;
+    if (!body || typeof body.content !== "string") {
+      return NextResponse.json({ error: "content must be a string" }, { status: 400 });
+    }
+    if (typeof body.baseContent !== "string") {
+      return NextResponse.json({ error: "A file baseline is required; reload before saving" }, { status: 428 });
+    }
+    const contentBytes = Buffer.byteLength(body.content, "utf8");
+    if (contentBytes > MAX_TEXT_EDIT_BYTES) {
+      return NextResponse.json({ error: "Text file is too large to edit" }, { status: 413 });
+    }
+
+    const result = writeTextFile(filePath, body.content, body.baseContent,
+      () => isExistingFilePathAllowed(filePath, allowedRoots));
+    if (result.conflict) {
+      return NextResponse.json({ error: "File changed", content: result.content }, { status: 409 });
+    }
+    return NextResponse.json({
+      success: true,
+      size: result.size,
+      modified: result.modified,
+    });
+  } catch (error) {
+    if (error instanceof MarkdownFileError) return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
 }
 
 export async function POST(
@@ -489,7 +557,11 @@ export async function GET(
       }
       const chunk = readTextPreviewChunk(filePath, stat.size, offset);
       const language = getLanguage(filePath);
-      return NextResponse.json({ ...chunk, language, size: stat.size });
+      const editable = isEditableTextPath(filePath) && offset === 0 && !chunk.truncated
+        && !fs.lstatSync(filePath).isSymbolicLink() && !chunk.content.includes("\0")
+        && isFilePathAllowed(filePath, allowedRoots) && isExistingFilePathAllowed(filePath, allowedRoots)
+        && Buffer.from(chunk.content, "utf8").equals(fs.readFileSync(filePath));
+      return NextResponse.json({ ...chunk, language, size: stat.size, editable });
     }
 
     if (type === "download") {

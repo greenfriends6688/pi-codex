@@ -28,6 +28,10 @@ const RUNTIME_SET = new Set([
   "--right-panel-width",
   "--config-panel-width",
   "--config-panel-height",
+  // Written by AppShell onto .main-panels so the workspace header can inset its
+  // absolutely-positioned controls by exactly one top-bar button (PR #838).
+  "--main-workspace-header-leading-inset",
+  "--main-workspace-header-trailing-inset",
 ]);
 
 // 每套主题都必须完整重定义的色板。少一个就会从 :root 泄漏成另一套主题的值。

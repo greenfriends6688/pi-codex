@@ -74,7 +74,7 @@ export function ExplorerPanel({
   onAtMentions,
 }: {
   cwd: string;
-  onOpenFile: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "diff" }) => void;
+  onOpenFile: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "preview" | "diff" }) => void;
   onOpenTerminal?: (cwd: string) => void;
   explorerRefreshKey?: number;
   onExplorerRefresh?: () => void;
@@ -110,6 +110,7 @@ export function ExplorerPanel({
 
   return (
     <div
+      className="file-explorer-section"
       style={{
         height: "100%",
         minHeight: 0,
@@ -119,8 +120,9 @@ export function ExplorerPanel({
         background: "var(--bg)",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: explorerOpen ? "1px solid var(--border-faint)" : "none" }}>
+      <div className="file-explorer-header" style={{ display: "flex", alignItems: "center", flexShrink: 0, borderBottom: explorerOpen ? "1px solid var(--border-faint)" : "none" }}>
         <button
+          className="file-explorer-toggle"
           onClick={() => setExplorerOpen((open) => {
             const next = !open;
             saveExplorerOpen(next);
@@ -151,7 +153,18 @@ export function ExplorerPanel({
           >
             <polyline points="3 2 7 5 3 8" />
           </svg>
-          {t("files.explorer")}
+          {/* Shown instead of the label once the panel is too narrow for it
+              (@container query in globals.css). Ported from upstream PR #838. */}
+          <svg
+            className="file-explorer-compact-icon"
+            width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3.5 6.5h6l1.8 2h9.2v9.8a1.2 1.2 0 0 1-1.2 1.2H4.7a1.2 1.2 0 0 1-1.2-1.2z" />
+            <path d="M3.5 6.5V5.7a1.2 1.2 0 0 1 1.2-1.2h4l1.8 2h8.8a1.2 1.2 0 0 1 1.2 1.2v.8" />
+          </svg>
+          <span className="file-explorer-title-label">{t("files.explorer")}</span>
         </button>
         {onOpenTerminal && (
           <ToolbarIconButton

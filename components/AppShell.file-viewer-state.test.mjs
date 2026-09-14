@@ -6,7 +6,7 @@ const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8"
 
 function fileContentBlock() {
   const start = source.indexOf("{/* Only the active viewer");
-  const end = source.indexOf("</div>\n      </div>\n    </div>", start);
+  const end = source.indexOf("\n    {sessionContextMenu && (", start);
   assert.notEqual(start, -1, "file content comment not found");
   assert.notEqual(end, -1, "end of file content block not found");
   return source.slice(start, end);
@@ -26,6 +26,8 @@ test("the active viewer restores tab state and saves it with a revision", () => 
   assert.match(block, /handleFileViewerStateChange\(\s*activeFileTab\.id,\s*activeFileTab\.viewerRevision \?\? 0,/);
 });
 
-test("closing the file panel pauses the active viewer watcher", () => {
-  assert.match(fileContentBlock(), /watchEnabled=\{rightPanelOpen\}/);
+test("the editor stays active when it occupies the main region", () => {
+  assert.match(source, /const editorVisible = workspaceSwapped \|\| rightPanelOpen;/);
+  assert.match(fileContentBlock(), /watchEnabled=\{editorVisible\}/);
+  assert.match(fileContentBlock(), /onMentionLines=\{editorVisible \? handleFileLineMention : undefined\}/);
 });
