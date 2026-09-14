@@ -207,6 +207,7 @@ html[data-theme="pine"],
 |---|---|---|---|
 | #844 | OpenCode Go 供应商用量配额 | `a7f1d11` | v0.9.1 |
 | #838 | 工作区 Markdown 编辑器 + 可切换主/副区布局 + Composer 选区上下文 | `1f4d45a` | v0.9.1 |
+| #470 | Plugins 面板中的 MCP 服务器管理（新增 `/api/mcp` + MCP 服务器区块） | `d3ee79e` | v0.8.8-beta.1（`d9b534e`） |
 
 **摘取方法（重要）**：本 fork 的 `upstream` 分支是**源码包快照**，与真实上游 git 历史
 **没有共同祖先**，PR 分支却带着完整上游历史（数百提交）。所以**不能 merge PR 分支**，
@@ -222,11 +223,43 @@ git apply -3 --binary --whitespace=nowarn /tmp/pr838.patch
 
 这样 `upstream` 分支保持纯净，后续快照式合并流程完全不受影响。
 
+**受影响文件（下次合上游时预期冲突面）**：#844 → `ModelsConfig` 相关；
+#838 → `SessionSidebar` / `ExplorerPanel` / `useAgentSession`；
+#470 → `components/PluginsConfig.tsx`、`lib/api-types.ts`、`lib/i18n/messages/{en,zh-CN,zh-TW}.ts`，
+以及上游永远不会有的新文件 `app/api/mcp/route.ts`。
+
 **#838 的移植要点**：PR 给 `SessionSidebar` 的文件树区域加 CSS 类名，但本皮肤已把文件树
 搬到 `ExplorerPanel`——所以那些 `file-explorer-*` 类名和 `@container` 响应式规则
 （含 `file-explorer-compact-icon`）要打在 `ExplorerPanel` 上，不能跟着 PR 放回侧栏。
 另外 PR 把 `modeHint` 从 `"diff"` 拓宽为 `"preview" | "diff"`，
 `ExplorerPanel` 的 `onOpenFile` prop 类型要同步拓宽。
+
+**#470 的移植要点**（`d3ee79e`）：PR 的基点是 v0.8.8-beta.1，那时 `PluginsConfig.tsx`
+还是内联样式旧结构，而本 fork 在 v0.9.1 已把它组件化（`ConfigSidebar` / `ConfigDetail` /
+`ConfigButton` / `ConfigSwitch`）。所以做法是**保留本地结构，只嫁接功能增量**：
+
+- 按 `@@@` 分块把 PR 相对 `d9b534e` 的增量（两个新组件 `McpServerDetail` /
+  `AddMcpServer`、10 个 MCP `useCallback`、侧栏区块、底部第二个 action、详情区三分支切换）
+  用脚本精确拼进本地文件，而不是手工解冲突——旧内联 JSX 与本地组件树逐块冲突，
+  按行合并几乎必错。
+- **不要引入 PR 的 `useIsMobile`**：它只服务于 PR 自己的内联弹窗外壳（宽度/高度/方向），
+  本地已由 `ConfigPanelShell` 承担响应式；照搬会变成未使用导入。
+- 硬编码色/圆角按本皮肤 token 化：`#ef4444` → `var(--danger)`、
+  `#16a34a` → `var(--success)`、`borderRadius: 6` → `var(--radius-sm)`。
+  `borderRadius: 3` 的徽章字面量与 `rgba(120,120,120,0.12)` 与 `PackageDetail` 保持一致，保留。
+- **i18n 要补三套**：PR 只给了 en / zh-CN，本 fork 还有 `zh-TW.ts`，而
+  `lib/i18n/registry.test.mjs` 要求所有语言键集合与 en 完全一致。`mcp.*` 共 51 个键，
+  漏一套就会挂在 `built-in locale packages have the complete English key ...`。
+- PR 的 5 个 MCP `useCallback` 依赖数组漏了 `t`，已按本文件既有惯例加
+  `// eslint-disable-line react-hooks/exhaustive-deps`（与 `loadPlugins` 的 effect 同款）。
+- 该路由读的是全局 `~/.pi/agent/mcp.json` 与项目 `.pi/mcp.json`；GET 复用
+  `getAllowedFileRoots()`，所以只有"已存在会话的 cwd"或 `~/pi-cwd-*` 才允许访问
+  （与 `/api/plugins` 行为一致，"Access denied" 是正常的）。项目范围写入需项目已受信任。
+
+> **能力边界**：pi 核心**不含内置 MCP**（`@earendil-works/pi-coding-agent` 的
+> `docs/usage.md` 明写 "It intentionally does not include built-in MCP ..."）。
+> 所以这个面板管理的是给 MCP 扩展/包（如 PR 提到的 `pi-mcp-adapter`）用的配置文件，
+> **本身不会把 MCP 服务器接进 agent**。装上面板≠Agent 会用 MCP。
 
 ### Electron 桌面端已剔除（`6bd923f`）
 
