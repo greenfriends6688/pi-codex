@@ -526,6 +526,45 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [listScrollTop, setListScrollTop] = useState(0);
   const [focusedSessionId, setFocusedSessionId] = useState<string | null>(null);
   const listScrollRafRef = useRef<number | null>(null);
+  const listPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const [pointerSessionId, setPointerSessionId] = useState<string | null>(null);
+  const syncPointerSession = useCallback(() => {
+    const pos = listPointerRef.current;
+    const list = listScrollRef.current;
+    if (!pos || !list) {
+      setPointerSessionId((current) => (current === null ? current : null));
+      return;
+    }
+    let id: string | null = null;
+    for (const candidate of list.querySelectorAll("[data-session-id]")) {
+      if (!(candidate instanceof HTMLElement)) continue;
+      const rect = candidate.getBoundingClientRect();
+      if (pos.x >= rect.left && pos.x <= rect.right && pos.y >= rect.top && pos.y <= rect.bottom) {
+        id = candidate.dataset.sessionId ?? null;
+        break;
+      }
+    }
+    setPointerSessionId((current) => (current === id ? current : id));
+  }, []);
+  const handleListPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>) => {
+    listPointerRef.current = { x: event.clientX, y: event.clientY };
+    syncPointerSession();
+  }, [syncPointerSession]);
+  const handleListPointerLeave = useCallback((event: React.PointerEvent<HTMLDivElement> | React.MouseEvent<HTMLDivElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const inside = event.clientX >= rect.left && event.clientX <= rect.right
+      && event.clientY >= rect.top && event.clientY <= rect.bottom;
+    // Removing the hovered row fires pointerleave even though the cursor is
+    // still inside the list. Keep the last point so the row that slides under
+    // the pointer can show its actions.
+    if (inside) {
+      listPointerRef.current = { x: event.clientX, y: event.clientY };
+      syncPointerSession();
+      return;
+    }
+    listPointerRef.current = null;
+    setPointerSessionId(null);
+  }, [syncPointerSession]);
   const handleListScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
     const top = e.currentTarget.scrollTop;
     if (listScrollRafRef.current != null) return;
@@ -545,6 +584,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     setListScrollTop(el.scrollTop);
     return () => ro.disconnect();
   }, [sessionSearchActive]);
+  useLayoutEffect(() => {
+    syncPointerSession();
+    const id = requestAnimationFrame(() => syncPointerSession());
+    return () => cancelAnimationFrame(id);
+  }, [allSessions, listScrollTop, syncPointerSession]);
 
   const loadSessions = useCallback(async (showLoading = false, force = false) => {
     const loadId = ++sessionLoadIdRef.current;
@@ -1723,6 +1767,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         <div
           ref={listScrollRef}
           onScroll={handleListScroll}
+          onPointerMove={handleListPointerMove}
+          onPointerLeave={handleListPointerLeave}
+          onMouseMove={handleListPointerMove}
+          onMouseLeave={handleListPointerLeave}
           style={{ flex: "1 1 auto", overflowY: "auto", padding: "0 6px 8px", minHeight: 80 }}
         >
           {loading && projectChoices.length === 0 && (
@@ -1795,9 +1843,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                 const familySessions = [family.root, ...family.subagents];
                                 const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
                                 return (
-                                  <div key={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0 }}>
+                                  <div key={family.root.id} data-session-id={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                      <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                                      <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} pointerActive={pointerSessionId === family.root.id} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
                                     </div>
                                   </div>
                                 );
@@ -1945,6 +1993,7 @@ function SessionItem({
   isSelected,
   isRunning,
   isUnread,
+  pointerActive = false,
   onClick,
   onRenamed,
   onDeleted,
@@ -1957,6 +2006,7 @@ function SessionItem({
   isSelected: boolean;
   isRunning?: boolean;
   isUnread?: boolean;
+  pointerActive?: boolean;
   onClick: () => void;
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
@@ -1967,6 +2017,7 @@ function SessionItem({
 }) {
   const { locale, t } = useI18n();
   const [hovered, setHovered] = useState(false);
+  const showHover = hovered || pointerActive;
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -2080,7 +2131,7 @@ function SessionItem({
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
           ? "var(--danger-soft)"
-          : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
+          : isSelected ? "var(--bg-selected)" : showHover ? "var(--bg-hover)" : "transparent",
         boxShadow: confirmDelete
           ? "inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent)"
           : "none",
@@ -2207,8 +2258,10 @@ function SessionItem({
 
           {/* Hover actions appear over the title's trailing edge; nothing is
               reserved when idle so the title uses the full row width. The
-              relative time stays available in the title tooltip above. */}
-          {hovered && !session.transient ? (
+              relative time stays available in the title tooltip above.
+              Also shown when a row slides under a stationary pointer after a
+              delete reflows the list (see syncPointerSession). */}
+          {showHover && !session.transient ? (
             <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
               <button
                 onClick={startRename}
