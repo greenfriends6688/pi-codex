@@ -66,8 +66,8 @@ test("all four settings sections use the shared list-detail layout", () => {
 
 test("all subpanel sidebars share one typography scale", () => {
   const sources = Object.fromEntries(configSources);
-  assert.match(cssSource, /\.config-sidebar-text \{[\s\S]*?font-family: inherit[\s\S]*?font-size: 12px/);
-  assert.match(cssSource, /\.config-sidebar-group-label \{[\s\S]*?font-family: inherit[\s\S]*?font-size: 10px/);
+  assert.match(cssSource, /\.config-sidebar-text \{[\s\S]*?font-family: inherit[\s\S]*?font-size: var\(--text-sm\)/);
+  assert.match(cssSource, /\.config-sidebar-group-label \{[\s\S]*?font-family: inherit[\s\S]*?font-size: var\(--text-2xs\)/);
   for (const source of Object.values(sources)) {
     assert.match(source, /<ConfigSidebarText/);
   }
@@ -116,8 +116,8 @@ test("all subpanel detail panes share one content hierarchy", () => {
   const sources = Object.fromEntries(configSources);
   assert.match(cssSource, /\.config-detail-stack \{[\s\S]*?gap: 16px[\s\S]*?width: 100%/);
   assert.doesNotMatch(cssSource, /\.config-detail-stack \{[\s\S]*?max-width: 720px/);
-  assert.match(cssSource, /\.config-field-label \{[\s\S]*?font-size: 11px/);
-  assert.match(cssSource, /\.config-empty-state \{[\s\S]*?font-size: 12px/);
+  assert.match(cssSource, /\.config-field-label \{[\s\S]*?font-size: var\(--text-xs\)/);
+  assert.match(cssSource, /\.config-empty-state \{[\s\S]*?font-size: var\(--text-sm\)/);
   for (const source of Object.values(sources)) {
     assert.match(source, /<ConfigDetailStack/);
     assert.match(source, /<ConfigEmptyState/);

@@ -97,15 +97,18 @@
 //       --radius-md 解析为 calc(8px * 1.25) 形态
 ```
 
-参考值（本皮肤 v0.9.1）：
+参考值（本节内容在「细节精修」一节后已改为暖色 oklch，当前值见下表）：
 
 | theme | dark 类 | --bg | --text | --accent | --primary-bg |
 |---|---|---|---|---|---|
-| light | false | `#ffffff` | `#1a1c1f` | `#339cff` | `#1a1c1f` |
-| dark | true | `#181818` | `#ffffff` | `#99ceff` | `#ffffff` |
-| mist | false | `#fbfdfc` | `#16241f` | `#1e6559` | `#16241f` |
-| rose | false | `#fdfbfb` | `#2a1f24` | `#914360` | `#2a1f24` |
-| pine | true | `#181c1a` | `#f2f7f4` | `#acccb7` | `#f2f7f4` |
+| light | false | `oklch(0.995 0.004 85)` | `oklch(0.26 0.015 55)` | `oklch(0.66 0.16 250)` | `oklch(0.26 0.015 55)` |
+| dark | true | `oklch(0.22 0.008 60)` | `oklch(0.94 0.01 85)` | `oklch(0.84 0.08 245)` | `oklch(0.94 0.01 85)` |
+| mist | false | `oklch(0.985 0.005 165)` | `oklch(0.27 0.02 165)` | `oklch(0.46 0.07 178)` | `oklch(0.27 0.02 165)` |
+| rose | false | `oklch(0.987 0.005 20)` | `oklch(0.28 0.015 12)` | `oklch(0.47 0.1 5)` | `oklch(0.28 0.015 12)` |
+| pine | true | `oklch(0.22 0.008 155)` | `oklch(0.94 0.012 155)` | `oklch(0.82 0.05 155)` | `oklch(0.94 0.012 155)` |
+
+> `verify-themes.mjs` 会把两边的 oklch 归一化成数值三元组再比，所以生产构建把
+> `oklch(0.995 0.004 85)` 压缩成 `oklch(99.5% .004 85)` 也不会误报。
 
 > 本机 Playwright 1.63 不支持 macOS 12 的 chromium 构建（`Playwright does not support chromium on mac12-arm64`），改用系统 Chrome：`chromium.launch({ channel: "chrome" })`。
 
@@ -282,15 +285,113 @@ git apply -3 --binary --whitespace=nowarn /tmp/pr838.patch
 以下测试断言的是皮肤数值，合并上游若覆盖需同步：
 `ChatAppearance`（768/13）、`SessionSidebar`（行高常量推导）、`AgentSessionPanel`（`--radius-md` 圆角）、`ImagePreview`（`--radius-md`/`--bg-elev`）、`MessageView`（`--border` 工具卡）、`MobilePwaLayout`（`--height-toolbar`/`--height-toolbar-pane`）、`panel-layout`（384 默认宽）、`SettingsPanel`（`THEME_OPTIONS.map` / `setThemePreference(option.id)` / `setLocale(plugin.id)`）。
 
+细节精修后新增/改写的断言（排版刻度 token 化、焦点环下沉到覆盖层）：
+
+| 文件 | 断言 |
+|---|---|
+| `SettingsPanel.test.mjs` | `.settings-chat-option` 字号为 `var(--text-sm)`；`.web-login-composer` 圆角为 `var(--radius-lg)`；当前选中 tab 的焦点规则**不再**含 `outline: none`，并断言覆盖层提供 `outline: 2px solid var(--accent) !important` |
+| `SettingsUi.test.mjs` | `.config-sidebar-text` → `var(--text-sm)`、`.config-sidebar-group-label` → `var(--text-2xs)`、`.config-field-label` → `var(--text-xs)`、`.config-empty-state` → `var(--text-sm)` |
+
 ## 合并后自检清单
 
 ```bash
 node_modules/.bin/tsc --noEmit              # 必过；JSX 失配会在这里暴露
-npm run lint                                # 0 error
-npm test                                    # 除 CLI global lock 外全过
-node docs/codex-skin/audit-tokens.mjs       # 必过；自造 token、6 套色板完整性、CSS 括号配平
-npm run dev                                 # 然后另开一个终端：
+npm run lint                                # 0 error（注意：release/ 构建产物会让 eslint . 爆量，先删或忽略）
+npm test                                    # 除 CLI global lock 与 plugin-updates 这类环境性用例外全过
+node docs/codex-skin/audit-tokens.mjs       # 必过；自造 token、皮肤刻度、6 套色板完整性、CSS 括号配平
+npm run prod                                # 必须**干净重建**（见下），然后另开一个终端：
 node docs/codex-skin/verify-themes.mjs      # 必过；重复主题块 + 实际渲染出的 token 值
+node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截图
 ```
 
 > 前四项都是静态检查，**抓不到重复主题块**——那类错误只有第五项（真实渲染）能暴露。改过主题层就一定要跑完第五项。
+>
+> **`.next` 里的 CSS 缓存会骗人**：`npm run prod` 在已经是 prod 模式时不会挪走 `.next`，
+> webpack 有可能直接吐回旧的 CSS 产物——表现是 `verify-themes.mjs` 报出一整套旧色板，
+> 而源码和 `audit-tokens.mjs` 都是新的。踩过之后：改过主题层就
+> `mv .next $(mktemp -d)/next` 再 `npm run prod`。
+
+---
+
+## 细节精修：暖色 oklch + 玻璃层（skin-v0.9.1 之上）
+
+目标：不动任何功能，只把「看起来还差点意思」的细节收敛成一套可验证的刻度。
+规范与判定依据全部写在 `docs/codex-skin/visual-spec.md`，本节只记改动面与坑。
+
+**范围约束**：只改 CSS（`app/globals.css`、`app/settings.css`），**不动任何 `.tsx`**。
+代价与天花板见 visual-spec.md §7。
+
+### 1. 色板：6 套全部改写为暖色 oklch
+
+- 中性面改暖色（浅色色相 80、深色 60；chroma 0.003–0.012），交互层用带暖色相的
+  `oklch(L C H / α)` 而不是中性灰；前景三级仍是 100% / 72% / 52% 同色相同亮度。
+- `--primary-bg` 改为该主题的「墨色」（浅色主题近黑暖、深色主题近白暖），
+  与 `--accent-contrast`（强调色实心上的文字）分开，两者不再混用——
+  任务列表勾号原本用 `--primary-fg` 画在强调色底上，浅色主题下会变成近黑勾号，已改为 `--accent-contrast`。
+- 每套色板仍然写全 `audit-tokens.mjs` 的 34 个 token；选择器各出现 1 次（`verify-themes.mjs` 会数）。
+
+### 2. 新增语义刻度（定义在裸 `:root`）
+
+- **排版**：`--text-2xs|xs|sm|md|lg|xl|2xl|3xl` = 10/11/12/13/14/15/18/24px，
+  与代码里的字号字面量 **1:1** 对应。`globals.css` 替换 27 处、`settings.css` 替换 38 处。
+  未替换的都是刻意的：`em` 相对字号、移动端 `16px`（防 iOS 缩放）、登录页输入框、关闭按钮的 `×` 字形。
+- **控件尺寸**：`--control-xs|sm|md|lg|xl|touch` = 22/26/28/32/36/44px。
+- **层级**：`--z-base|raised|sticky|panel|drawer|popover|modal|toast`。
+  组件内联的 z-index（1→1100 共 22 个散值）CSS 无法覆盖，这套刻度只服务于
+  新写的规则与覆盖层里能用类名命中的层。
+- **玻璃**：`--glass-blur|saturation|opacity|popover-opacity|tooltip-opacity`。
+
+### 3. 覆盖层（`globals.css` 末尾）
+
+组件把表现放在内联样式里，内联优先级高于任何选择器，所以凡是跨组件收敛的属性
+（圆角、阴影、动效时长、焦点环）都放在一层带 `!important` 的覆盖层里，规则按「收敛什么」分组：
+
+| 收敛项 | 命中方式 |
+|---|---|
+| 浮层圆角/阴影/玻璃 | `.anim-popover` / `.anim-popover-down` / `.anim-dialog` |
+| 输入框玻璃与焦点环 | `.chat-content div[style*="--radius-composer"]`（该内联变量全仓唯一） |
+| 焦点环 | `:where(button, a[href], …):focus-visible`，压掉 21 处内联 `outline: "none"` |
+| 动效时长 | `@media (prefers-reduced-motion: no-preference)` 下的控件 `transition` 简写，回收 ~70 处内联 `0.1–0.3s` |
+| 会话节奏 | `.chat-content [data-entry-id] > div` 用回 `--conversation-item-gap`（此前 token 定义了却没人用，消息写死 20px、过程详情 14px） |
+| 工作区边界按钮 | 去掉与 header 重复的 1px 分隔线，补 hover / focus 同款 chip |
+
+**玻璃只在内容真的从下面经过的地方**：下拉、菜单、扩展弹窗、输入框。
+全屏模态（`config-panel-root.is-modal` / `settings-dialog-surface`）坐在 `--scrim` 上，
+模糊买不到效果，保持不透明——这一条与最初计划不同，按实际判断排除。
+`@supports not (backdrop-filter)` 与 `prefers-reduced-transparency: reduce` 都有回落。
+
+### 4. 终端：从硬编码色改为 token 岛
+
+`.terminal-panel` 原来写死 `#1a1a1a`/`#1f1f1f`/`#333333`…，而 xterm 的主题
+（`TerminalPanel.tsx` 内的 JS 对象）用的是 `#111318`，两层近黑叠出可见接缝。
+现在面板底色与 viewport 都取 `--terminal-surface`（**必须等于 JS 主题的 background**），
+外壳灰阶走 `--terminal-chrome/border/hover/text/text-dim`，状态灯改用
+`--warning/--success/--danger`，报错条用 `color-mix` 在 `--danger` 上算。
+让终端真正跟随主题需要改 JS 里的 xterm 调色板，超出本次范围。
+
+### 5. 顺手清掉的硬编码与死 token
+
+- `settings.css`：`.skill-update-status.is-success` 的 `#16a34a` → `--success`；
+  `.config-scope-tag.is-project` 的 indigo `rgba(99,102,241,…)` → `--accent-soft`/`--accent`；
+  `.agents-concurrency-control input` 的 `border-radius: 4px` → `--radius-xs`。
+  `.config-scope-tag` 基础态的 `rgba(120,120,120,0.12)` 与 `border-radius: 3px` 保留，
+  因为它们要和 `ModelsConfig` 里内联的包徽章保持一致。
+- `globals.css`：登录页阴影与错误色、文件查看器保存状态色、Markdown 行内代码
+  （补 hairline 边框，浅色下原本几乎看不见）、Markdown 编辑器与目录选择器的焦点环、
+  移动抽屉与遮罩的阴影/背景。
+- 删掉死 token：`--elevation-prominent`、`--elevation-sidebar`、`--height-toolbar-sm`、
+  `--radius-token-composer-single-line`、`--conversation-grouped-item-gap`（全仓无人引用）。
+- `--shadow-sm|md|lg|xl` 名字保留（组件内联在引用），值改为统一的「描边 + 暖黑分层」四级阶梯。
+
+### 6. 脚本与截图
+
+- `audit-tokens.mjs` 新增「皮肤刻度 token 齐全」检查（32 个），并保持 34 token × 5 套调色板校验。
+- `verify-themes.mjs` 期望值改为暖色 oklch，且**按数值比较**，不再依赖压缩后的字面串。
+- 新增 `capture-themes.mjs`：跑 `npm run prod` 后重拍 5 套主题 + 设置页截图。
+
+### 7. 本次**没有**修掉的（需要改 .tsx，留给下一轮）
+
+- 侧栏会话行/文件树行、消息动作行、composer 内控件尺寸仍由内联样式决定；
+  覆盖层只能收敛它们共有的属性，改不了它们各自写死的数值。
+- 触摸端 hover 残留：`onMouseEnter/Leave` 直接写内联样式，CSS 无法撤销。
+- 内联 z-index 的 22 个散值、`ModelSelector` 等浮层各自的阴影字面量。

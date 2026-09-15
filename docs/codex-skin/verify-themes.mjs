@@ -21,12 +21,14 @@ const { chromium } = require("playwright");
 const BASE = "http://127.0.0.1:30141/";
 
 // 本皮肤的期望值。改调色板时同步更新这里。
+// 比较时会把 oklch() 归一化，所以这里写作者态的 `oklch(0.995 0.004 85)` 即可，
+// 构建压缩成 `oklch(99.5% .004 85)` 也不会误报。
 const EXPECTED = {
-  light: { dark: false, bg: "#ffffff", text: "#1a1c1f", accent: "#339cff", primaryBg: "#1a1c1f" },
-  dark: { dark: true, bg: "#181818", text: "#ffffff", accent: "#99ceff", primaryBg: "#ffffff" },
-  mist: { dark: false, bg: "#fbfdfc", text: "#16241f", accent: "#1e6559", primaryBg: "#16241f" },
-  rose: { dark: false, bg: "#fdfbfb", text: "#2a1f24", accent: "#914360", primaryBg: "#2a1f24" },
-  pine: { dark: true, bg: "#181c1a", text: "#f2f7f4", accent: "#acccb7", primaryBg: "#f2f7f4" },
+  light: { dark: false, bg: "oklch(0.995 0.004 85)", text: "oklch(0.26 0.015 55)", accent: "oklch(0.66 0.16 250)", primaryBg: "oklch(0.26 0.015 55)" },
+  dark: { dark: true, bg: "oklch(0.22 0.008 60)", text: "oklch(0.94 0.01 85)", accent: "oklch(0.84 0.08 245)", primaryBg: "oklch(0.94 0.01 85)" },
+  mist: { dark: false, bg: "oklch(0.985 0.005 165)", text: "oklch(0.27 0.02 165)", accent: "oklch(0.46 0.07 178)", primaryBg: "oklch(0.27 0.02 165)" },
+  rose: { dark: false, bg: "oklch(0.987 0.005 20)", text: "oklch(0.28 0.015 12)", accent: "oklch(0.47 0.1 5)", primaryBg: "oklch(0.28 0.015 12)" },
+  pine: { dark: true, bg: "oklch(0.22 0.008 155)", text: "oklch(0.94 0.012 155)", accent: "oklch(0.82 0.05 155)", primaryBg: "oklch(0.94 0.012 155)" },
 };
 
 // 先做一次零成本的重复选择器检查，给出比浏览器报错更直接的提示。
@@ -37,6 +39,21 @@ const hex = (v) => {
   const s = String(v).trim().toLowerCase();
   const m = /^#([0-9a-f]{3})$/.exec(s);
   return m ? `#${m[1].split("").map((c) => c + c).join("")}` : s;
+};
+
+// 自定义属性不会被解析成 rgb，浏览器返回的就是构建后的 token 序列。压缩器会把
+// `oklch(0.995 0.004 85)` 写成 `oklch(99.5% .004 85)`，所以按数值而不是字面比较。
+const oklchTriple = (v) => {
+  const m = /oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)/i.exec(String(v));
+  if (!m) return null;
+  const scale = m[2] === "%" ? 100 : 1;
+  return [Number(m[1]) / scale, Number(m[3]), Number(m[4])];
+};
+const sameColor = (got, want) => {
+  const a = oklchTriple(got);
+  const b = oklchTriple(want);
+  if (a && b) return a.every((value, index) => Math.abs(value - b[index]) < 1e-4);
+  return hex(got) === hex(want);
 };
 
 let duplicated = false;
@@ -81,7 +98,7 @@ for (const [theme, want] of Object.entries(EXPECTED)) {
   if (got.dataTheme !== theme) diffs.push(`data-theme=${got.dataTheme}（应为 ${theme}）`);
   if (got.dark !== want.dark) diffs.push(`dark 类=${got.dark}（应为 ${want.dark}）`);
   for (const key of ["bg", "text", "accent", "primaryBg"]) {
-    if (hex(got[key]) !== hex(want[key])) {
+    if (!sameColor(got[key], want[key])) {
       diffs.push(`${key}=${got[key]}（应为 ${want[key]}）`);
     }
   }

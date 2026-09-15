@@ -89,7 +89,7 @@ test("groups chat display controls together without row backgrounds", () => {
   }
   assert.doesNotMatch(panelSource, /ThinkingIcon|settings-thinking-/);
   const chatOptionStyles = cssSource.match(/\.settings-chat-option \{[\s\S]*?\}/)?.[0] ?? "";
-  assert.match(chatOptionStyles, /font-size: 12px/);
+  assert.match(chatOptionStyles, /font-size: var\(--text-sm\)/);
   assert.doesNotMatch(chatOptionStyles, /background/);
 });
 
@@ -110,7 +110,11 @@ test("uses top navigation on desktop and one compact section picker on mobile", 
   assert.match(cssSource, /\.settings-section-tab::after \{[\s\S]*?width: 24px/);
   assert.match(cssSource, /\.settings-section-tab\[aria-current="page"\]::after/);
   assert.match(cssSource, /\.settings-section-tab:focus-visible:not\(\[aria-current="page"\]\)/);
-  assert.match(cssSource, /\.settings-section-tab:focus-visible\[aria-current="page"\][\s\S]*?outline: none/);
+  // 焦点环改由 globals.css 的皮肤覆盖层统一提供，这一支不再清掉 outline。
+  const currentTabFocusRule = cssSource.match(/\.settings-section-tab:focus-visible\[aria-current="page"\] \{[\s\S]*?\}/)?.[0] ?? "";
+  assert.ok(currentTabFocusRule, "the current section tab focus rule should exist");
+  assert.doesNotMatch(currentTabFocusRule, /outline: none/);
+  assert.match(globalCssSource, /:where\(button[\s\S]*?:focus-visible \{[\s\S]*?outline: 2px solid var\(--accent\) !important/);
   assert.match(cssSource, /@media \(max-width: 640px\)[\s\S]*?\.settings-section-tabs \{[\s\S]*?display: none/);
   assert.match(cssSource, /@media \(max-width: 640px\)[\s\S]*?\.settings-mobile-section-picker \{[\s\S]*?display: block/);
   assert.doesNotMatch(panelSource, /width: isMobile \? "100%" : 188/);
@@ -146,5 +150,5 @@ test("keeps password authentication to one login field and one settings action",
   assert.match(panelSource, /fetch\("\/api\/web-auth", \{ method: "DELETE" \}\)/);
   assert.match(panelSource, /t\("auth\.logOut"\)/);
   assert.match(loginSource, /className="web-login-composer"[\s\S]*?type="password"[\s\S]*?<button type="submit"/);
-  assert.match(globalCssSource, /\.web-login-composer \{[\s\S]*?display: flex;[\s\S]*?border-radius: 14px/);
+  assert.match(globalCssSource, /\.web-login-composer \{[\s\S]*?display: flex;[\s\S]*?border-radius: var\(--radius-lg\)/);
 });
