@@ -1193,16 +1193,18 @@ function ToolCallBlock({ block, result, duration, onOpenSession, expanded: contr
         </pre>
       )}
 
+      {/* ── Result images — always visible, independent of the collapsed details ── */}
+      {resultImages.length > 0 && <ResultImages images={resultImages} isError={isError} />}
+
       {/* ── Paired result — only shown when expanded ── */}
       {expanded && result && (
         resultDiff ? (
           <PairedDiffResult
             diff={resultDiff}
           />
-        ) : (
+        ) : (!resultIsEmpty || resultImages.length === 0) && (
           <PairedResult
             text={resultText ?? ""}
-            images={resultImages}
             isEmpty={resultIsEmpty}
             isError={isError}
           />
@@ -1448,71 +1450,79 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function PairedResult({ text, images, isEmpty, isError }: {
+function ResultImages({ images, isError }: { images: ImageContent[]; isError: boolean }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        padding: "10px",
+        background: "var(--bg)",
+        borderTop: `1px solid ${isError ? "color-mix(in srgb, var(--danger) 30%, transparent)" : "color-mix(in srgb, var(--success) 15%, transparent)"}`,
+      }}
+    >
+      {images.map((image, index) => {
+        const src = imageSource(image);
+        if (!src) return null;
+        return (
+          <ImagePreview
+            key={`${src}-${index}`}
+            src={src}
+            style={{ maxWidth: "100%" }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={src}
+              alt=""
+              loading="lazy"
+              style={{
+                display: "block",
+                maxWidth: "min(100%, 720px)",
+                maxHeight: 520,
+                borderRadius: "var(--radius-sm)",
+                objectFit: "contain",
+                border: "1px solid var(--border)",
+              }}
+            />
+          </ImagePreview>
+        );
+      })}
+    </div>
+  );
+}
+
+function PairedResult({ text, isEmpty, isError }: {
   text: string;
-  images: ImageContent[];
   isEmpty: boolean;
   isError: boolean;
 }) {
   const { t } = useI18n();
-  const showText = !isEmpty || images.length === 0;
   return (
     <div
       style={{
-        borderTop: `1px solid ${isError ? "rgba(248,113,113,0.3)" : "rgba(34,197,94,0.15)"}`,
-        background: isError ? "rgba(248,113,113,0.04)" : "var(--bg-subtle)",
+        borderTop: `1px solid ${isError ? "color-mix(in srgb, var(--danger) 30%, transparent)" : "color-mix(in srgb, var(--success) 15%, transparent)"}`,
+        background: isError ? "color-mix(in srgb, var(--danger) 6%, transparent)" : "var(--bg-subtle)",
       }}
     >
-      {images.length > 0 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px", background: "var(--bg)" }}>
-          {images.map((image, index) => {
-            const src = imageSource(image);
-            if (!src) return null;
-            return (
-              <ImagePreview
-                key={`${src}-${index}`}
-                src={src}
-                style={{ maxWidth: "100%" }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={src}
-                  alt=""
-                  loading="lazy"
-                  style={{
-                    display: "block",
-                    maxWidth: "min(100%, 720px)",
-                    maxHeight: 520,
-                    borderRadius: "var(--radius-sm)",
-                    objectFit: "contain",
-                    border: "1px solid var(--border)",
-                  }}
-                />
-              </ImagePreview>
-            );
-          })}
-        </div>
-      )}
-      {showText && (
-        <pre
-          style={{
-            margin: 0,
-            padding: "8px 10px",
-            color: isError ? "var(--danger)" : (isEmpty ? "var(--text-dim)" : "var(--text-muted)"),
-            fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
-            lineHeight: 1.5,
-            overflow: "auto",
-            maxHeight: 400,
-            background: "var(--bg)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-            fontStyle: isEmpty ? "italic" : "normal",
-            opacity: isEmpty ? 0.6 : 1,
-          }}
-        >
-           {isEmpty ? t("i18n.noOutput") : text}
-        </pre>
-      )}
+      <pre
+        style={{
+          margin: 0,
+          padding: "8px 10px",
+          color: isError ? "var(--danger)" : (isEmpty ? "var(--text-dim)" : "var(--text-muted)"),
+          fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
+          lineHeight: 1.5,
+          overflow: "auto",
+          maxHeight: 400,
+          background: "var(--bg)",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          fontStyle: isEmpty ? "italic" : "normal",
+          opacity: isEmpty ? 0.6 : 1,
+        }}
+      >
+        {isEmpty ? t("i18n.noOutput") : text}
+      </pre>
     </div>
   );
 }
