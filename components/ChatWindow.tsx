@@ -135,6 +135,9 @@ function rangeFromTextOffsets(root: HTMLElement, startOffset: number, endOffset:
 
 const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 12;
+// A dialog replacing another one within this window is a single interaction
+// (e.g. select followed by a free-text input) and must not re-ring.
+const EXTENSION_DIALOG_SOUND_MIN_GAP_MS = 2000;
 
 function NewSessionUpdateLink({
   label,
@@ -302,6 +305,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
   const soundedExtensionDialogIdRef = useRef<string | null>(null);
+  const extensionDialogLastSoundAtRef = useRef(0);
   const wrappedOnAgentEnd = useCallback(() => {
     if (completionNotificationsEnabled && soundEnabledRef.current) {
       playDoneSoundRef.current();
@@ -574,6 +578,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       || soundedExtensionDialogIdRef.current === extensionDialog.id
     ) return;
     soundedExtensionDialogIdRef.current = extensionDialog.id;
+    const now = Date.now();
+    if (now - extensionDialogLastSoundAtRef.current < EXTENSION_DIALOG_SOUND_MIN_GAP_MS) return;
+    extensionDialogLastSoundAtRef.current = now;
     playDoneSoundRef.current();
   }, [completionNotificationsEnabled, extensionDialog]);
 
@@ -1701,7 +1708,7 @@ function ExtensionDialog({
         inset: 0,
         zIndex: 90,
         display: "flex",
-        alignItems: collapsed ? "flex-start" : "center",
+        alignItems: collapsed ? "flex-start" : "flex-end",
         justifyContent: "center",
         padding: 20,
         pointerEvents: "none",
@@ -1733,7 +1740,7 @@ function ExtensionDialog({
             {t("chat.extensionPending")}
           </span>
           <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-            {request.title}
+            {headerTitle}
           </span>
           {summary && (
             <span style={{ fontSize: 12, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%", flexShrink: 1 }}>
@@ -1986,7 +1993,7 @@ function ExtensionCustomPanel({
         inset: 0,
         zIndex: 95,
         display: "flex",
-        alignItems: collapsed ? "flex-start" : "center",
+        alignItems: collapsed ? "flex-start" : "flex-end",
         justifyContent: "center",
         padding: 20,
         pointerEvents: "none",
