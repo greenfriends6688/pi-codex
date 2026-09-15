@@ -212,6 +212,88 @@ html[data-theme="pine"],
 | #838 | 工作区 Markdown 编辑器 + 可切换主/副区布局 + Composer 选区上下文 | `1f4d45a` | v0.9.1 |
 | #470 | Plugins 面板中的 MCP 服务器管理（新增 `/api/mcp` + MCP 服务器区块） | `d3ee79e` | v0.8.8-beta.1（`d9b534e`） |
 
+#### 2026-09-15 收编批次 A+B（27 个，分支 `pick/ab-2026-09-15`）
+
+上游 439 个 PR 里，**已合并的全部已在 v0.9.1 基线内**（v0.9.1 tag 之后上游 merge 数为 0），
+所以候选就是当时 **61 个 open PR**。收件箱（patch + 元数据 + 索引）在
+`~/Desktop/pi-web-pr-inbox/`，整目录可删。
+
+关键实测：大多数 open PR 的 base 就是 `8366762fa` = **"Release v0.9.1" 本身**；
+`git apply --check` 直接过 23/61，`git apply -3 --check` 过 57/61。
+但 **`--check` 不等于真实应用**——`-3` 的通过率是逐个对当前工作树测的，
+应用完一个树就变了。**每应用一个都要重新 `-3 --check`，不要批量预检后一口气打。**
+
+**A 组（14 个，零皮肤冲突）**
+
+| PR | 内容 | 提交 |
+|---|---|---|
+| #835 | 流式首个 chunk 被重复渲染 | `c955034` |
+| #809 | 关机时关闭 SSE 流（僵尸 node / 502） | `aa7ff0d` |
+| #810 | tail 窗口只按可见消息计数 | `4ea5888` |
+| #796 | 读取其他 pi 进程写入的会话 | `29c31a9` |
+| #811 | manual-code 握手 token 改 randomUUID | `2300b57` |
+| #818 | session cookie 改 SameSite=Lax | `b909aa0` |
+| #827 | plugins `relativePath` 分隔符归一 | `313c5c6` |
+| #833 | 扩展注册的 provider 进设置/鉴权路由 | `89940d1` |
+| #847 | 前台子代理完成文本带 session ID | `09bcf08` |
+| #823 | RISC-V 关闭 Wasm 懒编译 | `1d7b436` |
+| #732 | worktree 先 fetch origin、放宽 git 超时 | `74a9b11` |
+| #805 | 离线用缓存的 app shell | `44b1c13` |
+| #837 | 插件更新检查绕开 `npm.cmd`（取代 #817） | `66c2bd3` |
+| #846 | 提高 Next 代理 body 缓冲（>10MB 上传 500） | `4873b02` |
+
+**B 组（13 个，皮肤面 1–2 文件）**
+
+| PR | 内容 | 提交 | 皮肤重打 |
+|---|---|---|---|
+| #785 | 顶栏显示会话消息数 | `96fa785` | 冲突：保留 fork 的「统计行常显 + 零值降透明度」，新增消息数 span 跟随同一约定；`#ef4444`→`var(--danger)`、`rgba(234,179,8,.95)`→`var(--warning)`（顺带修掉 `contextColor` 里漏 token 的琥珀色） |
+| #853 | 变更文件行「提及」按钮 + 路径中省略 | `314a6a9` `78d4166` | `borderRadius: 4` → `var(--radius-xs)`，与同组件文件树上的提及 chip 对齐 |
+| #771 | 列表位移后删除按钮不出现 | `ae9b5ec` | base 早于 v0.9.1、结构漂移大，**放弃三方合并、手工嫁接增量**（详见下） |
+| #828 | `/auto-compact` 斜杠命令 | `cb4b592` | 无 |
+| #839 | 扩展 widget 更新时保持顺序 | `0370aca` | 新增 `lib/extension-widgets.ts` |
+| #724 | 扩展弹窗标题支持代码围栏 | `effbbc0` `4936e23` | `borderRadius: 6`→`var(--radius-sm)`；`rgba(239,68,68,.10/.35)`→ danger 的 color-mix；`3px solid #ef4444`→`var(--danger)` |
+| #761 | 扩展对话框底部停靠 | `1fbc91c` | 上游把 `CHAT_COLUMN_PADDING` 12→16，**保留 fork 的 12**；标题拆分实现被 #724 取代，只取其增量 |
+| #735 | composer 预览待发送图片 | `b180805` | `borderRadius: 6` → `var(--radius-sm)` |
+| #743 | 流式更新时保持工具块展开 | `ba2e0d0` | 保留 fork 的 `toolResults` 传递与 `ToolCallIcon`；去掉 `prevAssistantEntryId`（fork 的 `Props` 没有这个字段） |
+| #826 | 工具卡折叠时也显示结果图片 | `d95f7db` | 4 处 rgba/hex → `--danger`/`--success` 的 color-mix；`borderRadius: 6`→`var(--radius-sm)` |
+| #744 | `apply_patch` 渲染成 split diff | `4b634e7` | `rgba(34,197,94,.15)` → `var(--success)` 的 color-mix；去掉 #826 已删除的 `images` prop 传参 |
+| #799 | 模型 provider 图标 | `942d9a7` `46c1e6c` | 只保留图标部分；**Windows 启动器（cmd/ps1/launcher.js/proxy-bootstrap）已剔除**——本 fork 纯 Web、无桌面端 |
+| #834 | 第三方子代理会话嵌到父级下 | **搁置** | 见下 |
+
+**本轮搁置 / 排除**
+
+- **#834 搁置（重要）**：它把 `family.subagents` 聚合模型改成 `family.children` 嵌套行模型
+  （`sessionRows` / `collapsedSessionFamilyIds` / depth 渲染），横跨 `lib/session-family.ts`、
+  `lib/session-list-scanner.ts`、`lib/session-reader.ts` + `SessionSidebar.tsx`。
+  这与本 fork **刻意的**「子代理行聚合进父行」设计直接相冲
+  （见 `SessionSidebar.test.mjs` 的 *hides subagent rows and aggregates their state into the main session row*）。
+  收它等于推翻该设计并重写虚拟列表行模型，需单独立项决策。
+- **#817 / #831**：分别是 #837 / #832 的前身，取更完整的那个。
+- **#801**：被已摘取的 #838 覆盖（文件集是 #838 的子集）。
+- **#819 / #820 / #821 / #852**：纯 `AGENTS.md` 文档；#852 还想把 Next 自动生成的
+  agent rules 块提交进仓库，与本 fork 的 AGENTS 处理方式冲突。
+- **#812 / #816 / #832**：D 组，本轮不做。其中 #816 把 pi 依赖改成 `file:../pi/packages/*`
+  本地 monorepo + `next.config.ts` 的 `localPiAliases` + 重写 lock，**在本 fork 不可用**。
+- **C 组 22 个**（#713 / #725 / #726 / #727 / #733 / #736 / #777 / #790 / #800 / #807 /
+  #813 / #814 / #815 / #824 / #825 / #830 / #836 / #841 / #843 / #845 / #849 / #854）：
+  皮肤面 3–8 文件，等 A+B 验证通过后再做。注意 **#725 与 #843 互斥**
+  （都重写 `MessageView.tsx` 的 `SplitPatchView` 区段）。
+
+**#771 的移植方式（下次遇到结构漂移照做）**
+
+PR 的 base（`0e712013d`）早于 v0.9.1，`SessionSidebar.tsx` 的结构与 fork 差得远，
+三方合并吐出 4 处冲突（其中一处 ours 为空、theirs 64 行，混着上游早已被 fork 移除的
+File Explorer 区段）。正确做法不是硬解，而是**放弃 patch、按 PR 的 diff 手工嫁接功能增量**：
+
+1. 先 `git checkout --` 还原冲突文件；
+2. 只读 PR 的 `.diff`，把「功能增量」逐条列出来（refs / state / callbacks / props / 渲染分支）；
+3. 用 Edit 逐条打进 fork 的现有结构；
+4. 同步改测试断言。
+
+**#833 的冲突（A 组唯一的冲突）**：`app/api/auth/login/[provider]/route.ts` 的 import 区，
+#811 刚加了 `randomUUID`、#833 要删掉已不再使用的 `ModelRuntime` import。
+取「保留 `randomUUID`、删掉 `ModelRuntime`」。
+
 **摘取方法（重要）**：本 fork 的 `upstream` 分支是**源码包快照**，与真实上游 git 历史
 **没有共同祖先**，PR 分支却带着完整上游历史（数百提交）。所以**不能 merge PR 分支**，
 只能把 PR 相对其基点的 diff 用 `git apply -3 --binary` 打进来：
@@ -291,6 +373,14 @@ git apply -3 --binary --whitespace=nowarn /tmp/pr838.patch
 |---|---|
 | `SettingsPanel.test.mjs` | `.settings-chat-option` 字号为 `var(--text-sm)`；`.web-login-composer` 圆角为 `var(--radius-lg)`；当前选中 tab 的焦点规则**不再**含 `outline: none`，并断言覆盖层提供 `outline: 2px solid var(--accent) !important` |
 | `SettingsUi.test.mjs` | `.config-sidebar-text` → `var(--text-sm)`、`.config-sidebar-group-label` → `var(--text-2xs)`、`.config-field-label` → `var(--text-xs)`、`.config-empty-state` → `var(--text-sm)` |
+
+A+B 收编批次新增/改写的断言：
+
+| 文件 | 断言 |
+|---|---|
+| `AppShell.session-stats.test.mjs`（#785 新增） | 消息数 span 断言 `color: messageCountColor, opacity: totalMessages ? 1 : 0.45`（fork 的「常显」约定，不是上游的 `{totalMessages > 0 && ...}` 门控）；阈值色断言 `var(--danger)` / `var(--warning)` |
+| `SessionSidebar.test.mjs`（#771 改写） | `{showHover && !session.transient ? (`（原 `hovered`）；新增「stationary pointer 重新探测」用例；**顺带修掉一条既有失败断言**——fork 把项目行改成 `if (project.key === selectedProject?.key) {`，上游的 `isSelectedProject && (` 已匹配不上 |
+| `ChatWindow.extension-request.test.mjs`（#761 增删） | 新增底部停靠 + 音效去抖两条；**删掉**上游的「标题拆段」用例——该实现被 #724 取代 |
 
 ## 合并后自检清单
 
