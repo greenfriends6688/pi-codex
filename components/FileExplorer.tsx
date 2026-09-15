@@ -577,7 +577,7 @@ function ChangeRow({
             height: 20,
             background: "var(--bg-panel)",
             border: "1px solid var(--border)",
-            borderRadius: 4,
+            borderRadius: "var(--radius-xs)",
             color: "var(--accent)",
             cursor: "pointer",
             fontSize: 11,
