@@ -1,0 +1,36 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const source = await readFile(new URL("./ChatInput.tsx", import.meta.url), "utf8");
+const controls = source.slice(source.indexOf("{isStreaming && onThinkingLevelChange &&"));
+
+test("shows the reasoning level of the running turn without offering a control", () => {
+  const readOnly = controls.slice(0, controls.indexOf("{!isStreaming && onThinkingLevelChange &&"));
+  assert.match(readOnly, /<span\s+title=\{t\("chat\.currentReasoning", \{ level: thinkingDisplayLabel \}\)\}/);
+  assert.match(readOnly, /\{thinkingDisplayLabel\}<\/span>/);
+  assert.doesNotMatch(readOnly, /<button|onClick=/);
+});
+
+test("keeps the read-only level aligned with the neighbouring controls", () => {
+  const readOnly = controls.slice(0, controls.indexOf("{!isStreaming && onThinkingLevelChange &&"));
+  const dropdown = controls.slice(controls.indexOf("{!isStreaming && onThinkingLevelChange &&"));
+  // Skin values: this fork tightens the composer controls to 6px 10px / 28px.
+  const padding = /padding: isMobile \? "0 6px" : "6px 10px"/;
+  const height = /height: 28/;
+  for (const [label, markup] of [["read-only", readOnly], ["dropdown", dropdown]]) {
+    assert.match(markup, padding, `${label} horizontal padding`);
+    assert.match(markup, height, `${label} height`);
+  }
+  // The label collapses to the icon on mobile exactly like the editable control.
+  assert.match(readOnly, /\(!isMobile \|\| controlsMenuOpen\) &&/);
+});
+
+test("shows the level the runtime actually applies, not the selector placeholder", async () => {
+  const session = await readFile(new URL("../hooks/useAgentSession.ts", import.meta.url), "utf8");
+  const start = session.slice(session.indexOf('case "agent_start":'), session.indexOf('case "agent_end":'));
+  // Choosing "auto" leaves pi's setting untouched, so the selector alone cannot be trusted.
+  assert.match(session, /if \(level === "auto"\) return;/);
+  assert.match(start, /fetch\(`\/api\/agent\/\$\{encodeURIComponent\(sessionIdRef\.current\)\}`\)/);
+  assert.match(start, /if \(!agentRunningRef\.current \|\| !d\.state\?\.thinkingLevel\) return;\s*setThinkingLevel\(d\.state\.thinkingLevel as ThinkingLevelOption\);/);
+});

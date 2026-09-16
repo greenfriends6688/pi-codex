@@ -28,6 +28,7 @@ import {
   CHAT_SCROLL_REATTACH_TOLERANCE,
   CHAT_SCROLL_TAIL_TOLERANCE,
   getLiveFollowAttached,
+  shouldShowScrollToLatest,
 } from "@/lib/chat-lazy-load";
 import {
   INITIAL_STREAMING_STATE,
@@ -329,6 +330,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
   const [promptAnchorActive, setPromptAnchorActive] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
   const [slashCommandsLoading, setSlashCommandsLoading] = useState(false);
   const [noticeState, dispatchNotice] = useReducer(noticeReducer, { visible: [], pending: [] });
@@ -1143,6 +1145,18 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setAgentRunning(true);
         setAgentPhase({ kind: "waiting_model" });
         dispatch({ type: "start" });
+        // "auto" is a client-side placeholder that leaves pi's setting untouched,
+        // so the selector can disagree with the runtime. Show the level this turn
+        // actually runs with.
+        if (sessionIdRef.current) {
+          fetch(`/api/agent/${encodeURIComponent(sessionIdRef.current)}`)
+            .then((r) => r.json())
+            .then((d: { state?: AgentStateResponse }) => {
+              if (!agentRunningRef.current || !d.state?.thinkingLevel) return;
+              setThinkingLevel(d.state.thinkingLevel as ThinkingLevelOption);
+            })
+            .catch(() => {});
+        }
         break;
       case "agent_end":
         // One logical prompt can emit multiple agent_end events before retrying,
@@ -2046,6 +2060,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       );
       isNearBottomRef.current = isAttached;
       previousScrollTopRef.current = scrollTop;
+      const shouldShow = shouldShowScrollToLatest(scrollTop, clientHeight, scrollHeight);
+      setShowScrollToBottom((previous) => (previous === shouldShow ? previous : shouldShow));
       if (!wasAttached && isAttached && isAgentRunning) {
         scrollToBottom("auto");
       } else if (!isAttached && liveFollowFrameRef.current !== null) {
@@ -2241,6 +2257,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentPhase,
     isNew,
     promptAnchorActive,
+    showScrollToBottom,
     // Refs
     sessionIdRef, scrollContainerRef,
     lastUserMsgRef, pendingScrollToUserRef, initialScrollDoneRef,

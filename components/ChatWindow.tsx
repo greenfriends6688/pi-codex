@@ -6,7 +6,7 @@ import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecuti
 import { normalizeCustomPanelLines } from "@/lib/ansi";
 import { splitDialogTitle, splitDialogTitleCode } from "@/lib/dialog-title";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
-import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
+import { countToolCallBlocks, getAssistantErrorMessage, getAssistantTruncationNotice, getDisplayableAssistantBlocks, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
 import { createSelectionContextId, type SelectionContext } from "@/lib/composer-context";
@@ -349,6 +349,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     isAutoModelSelection,
     agentPhase,
     isNew,
+    showScrollToBottom,
     sessionIdRef, scrollContainerRef,
     lastUserMsgRef, promptAnchorActive,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
@@ -611,6 +612,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const messageContentRef = useRef<HTMLDivElement | null>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
   const loadingOlderRef = useRef(false);
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
   const restoreStartedRef = useRef(false);
   const pendingScrollRestoreRef = useRef(pendingScrollRestore);
   pendingScrollRestoreRef.current = pendingScrollRestore;
@@ -772,6 +774,32 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     onSearchTargetHandled?.(pendingSearchScroll);
   }, [pendingSearchScroll, searchTarget, searchMessage, scrollContainerRef, scrollToMessage, onSearchTargetHandled]);
 
+  // Load one older page of history. Shared by the top sentinel (triggered by
+  // scrolling) and the minimap's "Load earlier" row so both paths keep a
+  // single in-flight guard and the same scroll-anchoring capture.
+  const loadOlderPage = useCallback(async () => {
+    // Skip while a page is already loading or nothing older exists.
+    if (loadingOlderRef.current) return;
+    if (!hasEarlierMessages) return;
+    const oldestId = historyCursor;
+    if (!oldestId) return;
+    const sid = session?.id ?? sessionIdRef.current;
+    if (!sid) return;
+    const container = scrollContainerRef.current;
+    if (container) {
+      prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
+    }
+    loadingOlderRef.current = true;
+    setLoadingEarlier(true);
+    try {
+      // loadContext handles prepend + scroll anchoring.
+      await loadContext(sid, activeLeafId, oldestId);
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingEarlier(false);
+    }
+  }, [activeLeafId, hasEarlierMessages, historyCursor, loadContext, scrollContainerRef, session?.id, sessionIdRef]);
+
   // IntersectionObserver on the sentinel div at the top of the message list.
   // When it becomes visible, load the next page of older messages.
   useEffect(() => {
@@ -781,26 +809,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries[0]?.isIntersecting) return;
-        // No older history loaded yet: fetch the previous page from the server
-        // and prepend it (loadContext handles prepend + scroll anchoring).
-        // Skip while a page is already loading or nothing older exists.
-        if (loadingOlderRef.current) return;
-        if (!hasEarlierMessages) return;
-        const oldestId = historyCursor;
-        if (!oldestId) return;
-        const sid = session?.id ?? sessionIdRef.current;
-        if (!sid) return;
-        loadingOlderRef.current = true;
-        prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
-        void loadContext(sid, activeLeafId, oldestId).finally(() => {
-          loadingOlderRef.current = false;
-        });
+        void loadOlderPage();
       },
       { root: container, threshold: 0 }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [historyCursor, hasEarlierMessages, session, activeLeafId, loadContext, sessionIdRef, scrollContainerRef]);
+  }, [loadOlderPage, scrollContainerRef]);
 
   // Keep the rendered window at least as large as what's loaded, so prepended
   // (older) pages stay visible instead of being sliced off the top.
@@ -1281,7 +1296,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
                 const finalAssistant = messages[finalAssistantIdx] as AssistantMessage;
                 const finalSplit = splitFinalAssistantBlocks(finalAssistant);
-                const finalAnswerMessage = finalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant)
+                const finalAnswerMessage = finalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant) || getAssistantTruncationNotice(finalAssistant)
                   ? withAssistantBlocks(finalAssistant, finalSplit.answerBlocks)
                   : null;
 
@@ -1413,7 +1428,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             position: "fixed",
             top: quotedSelection.top,
             left: quotedSelection.left,
-            zIndex: 130,
+            zIndex: 260,
             display: "flex",
             flexWrap: "wrap",
             gap: 3,
@@ -1494,6 +1509,33 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           background: "var(--bg)",
         } : undefined}
       >
+        {!isEmptyNew && (
+          <div
+            style={{
+              position: "absolute",
+              bottom: "100%",
+              left: 0,
+              right: isMobile ? 0 : CHAT_MINIMAP_WIDTH,
+              display: "flex",
+              justifyContent: "center",
+              paddingBottom: 10,
+              pointerEvents: "none",
+              zIndex: 20,
+            }}
+          >
+            <button
+              type="button"
+              className={`chat-scroll-to-bottom${showScrollToBottom && !pendingScrollRestore ? " is-visible" : ""}`}
+              title={t("chat.scrollToLatest")}
+              aria-label={t("chat.scrollToLatest")}
+              onClick={() => scrollToBottom("smooth")}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 5v14M5 12l7 7 7-7" />
+              </svg>
+            </button>
+          </div>
+        )}
         {isEmptyNew && (
           <div className="mx-auto w-full" style={{ maxWidth: "var(--composer-max-width, 892px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
             <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
@@ -1509,6 +1551,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           scrollContainer={scrollContainerRef}
           messageRefs={messageRefs}
           onRevealHistory={revealHistoryForMinimap}
+          hasEarlierMessages={hasEarlierMessages}
+          loadingEarlier={loadingEarlier}
+          onLoadEarlier={loadOlderPage}
         />
       )}
       {isEmptyNew && <div className="min-h-0 flex-1" />}
