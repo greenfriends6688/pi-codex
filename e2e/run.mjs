@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -28,6 +28,7 @@ const LONG = "e2e-long-session";
 const BRANCH = "e2e-branch-session";
 const RICH = "e2e-rich-session";
 const COMPACTED = "e2e-compacted-session";
+const APPEND = "e2e-external-append-session";
 const text = (i) => `E2E message ${String(i).padStart(4, "0")}`;
 const ids = (start, end) => Array.from({ length: end - start }, (_, i) => `e${start + i}`);
 
@@ -114,6 +115,10 @@ try {
     + "E2E compacted answer paragraph.\n\n".repeat(20),
   }]));
   writeSession(COMPACTED, compactedEntries);
+  writeSession(APPEND, [
+    message("root", null, "user", "E2E wrapper root"),
+    message("reply", "root", "assistant", "E2E wrapper reply"),
+  ]);
 
   const probe = createServer();
   probe.listen(0, "127.0.0.1");
@@ -137,6 +142,17 @@ try {
     return response.json();
   }
 
+  async function post(path, body) {
+    const response = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(60_000),
+    });
+    assert.ok(response.ok, `POST ${path} -> ${response.status}`);
+    return response.json();
+  }
+
   const deadline = Date.now() + 120_000;
   while (true) {
     if (serverError) throw serverError;
@@ -144,7 +160,7 @@ try {
     const response = await fetch(`${base}/api/sessions`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
     if (response?.ok) {
       const { sessions } = await response.json();
-      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED].sort());
+      assert.deepEqual(sessions.map((session) => session.id).sort(), [LONG, BRANCH, RICH, COMPACTED, APPEND].sort());
       break;
     }
     assert.ok(Date.now() < deadline, "Server readiness timed out; see server.log");
@@ -170,11 +186,50 @@ try {
   await api("/api/sessions/e2e-does-not-exist", 404);
   await api("/api/files/..%2F..%2Fetc%2Fpasswd?type=read", 403);
   const compacted = await api(`/api/sessions/${COMPACTED}`);
-  assert.equal(compacted.context.entryIds[0], "compact");
-  assert.equal(compacted.context.messages.some((entry) => entry.role === "user"), false);
+  // History pages keep compacted messages (see buildSessionContext), so the page
+  // must still carry the divider. #810 counts only visible messages toward
+  // `tail`, and this fixture has 51 entries but 27 visible ones, so tail=50 now
+  // covers the whole branch: the page starts at the root and there is nothing
+  // older to page in. Before #810 the raw-entry count happened to cut the page
+  // exactly at the divider — that is the arithmetic these two assertions used to
+  // pin, not a product rule.
+  assert.equal(compacted.context.entryIds[0], "user");
+  assert.equal(compacted.context.hasMore, false);
+  assert.ok(compacted.context.entryIds.includes("compact"), "the compaction divider must be in the page");
+  assert.ok(
+    compacted.context.messages.some((entry) => entry.role === "custom" && entry.customType === "compaction"),
+    "the compaction divider must render as a custom message",
+  );
   console.log("PASS: bounded history, branch context, pagination root, and API errors");
 
-  browser = await chromium.launch();
+  // #632 regression: a live in-memory wrapper used to shadow the session file,
+  // so entries appended by another pi process were invisible — even after a
+  // manual refresh. The wrapper must yield to what is actually on disk.
+  {
+    const file = join(sessionDir, `2026-08-23T00-00-00-000Z_${APPEND}.jsonl`);
+    // Warm a real wrapper so the shadowing code path is active.
+    await post(`/api/agent/${APPEND}`, { type: "get_state" });
+    const beforeAppend = await api(`/api/sessions/${APPEND}`);
+    assert.deepEqual(beforeAppend.context.entryIds, ["root", "reply"], "the wrapper must serve its own snapshot first");
+    // Append exactly as the pi TUI would: one more JSONL entry, same file.
+    appendFileSync(file, `${JSON.stringify(message("external", "reply", "assistant", "E2E external append"))}\n`);
+    const afterAppend = await api(`/api/sessions/${APPEND}`);
+    assert.deepEqual(afterAppend.context.entryIds, ["root", "reply", "external"], "an external append must become visible");
+    // A second read must stay correct rather than flap or re-evict forever.
+    const again = await api(`/api/sessions/${APPEND}`);
+    assert.deepEqual(again.context.entryIds, ["root", "reply", "external"], "repeated reads must stay stable");
+    const appended = await api(`/api/sessions/${APPEND}/context?tail=1`);
+    assert.deepEqual(appended.context.entryIds, ["external"], "the appended entry must be readable on its own");
+    console.log("PASS: external session-file appends are visible despite a live wrapper");
+  }
+
+  // Local accommodations: this checkout has no Playwright-managed chromium, and
+  // Playwright 1.63 has no mac12-arm64 build, so automation runs against system
+  // Chrome via `E2E_CHROME_CHANNEL=chrome`. CI leaves the variable unset and
+  // keeps using the bundled browser.
+  browser = await chromium.launch(
+    process.env.E2E_CHROME_CHANNEL ? { channel: process.env.E2E_CHROME_CHANNEL } : {},
+  );
   for (const viewport of [{ width: 1280, height: 800 }, { width: 390, height: 844 }]) {
     context = await browser.newContext({ viewport, locale: "en-US" });
     await context.tracing.start({ screenshots: true, snapshots: true });
@@ -252,7 +307,10 @@ try {
     assert.equal(await thinking.count(), 0, "All thinking stays inside process details");
     const finalMessage = page.locator("[data-entry-id='answer']");
     assert.equal(await finalMessage.getByRole("button", { name: /^Thinking/ }).count(), 0);
-    assert.equal(await finalMessage.getByText("test/E2E Model", { exact: true }).count(), 1);
+    // Skin deviation: the fork keeps the response surface quiet and only shows
+    // the model label while a response is streaming (MessageView + delta.md),
+    // so a completed message shows usage stats instead of the model name.
+    assert.equal(await finalMessage.getByText("test/E2E Model", { exact: true }).count(), 0);
     assert.equal(thinkingRequests.length, 0);
     await processDetails.click();
     assert.equal(await thinking.count(), 3);
@@ -293,8 +351,12 @@ try {
       });
       await page.screenshot({ path: join(artifacts, "compaction-minimap.png") });
 
+      // Skin deviation: this fork's session row label carries
+      // `"<name> · <relative time>"` as its tooltip (SessionSidebar), where
+      // upstream uses the bare name. Match the prefix so the time text and the
+      // active locale do not have to be predicted.
       const selectSession = async (title, entryId) => {
-        await page.locator(`[title="${title}"]`).click();
+        await page.locator(`[title^="${title} · "]`).first().click();
         await page.locator(`[data-entry-id="${entryId}"]:not([data-message-role])`).waitFor({ state: "visible" });
       };
       const readingOffset = (target) => target.evaluate((element) => (
@@ -337,7 +399,9 @@ try {
       await page.route(agentRoute, (route) => route.fulfill({ json: {} }));
       try {
         const pendingHistory = page.waitForRequest((request) => request.url().includes(`/api/sessions/${LONG}/context?`) && new URL(request.url()).searchParams.has("before"));
-        await page.locator(`[title="${text(0)}"]`).click();
+        // Same skin deviation as selectSession above: the row label tooltip is
+        // "<name> · <relative time>", so match the prefix.
+        await page.locator(`[title^="${text(0)} · "]`).first().click();
         await pendingHistory;
         await page.getByRole("button", { name: "Branches", exact: true }).click();
         await page.getByText("E2E alternate history branch", { exact: true }).click();

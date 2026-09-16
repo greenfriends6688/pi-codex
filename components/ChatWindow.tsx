@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from "react-dom";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, BlockingExtensionUiRequest, ExtensionUiRequest, SessionInfo, SessionTreeNode, ToolResultMessage, UserMessage } from "@/lib/types";
 import { normalizeCustomPanelLines } from "@/lib/ansi";
+import { splitDialogTitle, splitDialogTitleCode } from "@/lib/dialog-title";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
@@ -134,6 +135,9 @@ function rangeFromTextOffsets(root: HTMLElement, startOffset: number, endOffset:
 
 const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 12;
+// A dialog replacing another one within this window is a single interaction
+// (e.g. select followed by a free-text input) and must not re-ring.
+const EXTENSION_DIALOG_SOUND_MIN_GAP_MS = 2000;
 
 function NewSessionUpdateLink({
   label,
@@ -301,6 +305,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
   const soundedExtensionDialogIdRef = useRef<string | null>(null);
+  const extensionDialogLastSoundAtRef = useRef(0);
   const wrappedOnAgentEnd = useCallback(() => {
     if (completionNotificationsEnabled && soundEnabledRef.current) {
       playDoneSoundRef.current();
@@ -319,6 +324,20 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     return position && !position.atBottom ? position : null;
   });
   const [restoreAnchorReady, setRestoreAnchorReady] = useState(false);
+  // Lifted expanded state for tool calls — survives streaming re-renders and
+  // stream → history promotion (keyed by toolCallId, fallback to stream/entry index).
+  const [expandedToolIds, setExpandedToolIds] = useState<Set<string>>(() => new Set());
+  const handleToggleTool = useCallback((id: string) => {
+    setExpandedToolIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+  useEffect(() => {
+    setExpandedToolIds(new Set());
+  }, [session?.id]);
 
   const {
     loading, error, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, streamState,
@@ -573,6 +592,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       || soundedExtensionDialogIdRef.current === extensionDialog.id
     ) return;
     soundedExtensionDialogIdRef.current = extensionDialog.id;
+    const now = Date.now();
+    if (now - extensionDialogLastSoundAtRef.current < EXTENSION_DIALOG_SOUND_MIN_GAP_MS) return;
+    extensionDialogLastSoundAtRef.current = now;
     playDoneSoundRef.current();
   }, [completionNotificationsEnabled, extensionDialog]);
 
@@ -1211,6 +1233,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     prevTimestamp={idx > 0 ? (messages[idx - 1] as AgentMessage & { timestamp?: number }).timestamp : undefined}
                     sessionId={session?.id ?? sessionIdRef.current ?? undefined}
                     writtenFiles={options.writtenFiles}
+                    expandedToolIds={expandedToolIds}
+                    onToggleTool={handleToggleTool}
                   />
                 );
                 if (!isVisible || currentRefIdx === undefined) return view;
@@ -1344,20 +1368,18 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               );
             })()}
             {streamState.isStreaming && hasStreamingContent && streamState.streamingMessage && (
-              <MessageView message={streamState.streamingMessage as AgentMessage} toolResults={toolResultsMap} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} />
+              <MessageView message={streamState.streamingMessage as AgentMessage} toolResults={toolResultsMap} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} expandedToolIds={expandedToolIds} onToggleTool={handleToggleTool} />
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (
               <div className="break-words py-2 text-xs text-text-muted" role="status" aria-live="polite">
                 <span>{phaseLabel(agentPhase, t)}</span>
-                <span className="phase-dots" aria-hidden="true"><span /><span /><span /></span>
               </div>
             )}
 
             {bashRunning && !pendingBash && (
               <div className="py-2 text-xs text-text-muted" role="status" aria-live="polite">
                 <span>{t("chat.runningCommand")}</span>
-                <span className="phase-dots" aria-hidden="true"><span /><span /><span /></span>
               </div>
             )}
 
@@ -1607,6 +1629,47 @@ function getExtensionDialogSummary(request: ExtensionDialogRequest): string | un
   return undefined;
 }
 
+/**
+ * Render the scrollable portion of a dialog title: ```sh / ```bash code fences are
+ * rendered as highlighted code blocks (red border + red tint to flag risky commands),
+ * and all other text keeps pre-wrap multi-line rendering.
+ */
+function renderDialogTitle(title: string): ReactNode {
+  const segments = splitDialogTitleCode(title);
+  if (segments.length === 1 && !segments[0].isCode) return title;
+  return segments.map((seg, i) => {
+    if (seg.isCode) {
+      return (
+        <pre
+          key={i}
+          style={{
+            margin: "6px 0",
+            padding: "8px 10px",
+            borderRadius: "var(--radius-sm)",
+            background: "color-mix(in srgb, var(--danger) 10%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)",
+            borderLeft: "3px solid var(--danger)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 12.5,
+            lineHeight: 1.5,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-all",
+            overflowX: "auto",
+            color: "var(--text)",
+          }}
+        >
+          {seg.text}
+        </pre>
+      );
+    }
+    return (
+      <span key={i} style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+        {seg.text}
+      </span>
+    );
+  });
+}
+
 function ExtensionDialog({
   request,
   onRespond,
@@ -1620,6 +1683,7 @@ function ExtensionDialog({
   const [now, setNow] = useState(() => Date.now());
   const focusFirstOption = useCallback((element: HTMLDivElement | null) => element?.focus(), []);
   const summary = getExtensionDialogSummary(request);
+  const { head: titleHead, rest: titleRest } = splitDialogTitle(request.title);
   const remainingSeconds = request.expiresAt === undefined
     ? null
     : Math.max(0, Math.ceil((request.expiresAt - now) / 1000));
@@ -1658,7 +1722,7 @@ function ExtensionDialog({
         inset: 0,
         zIndex: 90,
         display: "flex",
-        alignItems: collapsed ? "flex-start" : "center",
+        alignItems: collapsed ? "flex-start" : "flex-end",
         justifyContent: "center",
         padding: 20,
         pointerEvents: "none",
@@ -1690,7 +1754,7 @@ function ExtensionDialog({
             {t("chat.extensionPending")}
           </span>
           <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-            {request.title}
+            {titleHead}
           </span>
           {summary && (
             <span style={{ fontSize: 12, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%", flexShrink: 1 }}>
@@ -1723,7 +1787,7 @@ function ExtensionDialog({
       >
         <div style={{ flexShrink: 0, display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 650 }}>{request.title}</div>
+            <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 650, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{titleHead}</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 3, color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
               <span>{t("chat.extensionRequest")}</span>
               {countdown}
@@ -1760,6 +1824,11 @@ function ExtensionDialog({
             flex: "1 1 auto", minHeight: 0, overflowY: "auto",
           }}
         >
+          {titleRest && (
+            <div style={{ marginBottom: 12, color: "var(--text-muted)", fontSize: 13, lineHeight: 1.55 }}>
+              {renderDialogTitle(titleRest)}
+            </div>
+          )}
           {request.method === "confirm" && (
             <MarkdownBody>{request.message}</MarkdownBody>
           )}
@@ -1938,7 +2007,7 @@ function ExtensionCustomPanel({
         inset: 0,
         zIndex: 95,
         display: "flex",
-        alignItems: collapsed ? "flex-start" : "center",
+        alignItems: collapsed ? "flex-start" : "flex-end",
         justifyContent: "center",
         padding: 20,
         pointerEvents: "none",

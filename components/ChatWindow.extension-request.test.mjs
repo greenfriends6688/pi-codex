@@ -40,3 +40,21 @@ test("resets collapse state when a new extension request arrives", () => {
   assert.match(source, /<ExtensionCustomPanel key=\{extensionCustomUi.id\}/);
   assert.match(customSource, /if \(!collapsed\) inputRef.current\?\.focus\(\);\s*}, \[collapsed\]\)/);
 });
+
+test("docks extension overlays to the bottom so the chat stays scrollable", () => {
+  assert.match(dialogSource, /alignItems: collapsed \? "flex-start" : "flex-end"/);
+  assert.match(customSource, /alignItems: collapsed \? "flex-start" : "flex-end"/);
+  assert.doesNotMatch(dialogSource, /alignItems: collapsed \? "flex-start" : "center"/);
+  assert.doesNotMatch(customSource, /alignItems: collapsed \? "flex-start" : "center"/);
+});
+
+test("debounces the completion sound across chained dialogs", () => {
+  assert.match(source, /EXTENSION_DIALOG_SOUND_MIN_GAP_MS = \d+/);
+  assert.match(source, /now - extensionDialogLastSoundAtRef\.current < EXTENSION_DIALOG_SOUND_MIN_GAP_MS/);
+});
+
+// The upstream "splits folded context out of the dialog title into the body"
+// test is intentionally not carried over: PR #724 landed the same feature with
+// code-fence highlighting via lib/dialog-title.ts (splitDialogTitle /
+// renderDialogTitle), and that implementation supersedes #761's plain
+// paragraph split. #724's own tests cover it.

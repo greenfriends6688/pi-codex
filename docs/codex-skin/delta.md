@@ -212,6 +212,88 @@ html[data-theme="pine"],
 | #838 | 工作区 Markdown 编辑器 + 可切换主/副区布局 + Composer 选区上下文 | `1f4d45a` | v0.9.1 |
 | #470 | Plugins 面板中的 MCP 服务器管理（新增 `/api/mcp` + MCP 服务器区块） | `d3ee79e` | v0.8.8-beta.1（`d9b534e`） |
 
+#### 2026-09-15 收编批次 A+B（27 个，分支 `pick/ab-2026-09-15`）
+
+上游 439 个 PR 里，**已合并的全部已在 v0.9.1 基线内**（v0.9.1 tag 之后上游 merge 数为 0），
+所以候选就是当时 **61 个 open PR**。收件箱（patch + 元数据 + 索引）在
+`~/Desktop/pi-web-pr-inbox/`，整目录可删。
+
+关键实测：大多数 open PR 的 base 就是 `8366762fa` = **"Release v0.9.1" 本身**；
+`git apply --check` 直接过 23/61，`git apply -3 --check` 过 57/61。
+但 **`--check` 不等于真实应用**——`-3` 的通过率是逐个对当前工作树测的，
+应用完一个树就变了。**每应用一个都要重新 `-3 --check`，不要批量预检后一口气打。**
+
+**A 组（14 个，零皮肤冲突）**
+
+| PR | 内容 | 提交 |
+|---|---|---|
+| #835 | 流式首个 chunk 被重复渲染 | `c955034` |
+| #809 | 关机时关闭 SSE 流（僵尸 node / 502） | `aa7ff0d` |
+| #810 | tail 窗口只按可见消息计数 | `4ea5888` |
+| #796 | 读取其他 pi 进程写入的会话 | `29c31a9` |
+| #811 | manual-code 握手 token 改 randomUUID | `2300b57` |
+| #818 | session cookie 改 SameSite=Lax | `b909aa0` |
+| #827 | plugins `relativePath` 分隔符归一 | `313c5c6` |
+| #833 | 扩展注册的 provider 进设置/鉴权路由 | `89940d1` |
+| #847 | 前台子代理完成文本带 session ID | `09bcf08` |
+| #823 | RISC-V 关闭 Wasm 懒编译 | `1d7b436` |
+| #732 | worktree 先 fetch origin、放宽 git 超时 | `74a9b11` |
+| #805 | 离线用缓存的 app shell | `44b1c13` |
+| #837 | 插件更新检查绕开 `npm.cmd`（取代 #817） | `66c2bd3` |
+| #846 | 提高 Next 代理 body 缓冲（>10MB 上传 500） | `4873b02` |
+
+**B 组（13 个，皮肤面 1–2 文件）**
+
+| PR | 内容 | 提交 | 皮肤重打 |
+|---|---|---|---|
+| #785 | 顶栏显示会话消息数 | `96fa785` | 冲突：保留 fork 的「统计行常显 + 零值降透明度」，新增消息数 span 跟随同一约定；`#ef4444`→`var(--danger)`、`rgba(234,179,8,.95)`→`var(--warning)`（顺带修掉 `contextColor` 里漏 token 的琥珀色） |
+| #853 | 变更文件行「提及」按钮 + 路径中省略 | `314a6a9` `78d4166` | `borderRadius: 4` → `var(--radius-xs)`，与同组件文件树上的提及 chip 对齐 |
+| #771 | 列表位移后删除按钮不出现 | `ae9b5ec` | base 早于 v0.9.1、结构漂移大，**放弃三方合并、手工嫁接增量**（详见下）。**2026-09-15 已回滚**：指针几何探测拖慢 hover，见「细节精修」§8 |
+| #828 | `/auto-compact` 斜杠命令 | `cb4b592` | 无 |
+| #839 | 扩展 widget 更新时保持顺序 | `0370aca` | 新增 `lib/extension-widgets.ts` |
+| #724 | 扩展弹窗标题支持代码围栏 | `effbbc0` `4936e23` | `borderRadius: 6`→`var(--radius-sm)`；`rgba(239,68,68,.10/.35)`→ danger 的 color-mix；`3px solid #ef4444`→`var(--danger)` |
+| #761 | 扩展对话框底部停靠 | `1fbc91c` | 上游把 `CHAT_COLUMN_PADDING` 12→16，**保留 fork 的 12**；标题拆分实现被 #724 取代，只取其增量 |
+| #735 | composer 预览待发送图片 | `b180805` | `borderRadius: 6` → `var(--radius-sm)` |
+| #743 | 流式更新时保持工具块展开 | `ba2e0d0` | 保留 fork 的 `toolResults` 传递与 `ToolCallIcon`；去掉 `prevAssistantEntryId`（fork 的 `Props` 没有这个字段） |
+| #826 | 工具卡折叠时也显示结果图片 | `d95f7db` | 4 处 rgba/hex → `--danger`/`--success` 的 color-mix；`borderRadius: 6`→`var(--radius-sm)` |
+| #744 | `apply_patch` 渲染成 split diff | `4b634e7` | `rgba(34,197,94,.15)` → `var(--success)` 的 color-mix；去掉 #826 已删除的 `images` prop 传参 |
+| #799 | 模型 provider 图标 | `942d9a7` `46c1e6c` | 只保留图标部分；**Windows 启动器（cmd/ps1/launcher.js/proxy-bootstrap）已剔除**——本 fork 纯 Web、无桌面端 |
+| #834 | 第三方子代理会话嵌到父级下 | **搁置** | 见下 |
+
+**本轮搁置 / 排除**
+
+- **#834 搁置（重要）**：它把 `family.subagents` 聚合模型改成 `family.children` 嵌套行模型
+  （`sessionRows` / `collapsedSessionFamilyIds` / depth 渲染），横跨 `lib/session-family.ts`、
+  `lib/session-list-scanner.ts`、`lib/session-reader.ts` + `SessionSidebar.tsx`。
+  这与本 fork **刻意的**「子代理行聚合进父行」设计直接相冲
+  （见 `SessionSidebar.test.mjs` 的 *hides subagent rows and aggregates their state into the main session row*）。
+  收它等于推翻该设计并重写虚拟列表行模型，需单独立项决策。
+- **#817 / #831**：分别是 #837 / #832 的前身，取更完整的那个。
+- **#801**：被已摘取的 #838 覆盖（文件集是 #838 的子集）。
+- **#819 / #820 / #821 / #852**：纯 `AGENTS.md` 文档；#852 还想把 Next 自动生成的
+  agent rules 块提交进仓库，与本 fork 的 AGENTS 处理方式冲突。
+- **#812 / #816 / #832**：D 组，本轮不做。其中 #816 把 pi 依赖改成 `file:../pi/packages/*`
+  本地 monorepo + `next.config.ts` 的 `localPiAliases` + 重写 lock，**在本 fork 不可用**。
+- **C 组 22 个**（#713 / #725 / #726 / #727 / #733 / #736 / #777 / #790 / #800 / #807 /
+  #813 / #814 / #815 / #824 / #825 / #830 / #836 / #841 / #843 / #845 / #849 / #854）：
+  皮肤面 3–8 文件，等 A+B 验证通过后再做。注意 **#725 与 #843 互斥**
+  （都重写 `MessageView.tsx` 的 `SplitPatchView` 区段）。
+
+**#771 的移植方式（下次遇到结构漂移照做）**
+
+PR 的 base（`0e712013d`）早于 v0.9.1，`SessionSidebar.tsx` 的结构与 fork 差得远，
+三方合并吐出 4 处冲突（其中一处 ours 为空、theirs 64 行，混着上游早已被 fork 移除的
+File Explorer 区段）。正确做法不是硬解，而是**放弃 patch、按 PR 的 diff 手工嫁接功能增量**：
+
+1. 先 `git checkout --` 还原冲突文件；
+2. 只读 PR 的 `.diff`，把「功能增量」逐条列出来（refs / state / callbacks / props / 渲染分支）；
+3. 用 Edit 逐条打进 fork 的现有结构；
+4. 同步改测试断言。
+
+**#833 的冲突（A 组唯一的冲突）**：`app/api/auth/login/[provider]/route.ts` 的 import 区，
+#811 刚加了 `randomUUID`、#833 要删掉已不再使用的 `ModelRuntime` import。
+取「保留 `randomUUID`、删掉 `ModelRuntime`」。
+
 **摘取方法（重要）**：本 fork 的 `upstream` 分支是**源码包快照**，与真实上游 git 历史
 **没有共同祖先**，PR 分支却带着完整上游历史（数百提交）。所以**不能 merge PR 分支**，
 只能把 PR 相对其基点的 diff 用 `git apply -3 --binary` 打进来：
@@ -292,6 +374,14 @@ git apply -3 --binary --whitespace=nowarn /tmp/pr838.patch
 | `SettingsPanel.test.mjs` | `.settings-chat-option` 字号为 `var(--text-sm)`；`.web-login-composer` 圆角为 `var(--radius-lg)`；当前选中 tab 的焦点规则**不再**含 `outline: none`，并断言覆盖层提供 `outline: 2px solid var(--accent) !important` |
 | `SettingsUi.test.mjs` | `.config-sidebar-text` → `var(--text-sm)`、`.config-sidebar-group-label` → `var(--text-2xs)`、`.config-field-label` → `var(--text-xs)`、`.config-empty-state` → `var(--text-sm)` |
 
+A+B 收编批次新增/改写的断言：
+
+| 文件 | 断言 |
+|---|---|
+| `AppShell.session-stats.test.mjs`（#785 新增） | 消息数 span 断言 `color: messageCountColor, opacity: totalMessages ? 1 : 0.45`（fork 的「常显」约定，不是上游的 `{totalMessages > 0 && ...}` 门控）；阈值色断言 `var(--danger)` / `var(--warning)` |
+| `SessionSidebar.test.mjs`（#771 改写） | `{showHover && !session.transient ? (`（原 `hovered`）；新增「stationary pointer 重新探测」用例；**顺带修掉一条既有失败断言**——fork 把项目行改成 `if (project.key === selectedProject?.key) {`，上游的 `isSelectedProject && (` 已匹配不上 |
+| `ChatWindow.extension-request.test.mjs`（#761 增删） | 新增底部停靠 + 音效去抖两条；**删掉**上游的「标题拆段」用例——该实现被 #724 取代 |
+
 ## 合并后自检清单
 
 ```bash
@@ -339,7 +429,8 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
 - **层级**：`--z-base|raised|sticky|panel|drawer|popover|modal|toast`。
   组件内联的 z-index（1→1100 共 22 个散值）CSS 无法覆盖，这套刻度只服务于
   新写的规则与覆盖层里能用类名命中的层。
-- **玻璃**：`--glass-blur|saturation|opacity|popover-opacity|tooltip-opacity`。
+- **玻璃**：~~`--glass-blur|saturation|opacity|popover-opacity|tooltip-opacity`~~
+  **已于 2026-09-15 回滚**（见 §8）。
 
 ### 3. 覆盖层（`globals.css` 末尾）
 
@@ -348,17 +439,14 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
 
 | 收敛项 | 命中方式 |
 |---|---|
-| 浮层圆角/阴影/玻璃 | `.anim-popover` / `.anim-popover-down` / `.anim-dialog` |
-| 输入框玻璃与焦点环 | `.chat-content div[style*="--radius-composer"]`（该内联变量全仓唯一） |
+| 浮层圆角/阴影 | `.anim-popover` / `.anim-popover-down` / `.anim-dialog`（类名是 inert hook，入场动画见 §8） |
+| 输入框圆角/焦点环 | `.chat-content div[style*="--radius-composer"]`（该内联变量全仓唯一） |
 | 焦点环 | `:where(button, a[href], …):focus-visible`，压掉 21 处内联 `outline: "none"` |
-| 动效时长 | `@media (prefers-reduced-motion: no-preference)` 下的控件 `transition` 简写，回收 ~70 处内联 `0.1–0.3s` |
 | 会话节奏 | `.chat-content [data-entry-id] > div` 用回 `--conversation-item-gap`（此前 token 定义了却没人用，消息写死 20px、过程详情 14px） |
 | 工作区边界按钮 | 去掉与 header 重复的 1px 分隔线，补 hover / focus 同款 chip |
 
-**玻璃只在内容真的从下面经过的地方**：下拉、菜单、扩展弹窗、输入框。
-全屏模态（`config-panel-root.is-modal` / `settings-dialog-surface`）坐在 `--scrim` 上，
-模糊买不到效果，保持不透明——这一条与最初计划不同，按实际判断排除。
-`@supports not (backdrop-filter)` 与 `prefers-reduced-transparency: reduce` 都有回落。
+~~**玻璃只在内容真的从下面经过的地方**：下拉、菜单、扩展弹窗、输入框。~~
+**玻璃层已于 2026-09-15 整体回滚**（见 §8），浮层恢复组件内联的不透明背景。
 
 ### 4. 终端：从硬编码色改为 token 岛
 
@@ -385,7 +473,7 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
 
 ### 6. 脚本与截图
 
-- `audit-tokens.mjs` 新增「皮肤刻度 token 齐全」检查（32 个），并保持 34 token × 5 套调色板校验。
+- `audit-tokens.mjs` 新增「皮肤刻度 token 齐全」检查（现为 29 个，含 §8 删掉 `--glass-*` 后的数量），并保持 34 token × 5 套调色板校验。
 - `verify-themes.mjs` 期望值改为暖色 oklch，且**按数值比较**，不再依赖压缩后的字面串。
 - 新增 `capture-themes.mjs`：跑 `npm run prod` 后重拍 5 套主题 + 设置页截图。
 
@@ -395,3 +483,70 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
   覆盖层只能收敛它们共有的属性，改不了它们各自写死的数值。
 - 触摸端 hover 残留：`onMouseEnter/Leave` 直接写内联样式，CSS 无法撤销。
 - 内联 z-index 的 22 个散值、`ModelSelector` 等浮层各自的阴影字面量。
+
+### 8. 回滚：动效 / 玻璃 / 会话行指针探测（2026-09-15）
+
+用户反馈「这些交互细节影响整体性能」，实测后回滚三块。**回滚面不涉及上游代码**，
+合上游时无需重打，但不要在后续 PR 摘取中把它们再引回来。
+
+1. **动效层（来自 `8112c7c`）**：删掉 `popover-in/popover-in-down/dialog-in/backdrop-in/
+   message-in/skeleton-shimmer/phase-dot/blink` 八组 keyframes，以及 `.anim-message-in`、
+   `.anim-backdrop`、`.streaming-caret`、`.phase-dots` 规则和全局 `button/a` 的按压过渡
+   （`:active scale(0.97)`）。`.anim-popover|.anim-popover-down|.anim-dialog` 类名保留，
+   但只剩覆盖层的圆角/阴影，**入场动画已不存在**——它们是 inert hook。
+   ChatMinimap 预览的 `minimap-preview-in` 一并删掉。
+   保留：`:focus-visible` 描边、键盘可达性（`role`/`tabIndex`/`onKeyDown`）、
+   `prefers-reduced-motion` 兜底、`chat.dropImagesOnly` 提示。
+   `.skeleton-line` 保留但改为静态底色（原来是无限 `background-position` 微光）。
+2. **玻璃层 + 全局过渡覆盖（来自 `11289af`）**：删掉 `--glass-*` token（含 dark/pine
+   里的覆盖值）、`.anim-popover|.anim-dialog` 与 composer 的 `backdrop-filter` 与半透明
+   `background-color`，以及 `@media (prefers-reduced-motion: no-preference)` 里那条
+   带 `!important` 的全局控件 `transition`（它带了 `width/height`，会反复触发布局）。
+   覆盖层保留浮层圆角/阴影、composer 圆角/焦点环、chat rhythm、边界按钮等纯视觉规则。
+   `audit-tokens.mjs` 的皮肤刻度清单同步删掉三个 `--glass-*`（29 个）。
+3. **#771 的指针几何探测（来自 `ae9b5ec`）**：删掉 `listPointerRef` / `pointerSessionId` /
+   `syncPointerSession` / `handleListPointerMove|Leave` / 列表容器上的 4 个 pointer/mouse
+   处理器 / `useLayoutEffect` 重探 / `pointerActive` prop，`SessionItem` 回到
+   `const showHover = hovered`（逐行 `onMouseEnter/Leave`）。
+   代价：删掉一条会话后，滑到光标下的下一行不再自动出现重命名/删除按钮（上游行为）。
+   `SessionSidebar.test.mjs` 里那条「stationary pointer 重新探测」用例同步删除。
+
+复测数据（同一台 M1 / 生产构建）：空闲 3s 任务时间 0.012s、0 个运行中动画；
+滚动长会话 60fps；鼠标扫过 13 行侧栏 150 次移动的任务时间 **0.41s → 0.23s**
+（其中脚本时间 0.12s → 0.05s），样式重算 250 → 221 次，布局 45 → 39 次。
+幅度不算大，因为剩下的开销是逐行 `onMouseEnter` 的 React 重渲染——那是上游行为。
+
+> 另一处与本次无关但被用户点名的现象：`处理详情` 组在回答落地时
+> 从「进行中展开」变为「完成后折叠」是**上游 `isLiveTail` + `defaultExpanded={!finalAnswerMessage}`
+> 的设计**（v0.9.0 原始包即如此），不是这两批改动引入的。这次只是去掉了放大它的
+> `anim-message-in`，闪动感随之减轻；要不要改行为（比如完成后不自动折叠）需另立决策。
+
+### 9. e2e 套件：本机可运行化 + 与 fork 行为对齐（2026-09-15）
+
+背景：这批 pick 的「测试环节」一直没跑完，**根因不是慢，是跑不起来**——
+Playwright 自带的 chromium 在这台机器上不存在（`chromium_headless_shell-1243` 缺失），
+而 macOS 12 又没有 Playwright 1.63 的 chromium 构建，只能用系统 Chrome。
+`e2e/run.mjs` 里是裸 `chromium.launch()`，一启动就死。本机跑法：
+
+```bash
+E2E_SERVER_MODE=start E2E_CHROME_CHANNEL=chrome node e2e/run.mjs   # 需先有生产构建
+```
+
+**改动一：launch 加环境变量门控**（`e2e/run.mjs`）。CI 不设该变量，行为不变。
+
+**改动二：5 处断言与 fork 行为对齐**（上游 e2e 写的是上游数值/行为）：
+
+| 位置 | 上游期望 | fork 实际 | 处理 |
+|---|---|---|---|
+| compacted 会话窗口 | `entryIds[0]=="compact"`、无 user 消息 | `#810` 让窗口只数可见消息，51 条 fixture 整段进窗口 → 首条是 `user` | 改断言：分页含 compaction 分隔条 + 无更早历史（行为本身符合 `buildSessionContext` 的「history pages retain compacted messages」） |
+| 完成态消息的模型名 | 显示 `test/E2E Model` | fork 只在 `isStreaming` 时显示（Codex 安静表面） | 改断言为 0 处 |
+| 聊天宽度/字号默认值 | 820 / 14 / 下限 820 | **860 / 13 / 下限 640**（`useChatAppearance.ts`） | 改断言为 fork 值 |
+| 代码围栏字号 | `16.5px` | CodeBlock 用 `calc(12.5px + offset)` → font=18 时为 **17.5px** | 改断言为 17.5px 并注明公式来源 |
+| 侧栏会话行 tooltip | 裸名字 `[title="X"]` | fork 是 `"<名字> · <相对时间>"` | 改前缀匹配 `[title^="X · "]`，时间文案与语言无关 |
+| 关面板后再读滑块 | 先 `closeSettings()` 再读滑块值 | fork 里 **Escape 会关掉设置面板**，滑块随即从 DOM 消失 | 把该断言移到关闭之前（两处断言意图都保留） |
+| Settings 点击时机 | 一次点击即可 | fork 的入口在侧栏底部，水合更晚；`domcontentloaded` 后立即点会丢事件 | 加 `openSettingsPanel()` 重试直到面板出现 |
+
+实测（Post-rollback 生产构建）：`E2E_SERVER_MODE=start` 下 **8/8 PASS**，
+含 1280px 与 390px 两轮（分页/分支/markdown/代码/工具卡/compaction 导航、扩展弹窗键盘与超时、
+聊天外观持久化）。单测 1126/1130（4 条既有环境性失败），`tsc --noEmit` 干净，
+`audit-tokens` 29 刻度 + 34×5 调色板，`verify-themes` 5/5。

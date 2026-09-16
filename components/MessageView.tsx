@@ -9,8 +9,9 @@ import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, getThinkingPreview, isEmptyThinkingBlock } from "@/lib/message-display";
-import { parseUnifiedPatch, type SplitDiffCell } from "@/lib/patch";
-import { isEditToolName } from "@/lib/tool-names";
+import { parseUnifiedPatch, type SplitDiffCell, type SplitDiffFile } from "@/lib/patch";
+import { applyPatchPreviewToFiles, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
+import { isApplyPatchToolName, isEditToolName } from "@/lib/tool-names";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
 import { TurnWrittenFiles } from "./TurnWrittenFiles";
 import type { WrittenFile } from "@/lib/turn-written-files";
@@ -203,6 +204,9 @@ interface Props {
    * final answer text-only.
    */
   writtenFiles?: WrittenFile[];
+  /** Lifted expanded state for tool calls — when provided, ToolCallBlock becomes controlled. */
+  expandedToolIds?: Set<string>;
+  onToggleTool?: (toolCallId: string) => void;
 }
 
 export function getModelDisplayName(
@@ -270,12 +274,12 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, searchBlock, onFork, forking, onNavigate, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, searchBlock, onFork, forking, onNavigate, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, expandedToolIds, onToggleTool }: Props) {
   if (message.role === "user") {
     return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} onEditContent={onEditContent} />;
   }
   if (message.role === "assistant") {
-    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} />;
+    return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} expandedToolIds={expandedToolIds} onToggleTool={onToggleTool} />;
   }
   if (message.role === "toolResult") {
     // Rendered inline under its toolCall — skip standalone rendering if paired
@@ -308,7 +312,9 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.showTimestamp === next.showTimestamp
     && prev.prevTimestamp === next.prevTimestamp
     && prev.writtenFiles === next.writtenFiles
-    && prev.sessionId === next.sessionId;
+    && prev.sessionId === next.sessionId
+    && prev.expandedToolIds === next.expandedToolIds
+    && prev.onToggleTool === next.onToggleTool;
 });
 
 function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, onEditContent }: {
@@ -389,7 +395,6 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
-      className="anim-message-in"
       style={{ marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "flex-start" }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 6, width: "100%", maxWidth: "100%" }}>
@@ -601,6 +606,8 @@ function AssistantMessageView({
   entryId,
   searchBlock,
   writtenFiles,
+  expandedToolIds,
+  onToggleTool,
 }: {
   message: AssistantMessage;
   isStreaming?: boolean;
@@ -615,6 +622,8 @@ function AssistantMessageView({
   entryId?: string;
   searchBlock?: AssistantContentBlock;
   writtenFiles?: WrittenFile[];
+  expandedToolIds?: Set<string>;
+  onToggleTool?: (toolCallId: string) => void;
 }) {
   const { t } = useI18n();
   const time = showTimestamp ? formatTime(message.timestamp) : null;
@@ -745,7 +754,6 @@ function AssistantMessageView({
     <div
       data-message-role="assistant"
       data-entry-id={entryId}
-      className="anim-message-in"
       style={{ marginBottom: 20 }}
     >
       {/* Codex keeps the response surface quiet; model metadata is only useful
@@ -795,13 +803,8 @@ function AssistantMessageView({
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {blockItems.map(({ block, originalIndex }) => (
-          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} />
+          <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} expandedToolIds={expandedToolIds} onToggleTool={onToggleTool} />
         ))}
-        {isStreaming && (
-          <span aria-hidden="true" style={{ display: "flex", alignItems: "center", minHeight: 18 }}>
-            <span className="streaming-caret" />
-          </span>
-        )}
       </div>
 
       {providerError && (
@@ -879,7 +882,7 @@ function AssistantMessageView({
   );
 }
 
-function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onOpenSession, sessionId, entryId, blockIndex }: { block: AssistantContentBlock; searchTarget?: boolean; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; onOpenSession?: (sessionId: string) => void; sessionId?: string; entryId?: string; blockIndex: number }) {
+function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDuration, toolCallDurations, cwd, onOpenFile, onOpenSession, sessionId, entryId, blockIndex, expandedToolIds, onToggleTool }: { block: AssistantContentBlock; searchTarget?: boolean; toolResults?: Map<string, ToolResultMessage>; isStreaming?: boolean; streamingDuration?: number; toolCallDurations?: Map<string, number>; cwd?: string; onOpenFile?: (filePath: string) => void; onOpenSession?: (sessionId: string) => void; sessionId?: string; entryId?: string; blockIndex: number; expandedToolIds?: Set<string>; onToggleTool?: (toolCallId: string) => void }) {
   if (block.type === "text") {
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} /></div>;
   }
@@ -890,7 +893,11 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     const tc = block as ToolCallContent;
     const result = toolResults?.get(tc.toolCallId);
     const duration = toolCallDurations?.get(tc.toolCallId);
-    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenSession={onOpenSession} />;
+    const fallbackKey = `${entryId ?? "stream"}-${blockIndex}`;
+    const toggleId = tc.toolCallId || fallbackKey;
+    const isExpanded = expandedToolIds ? expandedToolIds.has(toggleId) : undefined;
+    const handleToggle = onToggleTool ? () => onToggleTool(toggleId) : undefined;
+    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenSession={onOpenSession} expanded={isExpanded} onToggle={handleToggle} />;
   }
   return null;
 }
@@ -1071,13 +1078,20 @@ function ToolCallIcon({ toolName }: { toolName: string }) {
   );
 }
 
-function ToolCallBlock({ block, result, duration, onOpenSession }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSession?: (sessionId: string) => void }) {
+function ToolCallBlock({ block, result, duration, onOpenSession, expanded: controlledExpanded, onToggle }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSession?: (sessionId: string) => void; expanded?: boolean; onToggle?: () => void }) {
   const { t } = useI18n();
-  const [expanded, setExpanded] = useState(false);
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const isControlled = controlledExpanded !== undefined && onToggle !== undefined;
+  const expanded = isControlled ? controlledExpanded : localExpanded;
+  const handleToggle = isControlled ? onToggle! : () => setLocalExpanded((v) => !v);
   const inputStr = getToolCallInputText(block);
   const isStreamingInput = block.rawInput !== undefined;
   const isEditTool = isEditToolName(block.toolName);
   const resultDiff = result && !result.isError ? getResultDiff(result) : null;
+  const patchFiles = getApplyPatchFiles(block, result);
+  const patchLabel = isApplyPatchToolName(block.toolName)
+    ? summarizeApplyPatchInput(block)
+    : null;
 
   // Result display
   const resultText = result
@@ -1105,7 +1119,7 @@ function ToolCallBlock({ block, result, duration, onOpenSession }: { block: Tool
       {/* ── Tool call header ── */}
       <div style={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
         <button
-          onClick={() => setExpanded((v) => !v)}
+          onClick={handleToggle}
           style={{
             display: "flex",
             alignItems: "center",
@@ -1135,7 +1149,7 @@ function ToolCallBlock({ block, result, duration, onOpenSession }: { block: Tool
             {block.toolName}
           </span>
           <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
-            {isStreamingInput ? t("chat.generatingToolInput") : getToolPreview(block)}
+            {isStreamingInput ? t("chat.generatingToolInput") : (patchLabel ?? getToolPreview(block))}
           </span>
           {duration !== undefined && (
             <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
@@ -1157,8 +1171,8 @@ function ToolCallBlock({ block, result, duration, onOpenSession }: { block: Tool
         )}
       </div>
 
-      {/* ── Expanded: input args ── */}
-      {expanded && (isStreamingInput || !isEditTool) && (
+      {/* ── Expanded: input args (only when no richer view exists) ── */}
+      {expanded && !isEditTool && !patchFiles && (
         <pre
           style={{
             margin: 0,
@@ -1177,16 +1191,31 @@ function ToolCallBlock({ block, result, duration, onOpenSession }: { block: Tool
         </pre>
       )}
 
+      {/* ── Result images — always visible, independent of the collapsed details ── */}
+      {resultImages.length > 0 && <ResultImages images={resultImages} isError={isError} />}
+      {/* ── Expanded: applied-patch split diff ── */}
+      {expanded && patchFiles && (
+        <div style={{ borderTop: "1px solid color-mix(in srgb, var(--success) 15%, transparent)", background: "var(--bg)" }}>
+          <SplitFilesView files={patchFiles} />
+        </div>
+      )}
+
       {/* ── Paired result — only shown when expanded ── */}
-      {expanded && result && (
+      {expanded && result && patchFiles && isError && (
+        <PairedResult
+          text={resultText ?? ""}
+          isEmpty={resultIsEmpty}
+          isError={isError}
+        />
+      )}
+      {expanded && result && !patchFiles && (
         resultDiff ? (
           <PairedDiffResult
             diff={resultDiff}
           />
-        ) : (
+        ) : (!resultIsEmpty || resultImages.length === 0) && (
           <PairedResult
             text={resultText ?? ""}
-            images={resultImages}
             isEmpty={resultIsEmpty}
             isError={isError}
           />
@@ -1216,9 +1245,13 @@ function PairedDiffResult({ diff }: {
 }
 
 function SplitPatchView({ text }: { text: string }) {
-  const { t } = useI18n();
   const files = useMemo(() => parseUnifiedPatch(text), [text]);
   if (!files) return <PatchTextView text={text} />;
+  return <SplitFilesView files={files} />;
+}
+
+function SplitFilesView({ files }: { files: SplitDiffFile[] }) {
+  const { t } = useI18n();
   const showFileHeaders = files.length > 1;
 
   return (
@@ -1415,6 +1448,37 @@ function PatchTextView({ text }: { text: string }) {
   );
 }
 
+/**
+ * Split diff rows for an apply_patch-style tool call.
+ *
+ * Prefers parsing the V4A patch document from the call input. The extension's
+ * applied result preview contains the complete old/new file with unchanged
+ * lines, so it is only used as a fallback when the call input is unavailable.
+ * A single call may contain several file operations — each becomes its own
+ * file section.
+ */
+function getApplyPatchFiles(block: ToolCallContent, result?: ToolResultMessage): SplitDiffFile[] | null {
+  if (!isApplyPatchToolName(block.toolName)) return null;
+
+  const fromInput = parseApplyPatchInput(getApplyPatchInputText(block.input, block.rawInput));
+  if (fromInput) return fromInput;
+
+  const details = result && !result.isError ? (result as ToolResultMessage & { details?: unknown }).details : undefined;
+  if (isRecord(details)) {
+    const fromPreview = applyPatchPreviewToFiles(details.preview);
+    if (fromPreview) return fromPreview;
+  }
+
+  return null;
+}
+
+/** Header label listing the files targeted by an apply_patch call. */
+function summarizeApplyPatchInput(block: ToolCallContent): string | null {
+  const paths = extractApplyPatchPaths(getApplyPatchInputText(block.input, block.rawInput));
+  if (paths.length === 0) return null;
+  return paths.join(", ").slice(0, 120);
+}
+
 function getResultDiff(result: ToolResultMessage): ResultDiff | null {
   const details = (result as ToolResultMessage & { details?: unknown }).details;
   if (!isRecord(details)) return null;
@@ -1432,71 +1496,79 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function PairedResult({ text, images, isEmpty, isError }: {
+function ResultImages({ images, isError }: { images: ImageContent[]; isError: boolean }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        flexWrap: "wrap",
+        padding: "10px",
+        background: "var(--bg)",
+        borderTop: `1px solid ${isError ? "color-mix(in srgb, var(--danger) 30%, transparent)" : "color-mix(in srgb, var(--success) 15%, transparent)"}`,
+      }}
+    >
+      {images.map((image, index) => {
+        const src = imageSource(image);
+        if (!src) return null;
+        return (
+          <ImagePreview
+            key={`${src}-${index}`}
+            src={src}
+            style={{ maxWidth: "100%" }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={src}
+              alt=""
+              loading="lazy"
+              style={{
+                display: "block",
+                maxWidth: "min(100%, 720px)",
+                maxHeight: 520,
+                borderRadius: "var(--radius-sm)",
+                objectFit: "contain",
+                border: "1px solid var(--border)",
+              }}
+            />
+          </ImagePreview>
+        );
+      })}
+    </div>
+  );
+}
+
+function PairedResult({ text, isEmpty, isError }: {
   text: string;
-  images: ImageContent[];
   isEmpty: boolean;
   isError: boolean;
 }) {
   const { t } = useI18n();
-  const showText = !isEmpty || images.length === 0;
   return (
     <div
       style={{
-        borderTop: `1px solid ${isError ? "rgba(248,113,113,0.3)" : "rgba(34,197,94,0.15)"}`,
-        background: isError ? "rgba(248,113,113,0.04)" : "var(--bg-subtle)",
+        borderTop: `1px solid ${isError ? "color-mix(in srgb, var(--danger) 30%, transparent)" : "color-mix(in srgb, var(--success) 15%, transparent)"}`,
+        background: isError ? "color-mix(in srgb, var(--danger) 6%, transparent)" : "var(--bg-subtle)",
       }}
     >
-      {images.length > 0 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "10px", background: "var(--bg)" }}>
-          {images.map((image, index) => {
-            const src = imageSource(image);
-            if (!src) return null;
-            return (
-              <ImagePreview
-                key={`${src}-${index}`}
-                src={src}
-                style={{ maxWidth: "100%" }}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={src}
-                  alt=""
-                  loading="lazy"
-                  style={{
-                    display: "block",
-                    maxWidth: "min(100%, 720px)",
-                    maxHeight: 520,
-                    borderRadius: "var(--radius-sm)",
-                    objectFit: "contain",
-                    border: "1px solid var(--border)",
-                  }}
-                />
-              </ImagePreview>
-            );
-          })}
-        </div>
-      )}
-      {showText && (
-        <pre
-          style={{
-            margin: 0,
-            padding: "8px 10px",
-            color: isError ? "var(--danger)" : (isEmpty ? "var(--text-dim)" : "var(--text-muted)"),
-            fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
-            lineHeight: 1.5,
-            overflow: "auto",
-            maxHeight: 400,
-            background: "var(--bg)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-            fontStyle: isEmpty ? "italic" : "normal",
-            opacity: isEmpty ? 0.6 : 1,
-          }}
-        >
-           {isEmpty ? t("i18n.noOutput") : text}
-        </pre>
-      )}
+      <pre
+        style={{
+          margin: 0,
+          padding: "8px 10px",
+          color: isError ? "var(--danger)" : (isEmpty ? "var(--text-dim)" : "var(--text-muted)"),
+          fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
+          lineHeight: 1.5,
+          overflow: "auto",
+          maxHeight: 400,
+          background: "var(--bg)",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-all",
+          fontStyle: isEmpty ? "italic" : "normal",
+          opacity: isEmpty ? 0.6 : 1,
+        }}
+      >
+        {isEmpty ? t("i18n.noOutput") : text}
+      </pre>
     </div>
   );
 }

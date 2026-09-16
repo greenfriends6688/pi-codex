@@ -1795,7 +1795,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                 const familySessions = [family.root, ...family.subagents];
                                 const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
                                 return (
-                                  <div key={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0 }}>
+                                  <div key={family.root.id} data-session-id={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
                                     <div style={{ flex: 1, minWidth: 0 }}>
                                       <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
                                     </div>
@@ -1967,6 +1967,7 @@ function SessionItem({
 }) {
   const { locale, t } = useI18n();
   const [hovered, setHovered] = useState(false);
+  const showHover = hovered;
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -2080,7 +2081,7 @@ function SessionItem({
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
           ? "var(--danger-soft)"
-          : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
+          : isSelected ? "var(--bg-selected)" : showHover ? "var(--bg-hover)" : "transparent",
         boxShadow: confirmDelete
           ? "inset 0 0 0 1px color-mix(in srgb, var(--danger) 40%, transparent)"
           : "none",
@@ -2207,8 +2208,10 @@ function SessionItem({
 
           {/* Hover actions appear over the title's trailing edge; nothing is
               reserved when idle so the title uses the full row width. The
-              relative time stays available in the title tooltip above. */}
-          {hovered && !session.transient ? (
+              relative time stays available in the title tooltip above.
+              Also shown when a row slides under a stationary pointer after a
+              delete reflows the list (see syncPointerSession). */}
+          {showHover && !session.transient ? (
             <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
               <button
                 onClick={startRename}

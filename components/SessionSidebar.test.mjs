@@ -121,7 +121,7 @@ test("lifecycle refreshes bypass the cache while cross-window polling reuses it"
 
 test("does not expose disk-backed actions for transient sessions", () => {
   assert.match(sessionItemSource, /if \(session\.transient\) return;/);
-  assert.match(sessionItemSource, /\{hovered && !session\.transient \? \(/);
+  assert.match(sessionItemSource, /\{showHover && !session\.transient \? \(/);
 });
 
 test("hides subagent rows and aggregates their state into the main session row", () => {
@@ -140,7 +140,9 @@ test("keeps configuration out of the sidebar — entry points live in the AppShe
 test("renders projects as primary rows with the selected project's tasks nested below", () => {
   assert.match(source, /\{visibleProjects\.map\(\(project\) => \{/);
   assert.match(source, /<ProjectRow/);
-  assert.match(source, /isSelectedProject && \([\s\S]*?ref=\{sessionListRef\}/);
+  // The fork renders the selected project's tasks through an explicit branch
+  // (the upstream inline `isSelectedProject && (` form was restructured).
+  assert.match(source, /if \(project\.key === selectedProject\?\.key\) \{[\s\S]*?ref=\{sessionListRef\}/);
   assert.match(source, /t\("sidebar\.addProject"\)/);
   assert.doesNotMatch(source, /showMoreProjects/);
   assert.doesNotMatch(source, /showFewerProjects/);

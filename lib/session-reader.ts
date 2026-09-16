@@ -21,6 +21,8 @@ const SESSION_HEADER_MAX_BYTES = 64 * 1024;
 const SESSION_RELATION_MAX_BYTES = 256 * 1024;
 const SESSION_RELATION_MAX_LINES = 2;
 const SESSION_RESULT_MAX_BYTES = 256 * 1024;
+// Bounded probe for the newest entry id; never reads a whole session file.
+const SESSION_TAIL_PROBE_MAX_BYTES = 64 * 1024;
 
 function readBoundedLines(filePath: string, maxBytes: number, maxLines: number): string[] {
   const fd = openSync(filePath, "r");
@@ -92,6 +94,48 @@ function parseSessionEntries(lines: readonly string[]): SessionEntry[] {
       return [];
     }
   });
+}
+
+/**
+ * Entry id carried by one serialized JSONL line, or undefined when the line is
+ * the session header, malformed, or a torn trailing write mid-append.
+ *
+ * The header carries the session id rather than an entry id, and the SDK's entry
+ * index excludes it — treating it as an entry would evict a fresh wrapper.
+ */
+function readEntryId(line: string): string | undefined {
+  try {
+    const entry = JSON.parse(line) as { type?: unknown; id?: unknown };
+    if (entry.type === "session") return undefined;
+    return typeof entry.id === "string" && entry.id ? entry.id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Newest entry id recorded on disk, read from a bounded tail so large sessions
+ * stay cheap. Undefined when the file is absent (a wrapper that has not flushed
+ * its first assistant turn yet) or unreadable.
+ *
+ * Used to detect appends made by another pi process: the TUI writes the same
+ * session file pi-web is browsing, and an id the in-memory wrapper never saw
+ * means that wrapper no longer reflects the file.
+ */
+export function readLatestSessionEntryId(filePath: string | undefined): string | undefined {
+  if (!filePath) return undefined;
+  let lines: string[];
+  try {
+    lines = readBoundedTailLines(filePath, SESSION_TAIL_PROBE_MAX_BYTES);
+  } catch {
+    return undefined;
+  }
+  // Walk backwards so a torn trailing line falls back to the previous entry.
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const entryId = readEntryId(lines[index]);
+    if (entryId) return entryId;
+  }
+  return undefined;
 }
 
 function readSessionRelationEntries(filePath: string): SessionEntry[] {
@@ -494,6 +538,31 @@ export function buildSessionContext(
  * would overflow the stack. The result is still a valid prefix of the active
  * branch — older history is loaded on demand via pagination.
  */
+/**
+ * Entry that renders as a standalone visible message in the chat window:
+ * user / assistant messages plus the compaction divider. toolResult entries,
+ * hidden custom messages and session meta render as attachments or nothing,
+ * so they must NOT consume the `tail` budget — counting raw entries starves
+ * user messages out of the window in agent-heavy sessions (2026-09-03: the
+ * NPU experiment session had 15 user / 562 entries and the old 50-entry
+ * window contained exactly 1 user message; every earlier question needed
+ * manual "load earlier" paging).
+ */
+function countsTowardTail(entry: SessionEntry): boolean {
+  if (entry.type === "compaction") return true;
+  if (entry.type !== "message") return false;
+  const role = (entry as { message?: { role?: string } }).message?.role;
+  return role === "user" || role === "assistant";
+}
+
+/** Raw-entry ceiling for one page. Bounds payload size when visible anchors
+ * are sparse (tool-spam spans); scaled with `tail` so legitimate full-chain
+ * dumps (tail = whole session) are never truncated. Older history still
+ * pages in via `before`. */
+const MAX_RAW_WINDOW_ENTRIES = 1500;
+const rawWindowCap = (tail: number) =>
+  Math.max(MAX_RAW_WINDOW_ENTRIES, tail * 30);
+
 export function sliceActiveBranch(
   entries: SessionEntry[],
   leafId: string | null,
@@ -511,8 +580,12 @@ export function sliceActiveBranch(
   if (!leaf) return [];
   const chain: SessionEntry[] = [];
   let current: SessionEntry | undefined = leaf;
-  while (current && chain.length < tail) {
+  let visible = 0;
+  const rawCap = rawWindowCap(tail);
+  while (current) {
     chain.push(current);
+    if (countsTowardTail(current)) visible++;
+    if (visible >= tail || chain.length >= rawCap) break;
     current = current.parentId ? byId.get(current.parentId) : undefined;
   }
   chain.reverse();
