@@ -1613,6 +1613,9 @@ function TextFileViewer({
   // document can be read or edited without the surrounding panels.
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // "Expand" widens the document inside the layout by giving up the tree column —
+  // PiDeck's ⤢ behaviour — and stays separate from true fullscreen.
+  const [isExpanded, setIsExpanded] = useState(false);
   useEffect(() => {
     const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
     document.addEventListener("fullscreenchange", onChange);
@@ -2387,7 +2390,7 @@ function TextFileViewer({
     : `${language} · ${lines.length} lines · ${formatSize(data!.size)}`;
 
   return (
-    <div ref={shellRef} className="file-viewer-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
+    <div ref={shellRef} data-expanded={isExpanded || undefined} className="file-viewer-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
       <div
         className="file-viewer-toolbar"
         style={{
@@ -2474,6 +2477,28 @@ function TextFileViewer({
                 <MentionIcon />
               </button>
             )}
+            <button
+              type="button"
+              className="file-viewer-icon-button"
+              title={t(isExpanded ? "files.collapse" : "files.expand")}
+              aria-label={t(isExpanded ? "files.collapse" : "files.expand")}
+              aria-pressed={isExpanded}
+              onClick={() => setIsExpanded((value) => !value)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {isExpanded ? (
+                  <>
+                    <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M13 11h5v5" />
+                    <path d="m18 11-5 5" />
+                  </>
+                ) : (
+                  <>
+                    <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M11 16H6v-5" />
+                    <path d="m6 16 5-5" />
+                  </>
+                )}
+              </svg>
+            </button>
             <button
               type="button"
               className="file-viewer-icon-button"

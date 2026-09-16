@@ -637,3 +637,46 @@ E2E_SERVER_MODE=start E2E_CHROME_CHANNEL=chrome node e2e/run.mjs   # 需先有�
 
 **未做**：PiDeck 的中栏是「聊天与文件统一的标签区」，pi-web 里聊天和文件是两个独立表面；
 统一标签区属于架构级改动，不在本次范围。放大（栏内展开）与内置浏览器面板见后续条目。
+
+### 12. 栏内展开 + 内置浏览器面板 + 面板布局修正（2026-09-16）
+
+**① 栏内展开（PiDeck 的 ⤢）**
+
+查看器工具栏新增「展开文档」：给 `.file-viewer-shell` 打 `data-expanded`，CSS 用
+`.file-panel-body:has(.file-viewer-shell[data-expanded]) .explorer-column { display: none }`
+把文件树让出的空间给文档。**与整屏全屏（Fullscreen API）是两个独立按钮**，互不干扰。
+新增 i18n `files.expand` / `files.collapse`（三语）。
+
+**② 内置浏览器面板（`kind: "browser"` 标签）**
+
+- 新增 `components/browser-tab-state.ts`：`normalizeBrowserUrl`（裸域名补 https，loopback 补 http）、
+  `browserTabLabel`（取 host:port 作标签）、`newBrowserTab`、`restoreBrowserTabs`（sessionStorage 恢复，
+  id 必须 32 位 hex；无 url 视为合法的空标签）。
+- 新增 `components/BrowserPanel.tsx`：地址栏 + 前进/后退/刷新 + 「在新窗口打开」+ sandbox iframe。
+  后退/前进走本地历史栈（跨域 iframe 无法读它的 history）。
+- `AppShell` 接线与终端标签同构：状态、sessionStorage 持久化、`panelTabs` 条目、所有浏览器标签常驻挂载
+  （`hidden` 切换，避免切标签重载页面）、关闭处理；标签栏新增地球图标的「新建浏览器标签」按钮。
+  `TabBar` 的 `kind` 扩为 `"terminal" | "browser"` 并补图标。
+- 新增 `components/browser-tab-state.test.mjs`（4 个用例）。
+- **能力边界（已知并接受）**：纯 Web 版只能 `<iframe>`，声明 `X-Frame-Options` 或
+  `frame-ancestors` CSP 的站点无法嵌入（白屏），面板内提示改用「在新窗口打开」。
+  PiDeck 能内嵌公网站点是因为它是 Electron 壳（webview 不受此限）。
+
+**③ 布局修正（用户反馈：聊天不该被挪走）**
+
+上一版让「打开文件 → 翻转工作区角色」，结果聊天被推到最右侧、文件查看器与文件树占了两栏。
+用户明确要求：**聊天不动，文件树在最右**。现在 `handleOpenFile` 不再翻转角色，而是：
+
+- 打开右侧工作区；
+- 若面板窄于 760px（容器查询阈值），一次性把它加宽到 `min(视口 58%, 1020px)`，
+  使「查看器 + 树列」都放得下（`rightPanelResizer.setWidth`）。
+
+结果布局：`[会话侧栏] [聊天] [文档] [文件树]`。
+
+**待查（用户报的两个 bug，尚未复现）**
+
+- 「markdown 预览为空」：`.md` + Preview + `data.editable` 时走的是 `liveEditing` 分支
+  （`MarkdownFileEditor`）而不是 `MarkdownFilePreview`，空白可能出在编辑器侧或内容为空；
+  需要用户确认 **Source 模式是否正常** 与文件路径。
+- 「文件树显示未找到文件」：本地实测同一组件的树能正常列出 165 个节点，怀疑与该项目的
+  目录内容/信任状态有关；需要用户提供那是哪个项目（截图里是「招标改」）。

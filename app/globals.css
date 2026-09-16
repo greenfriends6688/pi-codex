@@ -2405,3 +2405,9 @@ span.token.table {
     display: block;
   }
 }
+
+/* Expanded document: the tree column yields its room to the viewer (PiDeck's ⤢
+   behaviour). True fullscreen stays on its own button. */
+.file-panel-body:has(.file-viewer-shell[data-expanded]) .explorer-column {
+  display: none;
+}

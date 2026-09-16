@@ -18,6 +18,8 @@ import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 import { TerminalPanel } from "./TerminalPanel";
 import { newTerminalTab, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTab } from "./terminal-tab-state";
+import { BrowserPanel } from "./BrowserPanel";
+import { browserTabLabel, BROWSER_TABS_KEY, newBrowserTab, restoreBrowserTabs, type BrowserTab } from "./browser-tab-state";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile, useIsNarrowMobile } from "@/hooks/useIsMobile";
@@ -477,12 +479,19 @@ export function AppShell() {
   const [pendingFileLocation, setPendingFileLocation] = useState<FileLocationTarget | null>(null);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [terminalsRestored, setTerminalsRestored] = useState(false);
+  const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
+  const [browsersRestored, setBrowsersRestored] = useState(false);
   const panelTabs: Tab[] = [...fileTabs, ...terminalTabs.map((tab) => ({
     id: tab.id,
     label: getFileName(tab.cwd) || tab.cwd,
     filePath: tab.cwd,
     kind: "terminal" as const,
     closing: Boolean(tab.closing),
+  })), ...browserTabs.map((tab) => ({
+    id: tab.id,
+    label: browserTabLabel(tab.url) || translate("browser.newTab"),
+    filePath: tab.url,
+    kind: "browser" as const,
   }))];
 
   useEffect(() => {
@@ -507,6 +516,29 @@ export function AppShell() {
       }));
     } catch { /* storage is optional */ }
   }, [terminalTabs, activeFileTabId, rightPanelOpen, terminalsRestored]);
+
+  useEffect(() => {
+    try {
+      const saved = restoreBrowserTabs(window.sessionStorage.getItem(BROWSER_TABS_KEY));
+      setBrowserTabs(saved.tabs);
+      if (saved.activeId) {
+        setActiveFileTabId(saved.activeId);
+        setRightPanelOpen(saved.open);
+      }
+    } catch { /* storage is optional */ }
+    setBrowsersRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!browsersRestored) return;
+    try {
+      window.sessionStorage.setItem(BROWSER_TABS_KEY, JSON.stringify({
+        tabs: browserTabs.map(({ id, url }) => ({ id, url })),
+        activeId: activeFileTabId,
+        open: rightPanelOpen,
+      }));
+    } catch { /* storage is optional */ }
+  }, [browserTabs, activeFileTabId, rightPanelOpen, browsersRestored]);
 
   const handleFileViewerStateChange = useCallback((
     tabId: string,
@@ -1090,20 +1122,25 @@ export function AppShell() {
       tabId,
     }));
     setActiveFileTabId(tabId);
-    // Documents open in the main (left) region with the tree beside them, the way a
-    // file-first workspace is usually laid out (user request 2026-09-16). The chat
-    // stays collapsed instead of being squeezed into a fourth column — it is one
-    // click away on the workspace toggle (and on mobile the panel is full screen).
-    if (!isMobile && !workspaceSwapped) {
-      setWorkspaceSwapped(true);
-      setRightPanelOpen(false);
-    } else if (!workspaceSwapped) {
-      // When the editor is the secondary workspace, opening a file reveals it.
+    // The chat never moves: it keeps the main region, and the document + tree live
+    // in the right-hand workspace (user feedback 2026-09-16). The panel is widened
+    // once, when it is too narrow for the tree column, so both fit without the
+    // user having to drag the divider first.
+    if (isMobile) {
+      // On mobile the file panel is full-screen; close the drawer so it shows.
+      setSidebarOpen(false);
       setRightPanelOpen(true);
+    } else {
+      setRightPanelOpen(true);
+      if (rightPanelResizer.width < EXPLORER_COLUMN_MIN_PANEL_WIDTH) {
+        const viewport = typeof window === "undefined" ? 1600 : window.innerWidth;
+        rightPanelResizer.setWidth(Math.min(
+          Math.round(viewport * 0.58),
+          EXPLORER_COLUMN_MIN_PANEL_WIDTH + 260,
+        ));
+      }
     }
-    // On mobile the file panel is full-screen; close the drawer so it shows.
-    if (isMobile) setSidebarOpen(false);
-  }, [isMobile, workspaceSwapped]);
+  }, [isMobile, rightPanelResizer, workspaceSwapped]);
 
   const handleOpenLinkedFile = useCallback((filePath: string, locationTarget?: Omit<FileLocationTarget, "filePath">) => {
     const baseCwd = selectedSession?.cwd ?? activeCwd;
@@ -1127,6 +1164,23 @@ export function AppShell() {
     if (isMobile) setSidebarOpen(false);
   }, [terminalTabs, isMobile, workspaceSwapped]);
 
+  const handleOpenBrowser = useCallback((url = "") => {
+    const tab = newBrowserTab(url);
+    setBrowserTabs((tabs) => [...tabs, tab]);
+    setActiveFileTabId(tab.id);
+    // Same workspace rule as opening a file: the panel takes the main region and
+    // the secondary chat stays collapsed.
+    if (!isMobile && !workspaceSwapped) {
+      setWorkspaceSwapped(true);
+      setRightPanelOpen(false);
+    }
+    if (isMobile) setSidebarOpen(false);
+  }, [isMobile, workspaceSwapped]);
+
+  const handleBrowserUrlChange = useCallback((tabId: string, url: string) => {
+    setBrowserTabs((tabs) => tabs.map((tab) => (tab.id === tabId ? { ...tab, url } : tab)));
+  }, []);
+
   const handleTerminalClosed = (tab: TerminalTab) => {
     const replacement = tab.closing === "restart" ? newTerminalTab(tab.cwd) : null;
     const remaining = terminalTabs.filter((item) => item.id !== tab.id);
@@ -1136,6 +1190,17 @@ export function AppShell() {
   };
 
   const handleCloseFileTab = useCallback((tabId: string) => {
+    if (browserTabs.some((tab) => tab.id === tabId)) {
+      const remaining = browserTabs.filter((tab) => tab.id !== tabId);
+      setBrowserTabs(remaining);
+      setActiveFileTabId((cur) => (cur !== tabId
+        ? cur
+        : fileTabs.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? remaining.at(-1)?.id ?? null));
+      if (!workspaceSwapped && remaining.length === 0 && fileTabs.length === 0 && terminalTabs.length === 0) {
+        setRightPanelOpen(false);
+      }
+      return;
+    }
     if (terminalTabs.some((tab) => tab.id === tabId)) {
       setTerminalTabs((tabs) => tabs.map((tab) => tab.id === tabId && !tab.closing ? { ...tab, closing: "close" } : tab));
       return;
@@ -1966,7 +2031,9 @@ export function AppShell() {
   const showExplorerColumn = Boolean(
     explorerPanel
     && !isMobile
-    && (activeFileTab?.filePath || terminalTabs.some((tab) => tab.id === activeFileTabId)),
+    && (activeFileTab?.filePath
+      || terminalTabs.some((tab) => tab.id === activeFileTabId)
+      || browserTabs.some((tab) => tab.id === activeFileTabId)),
   );
 
   return (
@@ -2681,6 +2748,19 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
+          <button
+            type="button"
+            className="file-viewer-icon-button"
+            title={translate("browser.newTab")}
+            aria-label={translate("browser.newTab")}
+            onClick={() => handleOpenBrowser()}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M3 12h18" />
+              <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18Z" />
+            </svg>
+          </button>
           {isMobile && (
             <button
               type="button"
@@ -2738,7 +2818,7 @@ export function AppShell() {
                 { sourceSessionId: activeFileTab.sourceSessionId },
               )}
             />
-          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) ? (
+          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !browserTabs.some((tab) => tab.id === activeFileTabId) ? (
             activeCwd ? (
               explorerPanel
             ) : (
@@ -2747,6 +2827,11 @@ export function AppShell() {
               </div>
             )
           ) : null}
+          {browserTabs.map((tab) => (
+            <div key={tab.id} hidden={tab.id !== activeFileTabId} style={{ width: "100%", height: "100%" }}>
+              <BrowserPanel tab={tab} onChangeUrl={handleBrowserUrlChange} />
+            </div>
+          ))}
           {terminalTabs.map((tab) => (
             <div key={tab.id} hidden={tab.id !== activeFileTabId} style={{ width: "100%", height: "100%" }}>
               <TerminalPanel
