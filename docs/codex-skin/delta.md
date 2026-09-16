@@ -610,3 +610,30 @@ E2E_SERVER_MODE=start E2E_CHROME_CHANNEL=chrome node e2e/run.mjs   # 需先有�
 
 **物理边界**：pdf / docx / xlsx / pptx / 图片 / 音视频无法在浏览器里直接编辑，只能预览；
 真正的可视化编辑需要 ONLYOFFICE / Collabora 这类服务端方案（见 §11 评估）。
+
+### 11. 三栏布局：会话 | 文档 | 文件树（2026-09-16）
+
+用户参考 PiDeck（桌面壳）的布局提出的诉求。pi-web 原来的结构是：`ExplorerPanel` 作为右侧面板的
+**互斥回退内容** —— 一旦有活动 Tab（文件/终端），文件树就被查看器顶掉。所以要做的是让两者共存。
+
+**改动**
+
+- `AppShell` 把 `ExplorerPanel` 提取为一个共用节点 `explorerPanel`：无活动 Tab 时它仍是面板内容，
+  有活动 Tab 时渲染在新增的 `.explorer-column` 里。
+- 面板主体拆成 `.file-panel-body`（横向 flex）与 `.file-panel-main`（原来的纵向内容区），
+  树列放在 body 的右侧（264px、`border-left`、`background: var(--bg)`）。
+- **宽度闸门用容器查询**，不是 JS：`.file-panel-body { container-type: inline-size }` +
+  `@container (min-width: 760px) { .explorer-column { display: block } }`。
+  踩坑：一开始用 `rightPanelResizer.width >= 760` 做闸门，结果**永远不显示** ——
+  面板在主区时宽度由网格 `1fr` 决定（实测 1072px），而残留的 resizer state 仍是 384。
+- 打开文件时的角色翻转不再强制展开副区（`setRightPanelOpen(false)`）：否则聊天会被压成
+  ~230px 的第四栏。聊天仍由工作区切换按钮一键唤出。
+
+**副作用与测试同步**
+
+- `components/AppShell.file-viewer-state.test.mjs` 的 `fileContentBlock()` 按注释文本切片
+  （`{/* Only the active viewer`），重构后注释改名导致锚点失效；已更新为 `{/* Body: the active viewer`。
+  该文件里的三条结构断言（只挂载活动 Tab、key 带 viewerRevision、状态回写）本身未变。
+
+**未做**：PiDeck 的中栏是「聊天与文件统一的标签区」，pi-web 里聊天和文件是两个独立表面；
+统一标签区属于架构级改动，不在本次范围。放大（栏内展开）与内置浏览器面板见后续条目。

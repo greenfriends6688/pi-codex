@@ -2359,3 +2359,49 @@ span.token.table {
     height: var(--control-lg) !important;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   File panel body: the active viewer plus an optional tree column. The tree used
+   to be the panel's fallback content, which meant opening a document hid it; it
+   now sits beside the document instead (PiDeck-style "document in the middle,
+   file tree on the right"). Only rendered on wide panels — see AppShell's
+   EXPLORER_COLUMN_MIN_PANEL_WIDTH.
+--------------------------------------------------------------------------- */
+.file-panel-body {
+  /* The tree column is gated on the *rendered* panel width, which the layout
+     grid decides (1fr in the main region) — not on the resizer state. */
+  container-type: inline-size;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: row;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.file-panel-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.explorer-column {
+  display: none;
+  flex: 0 0 auto;
+  width: var(--explorer-column-width, 264px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+
+@container (min-width: 760px) {
+  .explorer-column {
+    display: block;
+  }
+}

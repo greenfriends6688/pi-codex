@@ -81,6 +81,9 @@ type AutoNameStatus =
 
 const TOP_BAR_ICON_BUTTON_SIZE = 28;
 const AGENT_PANEL_WIDTH = 420;
+/** Below this rendered panel width the tree column is dropped so the document keeps room. */
+const EXPLORER_COLUMN_MIN_PANEL_WIDTH = 760;
+void EXPLORER_COLUMN_MIN_PANEL_WIDTH;
 
 function parkedNewSessionDraftKey(cwd: string): string {
   return `parked-new:${cwd}`;
@@ -1087,16 +1090,15 @@ export function AppShell() {
       tabId,
     }));
     setActiveFileTabId(tabId);
-    // Documents open in the main (left) region with the chat beside them, the way
-    // a file-first workspace is usually laid out (user request 2026-09-16).
-    // Opening a file therefore flips the persistent workspace role once, instead
-    // of only widening the right-hand panel.
+    // Documents open in the main (left) region with the tree beside them, the way a
+    // file-first workspace is usually laid out (user request 2026-09-16). The chat
+    // stays collapsed instead of being squeezed into a fourth column — it is one
+    // click away on the workspace toggle (and on mobile the panel is full screen).
     if (!isMobile && !workspaceSwapped) {
       setWorkspaceSwapped(true);
-      setRightPanelOpen(true);
+      setRightPanelOpen(false);
     } else if (!workspaceSwapped) {
-      // When the editor is the main region, opening a file should not also
-      // reveal the secondary chat workspace.
+      // When the editor is the secondary workspace, opening a file reveals it.
       setRightPanelOpen(true);
     }
     // On mobile the file panel is full-screen; close the drawer so it shows.
@@ -1942,6 +1944,31 @@ export function AppShell() {
     </button>
   );
 
+  // The tree is rendered in two places: as the panel's own content when no tab is
+  // open, and as a right-hand column beside the active viewer. Sharing one node
+  // keeps the two spots from drifting apart.
+  const explorerPanel = activeCwd ? (
+    <ExplorerPanel
+      cwd={activeCwd}
+      onOpenFile={handleOpenFile}
+      onOpenTerminal={handleOpenTerminal}
+      explorerRefreshKey={explorerRefreshKey}
+      onExplorerRefresh={handleExplorerRefresh}
+      onAtMention={handleAtMention}
+      onAtMentions={handleAtMentions}
+    />
+  ) : null;
+  // Only wide panels can afford a tree column next to the document (PiDeck-style
+  // "document in the middle, file tree on the right"). The width itself is
+  // measured by a container query on .file-panel-body — the panel's rendered
+  // width comes from the layout grid (1fr in the main region) and is not the
+  // resizer's stored width.
+  const showExplorerColumn = Boolean(
+    explorerPanel
+    && !isMobile
+    && (activeFileTab?.filePath || terminalTabs.some((tab) => tab.id === activeFileTabId)),
+  );
+
   return (
     <>
     <style>{`
@@ -2028,6 +2055,10 @@ export function AppShell() {
         }
       }
     `}</style>
+    {/* The tree is rendered in two places: as the panel's own content when no tab
+        is open, and as a right-hand column beside the active viewer. One node
+        keeps the two spots from drifting apart. */}
+    {(() => {})()}
     <div ref={appShellRef} className="app-shell-layout" style={{
       position: "relative",
       display: "flex",
@@ -2674,8 +2705,10 @@ export function AppShell() {
           )}
         </div>
 
-        {/* Only the active viewer is mounted. Lightweight per-tab state is restored on activation. */}
-        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {/* Body: the active viewer plus an optional tree column. Both live in the
+            same container so the tree no longer replaces the document. */}
+        <div className="file-panel-body">
+        <div className="file-panel-main">
           {activeFileTab?.filePath ? (
             <FileViewer
               key={`${activeFileTab.id}:${activeFileTab.viewerRevision ?? 0}`}
@@ -2707,15 +2740,7 @@ export function AppShell() {
             />
           ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) ? (
             activeCwd ? (
-              <ExplorerPanel
-                cwd={activeCwd}
-                onOpenFile={handleOpenFile}
-                onOpenTerminal={handleOpenTerminal}
-                explorerRefreshKey={explorerRefreshKey}
-                onExplorerRefresh={handleExplorerRefresh}
-                onAtMention={handleAtMention}
-                onAtMentions={handleAtMentions}
-              />
+              explorerPanel
             ) : (
               <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
                  {translate("files.noneOpen")}
@@ -2733,6 +2758,10 @@ export function AppShell() {
               />
             </div>
           ))}
+        </div>
+        {showExplorerColumn ? (
+          <div className="explorer-column">{explorerPanel}</div>
+        ) : null}
         </div>
       </div>
       </div>
