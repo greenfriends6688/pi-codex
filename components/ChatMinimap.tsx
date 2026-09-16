@@ -18,6 +18,12 @@ interface Props {
   scrollContainer: RefObject<HTMLDivElement | null>;
   messageRefs: RefObject<(HTMLDivElement | null)[]>;
   onRevealHistory: () => void;
+  /** Whether the server has user turns older than the loaded page. */
+  hasEarlierMessages: boolean;
+  /** True while a page of older history is being fetched. */
+  loadingEarlier: boolean;
+  /** Fetch the previous page of older history into the chat. */
+  onLoadEarlier: () => void | Promise<void>;
 }
 
 const MINIMAP_WIDTH = 36;
@@ -234,6 +240,9 @@ export function ChatMinimap({
   scrollContainer,
   messageRefs,
   onRevealHistory,
+  hasEarlierMessages,
+  loadingEarlier,
+  onLoadEarlier,
 }: Props) {
   const { t } = useI18n();
   const [visible, setVisible] = useState(false);
@@ -715,7 +724,7 @@ export function ChatMinimap({
         );
       })}
 
-      {minimapHovered && allNodes.length > 0 && (
+      {minimapHovered && (allNodes.length > 0 || hasEarlierMessages) && (
         <div
           className={styles.preview}
           data-minimap-preview-box=""
@@ -743,6 +752,20 @@ export function ChatMinimap({
             </svg>
           </button>
           <div ref={previewBoxRef} className={styles.list}>
+          {hasEarlierMessages && (
+            <button
+              type="button"
+              className={styles.loadEarlier}
+              data-minimap-load-earlier=""
+              disabled={loadingEarlier}
+              onClick={() => { void onLoadEarlier(); }}
+            >
+              <span className={styles.loadEarlierArrow} aria-hidden="true">↑</span>
+              <span className={styles.loadEarlierLabel}>
+                {loadingEarlier ? t("i18n.loading") : t("chatMinimap.loadEarlier")}
+              </span>
+            </button>
+          )}
             {allNodes.map((node) => {
               const isLocated = nearestNodeIndex === node.index;
               return (

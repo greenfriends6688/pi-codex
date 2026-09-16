@@ -470,6 +470,7 @@ export const zhTWLocale: LocalePlugin = {
     "chatMinimap.locateAssistant": "定位助理訊息",
     "chatMinimap.pinPreview": "固定導覽面板",
     "chatMinimap.unpinPreview": "取消固定導覽面板",
+    "chatMinimap.loadEarlier": "載入較早的記錄",
     "i18n.close": "關閉",
     "i18n.copy": "複製",
     "i18n.copied": "已複製",

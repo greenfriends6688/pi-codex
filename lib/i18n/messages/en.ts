@@ -470,6 +470,7 @@ export const enLocale: LocalePlugin = {
     "chatMinimap.locateAssistant": "Locate assistant message",
     "chatMinimap.pinPreview": "Keep navigator open",
     "chatMinimap.unpinPreview": "Allow navigator to close",
+    "chatMinimap.loadEarlier": "Load earlier",
     "i18n.close": "Close",
     "i18n.copy": "Copy",
     "i18n.copied": "Copied",

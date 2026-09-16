@@ -470,6 +470,7 @@ export const zhCNLocale: LocalePlugin = {
     "chatMinimap.locateAssistant": "定位助手消息",
     "chatMinimap.pinPreview": "固定导航面板",
     "chatMinimap.unpinPreview": "取消固定导航面板",
+    "chatMinimap.loadEarlier": "加载更早记录",
     "i18n.close": "关闭",
     "i18n.copy": "复制",
     "i18n.copied": "已复制",
