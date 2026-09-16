@@ -1168,14 +1168,20 @@ export function AppShell() {
     const tab = newBrowserTab(url);
     setBrowserTabs((tabs) => [...tabs, tab]);
     setActiveFileTabId(tab.id);
-    // Same workspace rule as opening a file: the panel takes the main region and
-    // the secondary chat stays collapsed.
-    if (!isMobile && !workspaceSwapped) {
-      setWorkspaceSwapped(true);
-      setRightPanelOpen(false);
+    // Same rule as opening a document: the chat keeps the main region and the
+    // panel opens (widened once when it is too narrow) so the page gets the same
+    // room a file preview would, instead of covering the conversation.
+    if (isMobile) {
+      setSidebarOpen(false);
+      setRightPanelOpen(true);
+    } else {
+      setRightPanelOpen(true);
+      if (rightPanelResizer.width < EXPLORER_COLUMN_MIN_PANEL_WIDTH) {
+        const viewport = typeof window === "undefined" ? 1600 : window.innerWidth;
+        rightPanelResizer.setWidth(Math.min(Math.round(viewport * 0.58), EXPLORER_COLUMN_MIN_PANEL_WIDTH + 260));
+      }
     }
-    if (isMobile) setSidebarOpen(false);
-  }, [isMobile, workspaceSwapped]);
+  }, [isMobile, rightPanelResizer]);
 
   const handleBrowserUrlChange = useCallback((tabId: string, url: string) => {
     setBrowserTabs((tabs) => tabs.map((tab) => (tab.id === tabId ? { ...tab, url } : tab)));
@@ -1878,7 +1884,11 @@ export function AppShell() {
             {desktopContextText && (
               <span style={{ display: "flex", alignItems: "center", gap: 4, color: contextColor }}>
                 <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M1 9 L1 5 Q1 1 5 1 Q9 1 9 5 L9 9" /><line x1="1" y1="9" x2="9" y2="9" />
+                  {/* Usage bars: an arch glyph here read as a second panel icon next
+                      to the real panel toggle. */}
+                  <line x1="2" y1="8.5" x2="2" y2="6" />
+                  <line x1="5" y1="8.5" x2="5" y2="3.5" />
+                  <line x1="8" y1="8.5" x2="8" y2="1.5" />
                 </svg>
                 {desktopContextText}
               </span>

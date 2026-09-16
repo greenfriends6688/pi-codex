@@ -2420,3 +2420,14 @@ span.token.table {
 .desktop-workspace-role-toggle {
   z-index: 300 !important;
 }
+
+/* The tree column spans the panel's full height so its header lines up with the
+   tab bar row (the tab bar lives in .file-panel-main, the column is its sibling
+   inside .file-panel-body — hence the negative offset). */
+.explorer-column {
+  margin-top: calc(-1 * var(--height-toolbar-pane, 40px));
+}
+
+.explorer-column .file-explorer-header {
+  min-height: var(--height-toolbar-pane, 40px);
+}
