@@ -41,7 +41,9 @@
     "test:terminal": "node e2e/terminal.mjs",
     "test:e2e": "node e2e/run.mjs",
     "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
-    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public"
+    "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
+    "desktop": "electron .",
+    "desktop:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.0",
@@ -109,6 +111,63 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5"
+    "typescript": "^5",
+    "electron": "^39.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "productName": "pi-web",
+  "main": "electron/main.js",
+  "build": {
+    "appId": "com.agegr.piweb",
+    "productName": "pi-web",
+    "asar": false,
+    "npmRebuild": false,
+    "files": [
+      "**/*",
+      "!e2e/**",
+      "!docs/**",
+      "!release/**",
+      "!test-results/**",
+      "!**/*.map",
+      "!**/*.test.*",
+      "!**/*.tsbuildinfo",
+      "!**/tsconfig.json",
+      "!**/.DS_Store",
+      "!.next/cache/**",
+      "!node_modules/@esbuild/**",
+      "!node_modules/esbuild/**",
+      "!node_modules/@resvg/**",
+      "!node_modules/.bin/**",
+      "!node_modules/**/{test,tests,__tests__,example,examples,docs,doc}/**",
+      "!node_modules/**/*.{md,markdown,ts,map}",
+      "!node_modules/{typescript,eslint,prettier,tailwindcss,postcss,autoprefixer}/**",
+      "/*.png",
+      "/*.jpg",
+      "/*.jpeg",
+      "/*.zip",
+      "/*.log",
+      "/*.tar.gz"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        "dir"
+      ]
+    },
+    "extraResources": [
+      {
+        "from": "build/trayTemplate.png",
+        "to": "trayTemplate.png"
+      },
+      {
+        "from": "build/trayTemplate@2x.png",
+        "to": "trayTemplate@2x.png"
+      }
+    ],
+    "afterPack": "scripts/after-pack.mjs"
   }
 }
