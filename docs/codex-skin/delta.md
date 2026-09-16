@@ -583,3 +583,30 @@ E2E_SERVER_MODE=start E2E_CHROME_CHANNEL=chrome node e2e/run.mjs   # 需先有�
 
 - **不能在索引有未解冲突时继续叠补丁**：`git apply -3 --check` 会报 `does not exist in index` 并回退成 `direct application`，把后面几个 PR 连带写成冲突态。正确节奏是「一个 PR → 解冲突 → `git commit` → 再 check 下一个」。
 - **`both` 式合并 CSS 要验括号**：冲突两侧直接拼接时，闭合括号可能落在冲突区之外，产物是「无编译错误提示、只有 `next build` 报 `Unclosed block`」。`audit-tokens.mjs` 的括号配平检查只覆盖 `globals.css` / `settings.css`，`*.module.css` 不在内 —— 这次是靠构建才发现的。
+
+### 10. 界面调整：纯白、侧栏行距、文件默认开在左侧、全屏、放开编辑（2026-09-16）
+
+按使用反馈做的五项调整，全部落在 fork 侧，不涉及上游代码。
+
+1. **浅色阅读面纯白**：`--bg` 早先已改纯白，但文件查看器有几处内容底用的是 `--bg-panel`（≈#FAFAFA），
+   文档区因此发灰。现在查看器的**内容面**用 `--bg`，工具栏/行号槽（`FILE_LINE_NUMBER_STYLE`）保留
+   `--bg-panel` 以维持层次。
+2. **侧栏行距**：`SESSION_LIST_ITEM_HEIGHT` 34→38，行内胶囊改为 `HEIGHT - 8` + `marginTop: 4`
+   （项目行同样处理）。此前胶囊高度等于槽高 → 相邻行零间隙，项目标题与第一条会话贴在一起。
+   虚拟列表的定位数学依赖该常量，所以只改常量与内缩，未动绝对定位逻辑。
+3. **打开文件默认落在左侧**：`handleOpenFile` 现在会翻转一次工作区角色
+   （`setWorkspaceSwapped(true)` + `setRightPanelOpen(true)`），文件查看器进入主区（左）、
+   聊天留在副区（右）。
+   **已知限制**：pi-web 的文件树（`ExplorerPanel`）与查看器在**同一个容器**里互斥渲染
+   （无活动 Tab 时才显示树），所以做不到 openchamber 那样「文件左 + 树右」同时可见；
+   要同时可见需要把树拆成独立第三栏或让它在副区渲染 —— 属单独立项，见 §11。
+4. **查看器全屏**：工具栏新增全屏按钮，对 `file-viewer-shell` 调 `requestFullscreen()`，
+   监听 `fullscreenchange` 同步图标与 `aria-pressed`。新增 i18n 键 `files.fullscreen` /
+   `files.exitFullscreen`（三语齐备）。
+5. **放开编辑范围（用户：原则上所有文件都可编辑）**：`isEditableTextPath` 从「白名单」改为
+   **黑名单 + 预览类型判定** —— 归档/二进制/图片/音视频/office 文档不可编辑，其余（含未知后缀）
+   一律可编辑，与查看器已有的「未知类型按 UTF-8 读」行为一致。白名单保留为快速路径并扩充了
+   常见文本后缀（ini/conf/csv/log/vue/php/lua/r/nix/plist…）。
+
+**物理边界**：pdf / docx / xlsx / pptx / 图片 / 音视频无法在浏览器里直接编辑，只能预览；
+真正的可视化编辑需要 ONLYOFFICE / Collabora 这类服务端方案（见 §11 评估）。

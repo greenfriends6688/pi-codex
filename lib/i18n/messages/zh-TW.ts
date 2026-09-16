@@ -308,6 +308,8 @@ export const zhTWLocale: LocalePlugin = {
     "files.conflict": "衝突",
     "files.newlyUploaded": "剛上傳",
     "files.containsChangedFiles": "包含已變更的檔案",
+    "files.fullscreen": "全螢幕",
+    "files.exitFullscreen": "結束全螢幕",
     "files.insertPath": "將路徑插入聊天",
     "files.mention": "提及",
     "files.download": "下載檔案",

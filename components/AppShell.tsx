@@ -1087,9 +1087,18 @@ export function AppShell() {
       tabId,
     }));
     setActiveFileTabId(tabId);
-    // When the editor is the main region, opening a file should not also
-    // reveal the secondary chat workspace.
-    if (!workspaceSwapped) setRightPanelOpen(true);
+    // Documents open in the main (left) region with the chat beside them, the way
+    // a file-first workspace is usually laid out (user request 2026-09-16).
+    // Opening a file therefore flips the persistent workspace role once, instead
+    // of only widening the right-hand panel.
+    if (!isMobile && !workspaceSwapped) {
+      setWorkspaceSwapped(true);
+      setRightPanelOpen(true);
+    } else if (!workspaceSwapped) {
+      // When the editor is the main region, opening a file should not also
+      // reveal the secondary chat workspace.
+      setRightPanelOpen(true);
+    }
     // On mobile the file panel is full-screen; close the drawer so it shows.
     if (isMobile) setSidebarOpen(false);
   }, [isMobile, workspaceSwapped]);

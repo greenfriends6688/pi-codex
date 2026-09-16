@@ -308,6 +308,8 @@ export const enLocale: LocalePlugin = {
     "files.conflict": "Conflict",
     "files.newlyUploaded": "Newly uploaded",
     "files.containsChangedFiles": "Contains changed files",
+    "files.fullscreen": "Fullscreen",
+    "files.exitFullscreen": "Exit fullscreen",
     "files.insertPath": "Insert path into chat",
     "files.mention": "mention",
     "files.download": "Download file",

@@ -705,7 +705,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
         style={{
           flex: 1,
           overflow: "auto",
-          background: "var(--bg-panel)",
+          background: "var(--bg)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -878,7 +878,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           alignItems: "center",
           justifyContent: "center",
           padding: 24,
-          background: "var(--bg-panel)",
+          background: "var(--bg)",
         }}
       >
         <div style={{ width: "min(680px, 100%)" }}>
@@ -1609,6 +1609,15 @@ function TextFileViewer({
   const initialScrollTop = initialState?.scrollTop ?? 0;
   const initialScrollLeft = initialState?.scrollLeft ?? 0;
   const [displayMode, setDisplayMode] = useState<DisplayMode>(requestedInitialDisplayMode);
+  // Fullscreen support for the whole viewer shell (toolbar + content), so a
+  // document can be read or edited without the surrounding panels.
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
   const [wrapLines, setWrapLines] = useState(initialWrapLines);
   const [watching, setWatching] = useState(false);
   const esRef = useRef<EventSource | null>(null);
@@ -2378,7 +2387,7 @@ function TextFileViewer({
     : `${language} · ${lines.length} lines · ${formatSize(data!.size)}`;
 
   return (
-    <div className="file-viewer-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
+    <div ref={shellRef} className="file-viewer-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
       <div
         className="file-viewer-toolbar"
         style={{
@@ -2465,6 +2474,31 @@ function TextFileViewer({
                 <MentionIcon />
               </button>
             )}
+            <button
+              type="button"
+              className="file-viewer-icon-button"
+              title={t(isFullscreen ? "files.exitFullscreen" : "files.fullscreen")}
+              aria-label={t(isFullscreen ? "files.exitFullscreen" : "files.fullscreen")}
+              aria-pressed={isFullscreen}
+              onClick={() => {
+                if (document.fullscreenElement) void document.exitFullscreen();
+                else void shellRef.current?.requestFullscreen();
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                {isFullscreen ? (
+                  <>
+                    <path d="M9 4v5H4" /><path d="M15 20v-5h5" />
+                    <path d="M9 9 4 4" /><path d="m15 15 5 5" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M4 9V4h5" /><path d="M20 15v5h-5" />
+                    <path d="M4 4l5 5" /><path d="m20 20-5-5" />
+                  </>
+                )}
+              </svg>
+            </button>
             {!isEditing && !liveEditing && effectiveDisplayMode === "source" && (
               <>
                 <button

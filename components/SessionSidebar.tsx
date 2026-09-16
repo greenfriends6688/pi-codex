@@ -16,7 +16,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 
 // Fixed row height for the session list. SessionItem renders at exactly this
 // height, so the list can be windowed (only the visible slice is mounted).
-export const SESSION_LIST_ITEM_HEIGHT = 34;
+export const SESSION_LIST_ITEM_HEIGHT = 38;
 
 export function getSessionListIndices(count: number, scrollTop: number, viewportHeight: number, focusedIndex = -1): number[] {
   const overscan = 8;
@@ -409,7 +409,10 @@ function ProjectRow({
       onMouseLeave={() => setHovered(false)}
       style={{
         width: "100%",
-        height: 36,
+        // Same inset as the session rows below, so a project header separates from
+        // its session list by the same gap it uses between sessions.
+        height: SESSION_LIST_ITEM_HEIGHT - 8,
+        marginTop: 4,
         display: "flex",
         alignItems: "center",
         gap: 8,
@@ -2070,7 +2073,11 @@ function SessionItem({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
       style={{
-        height: SESSION_LIST_ITEM_HEIGHT,
+        // Inset the pill inside its 34px virtual slot so consecutive rows read as
+        // separate chips instead of one continuous block (user feedback
+        // 2026-09-16: the project header and the first session were touching).
+        height: SESSION_LIST_ITEM_HEIGHT - 8,
+        marginTop: 4,
         display: "flex",
         alignItems: "center",
         marginLeft: 12,

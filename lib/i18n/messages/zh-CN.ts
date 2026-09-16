@@ -308,6 +308,8 @@ export const zhCNLocale: LocalePlugin = {
     "files.conflict": "冲突",
     "files.newlyUploaded": "刚上传",
     "files.containsChangedFiles": "包含已更改文件",
+    "files.fullscreen": "全屏",
+    "files.exitFullscreen": "退出全屏",
     "files.insertPath": "将路径插入聊天",
     "files.mention": "提及",
     "files.download": "下载文件",

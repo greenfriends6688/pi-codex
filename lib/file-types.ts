@@ -13,6 +13,13 @@ const EDITABLE_TEXT_EXTENSIONS = new Set([
   "sh", "bash", "zsh", "fish", "sql", "graphql", "gql",
   "tf", "hcl", "dockerfile", "env", "gitignore", "makefile", "txt",
   "md", "mdx",
+  // Added with the "every text file is editable" pass (2026-09-16).
+  "ini", "cfg", "conf", "config", "properties", "lock", "csv", "tsv", "log", "text",
+  "vue", "svelte", "astro", "php", "pl", "pm", "lua", "r", "dart", "scala", "clj", "cljs",
+  "ex", "exs", "erl", "hs", "ml", "mli", "nim", "zig", "v", "asm", "s",
+  "bat", "cmd", "ps1", "awk", "sed", "diff", "patch", "tex", "bib", "rst", "adoc", "org", "mmd",
+  "gitattributes", "editorconfig", "npmrc", "nvmrc", "bashrc", "zshrc", "profile", "service", "timer",
+  "ipynb", "svg", "srt", "vtt", "nix", "gradle", "csproj", "sln", "plist",
 ]);
 
 export type DocumentPreviewKind = "pdf" | "docx";
@@ -62,8 +69,32 @@ export function getFileExt(filePath: string): string {
   return getBaseName(filePath).toLowerCase().split(".").pop() ?? "";
 }
 
+/**
+ * Extensions that must never open in the text editor: archives, binaries and
+ * anything with a dedicated preview (images / audio / video / office documents).
+ * Everything outside this list is editable, because the viewer already falls
+ * back to reading unknown types as UTF-8 — user request 2026-09-16: "in
+ * principle every file should be editable".
+ */
+const BINARY_EXTENSIONS = new Set([
+  "zip", "gz", "tgz", "bz2", "xz", "7z", "rar", "tar",
+  "dmg", "pkg", "app", "exe", "dll", "so", "dylib", "a", "o", "obj", "class", "jar", "pyc",
+  "wasm", "bin", "dat", "db", "sqlite", "sqlite3",
+  "ttf", "otf", "woff", "woff2", "eot", "icns", "ico",
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "avif", "heic", "svgz",
+  "pdf", "docx", "xlsx", "pptx", "doc", "xls", "ppt",
+  "mp3", "wav", "ogg", "flac", "m4a", "aac", "mp4", "mov", "avi", "mkv", "webm",
+]);
+
 export function isEditableTextPath(filePath: string): boolean {
-  return EDITABLE_TEXT_EXTENSIONS.has(getFileExt(filePath));
+  const ext = getFileExt(filePath);
+  // Extension-less names (Dockerfile, Makefile, LICENSE…) are text.
+  if (!ext) return true;
+  if (EDITABLE_TEXT_EXTENSIONS.has(ext)) return true;
+  if (BINARY_EXTENSIONS.has(ext)) return false;
+  if (IMAGE_EXT_TO_MIME[ext] || AUDIO_EXT_TO_MIME[ext] || VIDEO_EXT_TO_MIME[ext]) return false;
+  if (DOCUMENT_EXT_TO_MIME[ext as DocumentPreviewKind]) return false;
+  return true;
 }
 
 export function getImageMime(filePath: string): string | null {
