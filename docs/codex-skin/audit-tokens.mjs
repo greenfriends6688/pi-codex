@@ -158,7 +158,7 @@ for (const [selector, toks] of palettes) {
   }
 }
 
-// 皮肤新增的语义刻度（排版 / 控件尺寸 / 层级 / 玻璃 / 终端）。上游合并时整块
+// 皮肤新增的语义刻度（排版 / 控件尺寸 / 层级 / 终端）。上游合并时整块
 // 丢掉的就是这些，所以它们和自造色板 token 一样需要守住。规范见
 // docs/codex-skin/visual-spec.md。
 const REQUIRED_SCALE = [
@@ -167,7 +167,6 @@ const REQUIRED_SCALE = [
   "--control-xs", "--control-sm", "--control-md", "--control-lg",
   "--control-xl", "--control-touch",
   "--z-popover", "--z-drawer", "--z-modal", "--z-toast",
-  "--glass-blur", "--glass-saturation", "--glass-opacity",
   "--terminal-surface", "--terminal-chrome", "--terminal-border",
   "--terminal-hover", "--terminal-text", "--terminal-text-dim",
   "--elevation-stroke", "--shadow-sm", "--shadow-md", "--shadow-lg", "--shadow-xl",

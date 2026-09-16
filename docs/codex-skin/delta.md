@@ -248,7 +248,7 @@ html[data-theme="pine"],
 |---|---|---|---|
 | #785 | 顶栏显示会话消息数 | `96fa785` | 冲突：保留 fork 的「统计行常显 + 零值降透明度」，新增消息数 span 跟随同一约定；`#ef4444`→`var(--danger)`、`rgba(234,179,8,.95)`→`var(--warning)`（顺带修掉 `contextColor` 里漏 token 的琥珀色） |
 | #853 | 变更文件行「提及」按钮 + 路径中省略 | `314a6a9` `78d4166` | `borderRadius: 4` → `var(--radius-xs)`，与同组件文件树上的提及 chip 对齐 |
-| #771 | 列表位移后删除按钮不出现 | `ae9b5ec` | base 早于 v0.9.1、结构漂移大，**放弃三方合并、手工嫁接增量**（详见下） |
+| #771 | 列表位移后删除按钮不出现 | `ae9b5ec` | base 早于 v0.9.1、结构漂移大，**放弃三方合并、手工嫁接增量**（详见下）。**2026-09-15 已回滚**：指针几何探测拖慢 hover，见「细节精修」§8 |
 | #828 | `/auto-compact` 斜杠命令 | `cb4b592` | 无 |
 | #839 | 扩展 widget 更新时保持顺序 | `0370aca` | 新增 `lib/extension-widgets.ts` |
 | #724 | 扩展弹窗标题支持代码围栏 | `effbbc0` `4936e23` | `borderRadius: 6`→`var(--radius-sm)`；`rgba(239,68,68,.10/.35)`→ danger 的 color-mix；`3px solid #ef4444`→`var(--danger)` |
@@ -429,7 +429,8 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
 - **层级**：`--z-base|raised|sticky|panel|drawer|popover|modal|toast`。
   组件内联的 z-index（1→1100 共 22 个散值）CSS 无法覆盖，这套刻度只服务于
   新写的规则与覆盖层里能用类名命中的层。
-- **玻璃**：`--glass-blur|saturation|opacity|popover-opacity|tooltip-opacity`。
+- **玻璃**：~~`--glass-blur|saturation|opacity|popover-opacity|tooltip-opacity`~~
+  **已于 2026-09-15 回滚**（见 §8）。
 
 ### 3. 覆盖层（`globals.css` 末尾）
 
@@ -438,17 +439,14 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
 
 | 收敛项 | 命中方式 |
 |---|---|
-| 浮层圆角/阴影/玻璃 | `.anim-popover` / `.anim-popover-down` / `.anim-dialog` |
-| 输入框玻璃与焦点环 | `.chat-content div[style*="--radius-composer"]`（该内联变量全仓唯一） |
+| 浮层圆角/阴影 | `.anim-popover` / `.anim-popover-down` / `.anim-dialog`（类名是 inert hook，入场动画见 §8） |
+| 输入框圆角/焦点环 | `.chat-content div[style*="--radius-composer"]`（该内联变量全仓唯一） |
 | 焦点环 | `:where(button, a[href], …):focus-visible`，压掉 21 处内联 `outline: "none"` |
-| 动效时长 | `@media (prefers-reduced-motion: no-preference)` 下的控件 `transition` 简写，回收 ~70 处内联 `0.1–0.3s` |
 | 会话节奏 | `.chat-content [data-entry-id] > div` 用回 `--conversation-item-gap`（此前 token 定义了却没人用，消息写死 20px、过程详情 14px） |
 | 工作区边界按钮 | 去掉与 header 重复的 1px 分隔线，补 hover / focus 同款 chip |
 
-**玻璃只在内容真的从下面经过的地方**：下拉、菜单、扩展弹窗、输入框。
-全屏模态（`config-panel-root.is-modal` / `settings-dialog-surface`）坐在 `--scrim` 上，
-模糊买不到效果，保持不透明——这一条与最初计划不同，按实际判断排除。
-`@supports not (backdrop-filter)` 与 `prefers-reduced-transparency: reduce` 都有回落。
+~~**玻璃只在内容真的从下面经过的地方**：下拉、菜单、扩展弹窗、输入框。~~
+**玻璃层已于 2026-09-15 整体回滚**（见 §8），浮层恢复组件内联的不透明背景。
 
 ### 4. 终端：从硬编码色改为 token 岛
 
@@ -475,7 +473,7 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
 
 ### 6. 脚本与截图
 
-- `audit-tokens.mjs` 新增「皮肤刻度 token 齐全」检查（32 个），并保持 34 token × 5 套调色板校验。
+- `audit-tokens.mjs` 新增「皮肤刻度 token 齐全」检查（现为 29 个，含 §8 删掉 `--glass-*` 后的数量），并保持 34 token × 5 套调色板校验。
 - `verify-themes.mjs` 期望值改为暖色 oklch，且**按数值比较**，不再依赖压缩后的字面串。
 - 新增 `capture-themes.mjs`：跑 `npm run prod` 后重拍 5 套主题 + 设置页截图。
 
@@ -485,3 +483,40 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
   覆盖层只能收敛它们共有的属性，改不了它们各自写死的数值。
 - 触摸端 hover 残留：`onMouseEnter/Leave` 直接写内联样式，CSS 无法撤销。
 - 内联 z-index 的 22 个散值、`ModelSelector` 等浮层各自的阴影字面量。
+
+### 8. 回滚：动效 / 玻璃 / 会话行指针探测（2026-09-15）
+
+用户反馈「这些交互细节影响整体性能」，实测后回滚三块。**回滚面不涉及上游代码**，
+合上游时无需重打，但不要在后续 PR 摘取中把它们再引回来。
+
+1. **动效层（来自 `8112c7c`）**：删掉 `popover-in/popover-in-down/dialog-in/backdrop-in/
+   message-in/skeleton-shimmer/phase-dot/blink` 八组 keyframes，以及 `.anim-message-in`、
+   `.anim-backdrop`、`.streaming-caret`、`.phase-dots` 规则和全局 `button/a` 的按压过渡
+   （`:active scale(0.97)`）。`.anim-popover|.anim-popover-down|.anim-dialog` 类名保留，
+   但只剩覆盖层的圆角/阴影，**入场动画已不存在**——它们是 inert hook。
+   ChatMinimap 预览的 `minimap-preview-in` 一并删掉。
+   保留：`:focus-visible` 描边、键盘可达性（`role`/`tabIndex`/`onKeyDown`）、
+   `prefers-reduced-motion` 兜底、`chat.dropImagesOnly` 提示。
+   `.skeleton-line` 保留但改为静态底色（原来是无限 `background-position` 微光）。
+2. **玻璃层 + 全局过渡覆盖（来自 `11289af`）**：删掉 `--glass-*` token（含 dark/pine
+   里的覆盖值）、`.anim-popover|.anim-dialog` 与 composer 的 `backdrop-filter` 与半透明
+   `background-color`，以及 `@media (prefers-reduced-motion: no-preference)` 里那条
+   带 `!important` 的全局控件 `transition`（它带了 `width/height`，会反复触发布局）。
+   覆盖层保留浮层圆角/阴影、composer 圆角/焦点环、chat rhythm、边界按钮等纯视觉规则。
+   `audit-tokens.mjs` 的皮肤刻度清单同步删掉三个 `--glass-*`（29 个）。
+3. **#771 的指针几何探测（来自 `ae9b5ec`）**：删掉 `listPointerRef` / `pointerSessionId` /
+   `syncPointerSession` / `handleListPointerMove|Leave` / 列表容器上的 4 个 pointer/mouse
+   处理器 / `useLayoutEffect` 重探 / `pointerActive` prop，`SessionItem` 回到
+   `const showHover = hovered`（逐行 `onMouseEnter/Leave`）。
+   代价：删掉一条会话后，滑到光标下的下一行不再自动出现重命名/删除按钮（上游行为）。
+   `SessionSidebar.test.mjs` 里那条「stationary pointer 重新探测」用例同步删除。
+
+复测数据（同一台 M1 / 生产构建）：空闲 3s 任务时间 0.012s、0 个运行中动画；
+滚动长会话 60fps；鼠标扫过 13 行侧栏 150 次移动的任务时间 **0.41s → 0.23s**
+（其中脚本时间 0.12s → 0.05s），样式重算 250 → 221 次，布局 45 → 39 次。
+幅度不算大，因为剩下的开销是逐行 `onMouseEnter` 的 React 重渲染——那是上游行为。
+
+> 另一处与本次无关但被用户点名的现象：`处理详情` 组在回答落地时
+> 从「进行中展开」变为「完成后折叠」是**上游 `isLiveTail` + `defaultExpanded={!finalAnswerMessage}`
+> 的设计**（v0.9.0 原始包即如此），不是这两批改动引入的。这次只是去掉了放大它的
+> `anim-message-in`，闪动感随之减轻；要不要改行为（比如完成后不自动折叠）需另立决策。

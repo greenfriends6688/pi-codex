@@ -124,18 +124,6 @@ test("does not expose disk-backed actions for transient sessions", () => {
   assert.match(sessionItemSource, /\{showHover && !session\.transient \? \(/);
 });
 
-test("re-probes the session under a stationary pointer after the list reflows", () => {
-  assert.match(source, /data-session-id=\{family\.root\.id\}/);
-  assert.match(source, /list\.querySelectorAll\("\[data-session-id\]"\)/);
-  assert.match(source, /Removing the hovered row fires pointerleave/);
-  assert.match(
-    source,
-    /useLayoutEffect\(\(\) => \{[\s\S]*?syncPointerSession\(\);[\s\S]*?\}, \[allSessions, listScrollTop, syncPointerSession\]\);/,
-  );
-  assert.match(source, /pointerActive=\{pointerSessionId === family\.root\.id\}/);
-  assert.match(sessionItemSource, /const showHover = hovered \|\| pointerActive/);
-});
-
 test("hides subagent rows and aggregates their state into the main session row", () => {
   assert.match(source, /const sessionFamilies = listSessionFamilies\(filteredSessions\)/);
   assert.match(source, /familySessions\.some\(\(session\) => session\.id === selectedSessionId\)/);

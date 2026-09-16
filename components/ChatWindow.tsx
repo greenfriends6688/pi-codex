@@ -1374,14 +1374,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             {agentRunning && !hasStreamingContent && agentPhase && (
               <div className="break-words py-2 text-xs text-text-muted" role="status" aria-live="polite">
                 <span>{phaseLabel(agentPhase, t)}</span>
-                <span className="phase-dots" aria-hidden="true"><span /><span /><span /></span>
               </div>
             )}
 
             {bashRunning && !pendingBash && (
               <div className="py-2 text-xs text-text-muted" role="status" aria-live="polite">
                 <span>{t("chat.runningCommand")}</span>
-                <span className="phase-dots" aria-hidden="true"><span /><span /><span /></span>
               </div>
             )}
 

@@ -395,7 +395,6 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
-      className="anim-message-in"
       style={{ marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "flex-start" }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", gap: 6, width: "100%", maxWidth: "100%" }}>
@@ -755,7 +754,6 @@ function AssistantMessageView({
     <div
       data-message-role="assistant"
       data-entry-id={entryId}
-      className="anim-message-in"
       style={{ marginBottom: 20 }}
     >
       {/* Codex keeps the response surface quiet; model metadata is only useful
@@ -807,11 +805,6 @@ function AssistantMessageView({
         {blockItems.map(({ block, originalIndex }) => (
           <BlockView key={`${entryId ?? "stream"}-${originalIndex}`} block={block} searchTarget={block === searchBlock} toolResults={toolResults} isStreaming={isStreaming} streamingDuration={streamingDurations.get(originalIndex) ?? (block.type === "thinking" ? thinkingDurationFromFile : undefined)} toolCallDurations={toolCallDurations} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} sessionId={sessionId} entryId={entryId} blockIndex={originalIndex} expandedToolIds={expandedToolIds} onToggleTool={onToggleTool} />
         ))}
-        {isStreaming && (
-          <span aria-hidden="true" style={{ display: "flex", alignItems: "center", minHeight: 18 }}>
-            <span className="streaming-caret" />
-          </span>
-        )}
       </div>
 
       {providerError && (
