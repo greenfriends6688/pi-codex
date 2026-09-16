@@ -22,7 +22,7 @@ import {
   isVideoPath,
 } from "@/lib/file-types";
 import { encodeFilePathForApi, getFileName, getRelativeFilePath, sameFilePath } from "@/lib/file-paths";
-import { buildFileLineMentionText } from "@/lib/file-fuzzy";
+import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { clearLocationTextHighlight, LOCATION_HIGHLIGHT_CLASS } from "@/lib/location-highlight";
 import { MarkdownFilePreview } from "./MarkdownFilePreview";
 import type { MarkdownEditorLocationApi, MarkdownEditorSelection } from "./MarkdownFileEditor";
@@ -1057,14 +1057,181 @@ function VideoViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
   );
 }
 
-function DocumentViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Props) {
+interface FileSelectionQuotePopoverProps {
+  top: number;
+  left: number;
+  /** Prefilled into the new-chat composer, e.g. an @file mention. */
+  mentionText: string;
+  onAskInCurrent: () => void;
+  onAskInNewChat?: (prompt: string) => Promise<void>;
+  onClose: () => void;
+  onInputOpenChange?: (open: boolean) => void;
+}
+
+/**
+ * Toolbar anchored to a text selection: quote it into the open composer, or
+ * open a small composer that asks about it in a fresh chat. Shared by the text
+ * viewer and the document (docx) viewer, whose selection lives in an iframe.
+ */
+function FileSelectionQuotePopover({
+  top,
+  left,
+  mentionText,
+  onAskInCurrent,
+  onAskInNewChat,
+  onClose,
+  onInputOpenChange,
+}: FileSelectionQuotePopoverProps) {
+  const { t } = useI18n();
+  const [inputOpen, setInputOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<ChatInputHandle | null>(null);
+
+  const toggleInput = useCallback((open: boolean) => {
+    setInputOpen(open);
+    onInputOpenChange?.(open);
+  }, [onInputOpenChange]);
+
+  const closeInput = useCallback(() => {
+    if (submitting) return;
+    setError(null);
+    toggleInput(false);
+  }, [submitting, toggleInput]);
+
+  // Keep the file selector's menu pixel-for-pixel aligned with the chat
+  // selector: fixed popovers need a measured left edge, not a transform that
+  // lets the browser shrink buttons near a viewport edge.
+  useLayoutEffect(() => {
+    const popover = popoverRef.current;
+    if (!popover) return;
+    const anchorTop = top;
+    const anchorLeft = left;
+    const viewport = window.visualViewport;
+    const position = () => {
+      const rect = popover.getBoundingClientRect();
+      const viewportTop = viewport?.offsetTop ?? 0;
+      const viewportLeft = viewport?.offsetLeft ?? 0;
+      popover.style.top = `${Math.max(viewportTop + 8, Math.min(anchorTop, viewportTop + (viewport?.height ?? window.innerHeight) - rect.height - 8))}px`;
+      popover.style.left = `${Math.max(viewportLeft + 8, Math.min(anchorLeft - rect.width / 2, viewportLeft + (viewport?.width ?? window.innerWidth) - rect.width - 8))}px`;
+    };
+    position();
+    const observer = new ResizeObserver(position);
+    observer.observe(popover);
+    viewport?.addEventListener("resize", position);
+    viewport?.addEventListener("scroll", position);
+    return () => {
+      observer.disconnect();
+      viewport?.removeEventListener("resize", position);
+      viewport?.removeEventListener("scroll", position);
+    };
+  }, [error, inputOpen, left, top]);
+
+  useEffect(() => {
+    if (!inputOpen) return;
+    chatInputRef.current?.insertIfEmpty(mentionText);
+  }, [inputOpen, mentionText]);
+
+  const askInNewChat = useCallback(async (prompt: string) => {
+    if (!onAskInNewChat || !prompt.trim()) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await onAskInNewChat(prompt);
+      toggleInput(false);
+      onClose();
+    } catch (nextError) {
+      chatInputRef.current?.restoreSubmission(prompt);
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [onAskInNewChat, onClose, toggleInput]);
+
+  return createPortal(
+    <div
+      ref={popoverRef}
+      role={inputOpen ? "dialog" : "toolbar"}
+      aria-label={t(inputOpen ? "chat.newQuoteChat" : "chat.askSelection")}
+      style={{
+        position: "fixed",
+        top,
+        left,
+        zIndex: 130,
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 3,
+        width: inputOpen ? "min(420px, calc(100vw - 16px))" : undefined,
+        maxWidth: "calc(100vw - 16px)",
+        maxHeight: "calc(var(--app-viewport-height, 100dvh) - 16px)",
+        overflowY: "auto",
+        padding: inputOpen ? 12 : 3,
+        border: "1px solid var(--border)",
+        borderRadius: 6,
+        background: "var(--bg)",
+        boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
+      }}
+    >
+      {inputOpen ? (
+        <fieldset disabled={submitting} aria-busy={submitting} style={{ width: "100%", minWidth: 0, margin: 0, padding: 0, border: "none", display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600 }}>{t("chat.askInNewChat")}</span>
+            <button type="button" className="file-viewer-icon-button" title={t("i18n.close")} aria-label={t("i18n.close")} disabled={submitting} onClick={closeInput} style={{ border: "none" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+            </button>
+          </div>
+          <ChatInput ref={chatInputRef} compact onSend={askInNewChat} onAbort={closeInput} isStreaming={false} />
+          {error && <div role="alert" style={{ color: "#dc2626", fontSize: 12, overflowWrap: "anywhere" }}>{error}</div>}
+        </fieldset>
+      ) : <>
+        <button
+          type="button"
+          className="file-viewer-icon-button"
+          title={t("chat.askInCurrent")}
+          aria-label={t("chat.askInCurrent")}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={onAskInCurrent}
+          style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
+        >
+          <span aria-hidden="true" style={{ fontSize: 15 }}>@</span>
+          <span>{t("chat.askInCurrent")}</span>
+        </button>
+        {onAskInNewChat && (
+          <button
+            type="button"
+            className="file-viewer-icon-button"
+            title={t("chat.askInNewChat")}
+            aria-label={t("chat.askInNewChat")}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => toggleInput(true)}
+            style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M6 3v12M18 9a9 9 0 0 1-9 9" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
+            </svg>
+            <span>{t("chat.askInNewChat")}</span>
+          </button>
+        )}
+      </>}
+    </div>,
+    document.body,
+  );
+}
+
+function DocumentViewer({ filePath, cwd, sourceSessionId, onMentionLines, onAskInNewChat, watchEnabled = true }: Props) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
   const [size, setSize] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [frameSelection, setFrameSelection] = useState<{ text: string; top: number; left: number } | null>(null);
+  const [frameQuoteInputOpen, setFrameQuoteInputOpen] = useState(false);
   const esRef = useRef<EventSource | null>(null);
   const syncRequestRef = useRef(0);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const frameDocRef = useRef<Document | null>(null);
+  const frameQuoteInputOpenRef = useRef(false);
 
   const ext = getFileExt(filePath);
   const isPdf = ext === "pdf";
@@ -1172,6 +1339,111 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }:
     };
   }, [filePath, isPdf, sourceSessionId, watchEnabled]);
 
+  // The docx preview is a same-origin iframe, so its selection is invisible to
+  // the parent document. Read it straight out of the frame and anchor the
+  // quote toolbar to the frame's own coordinates.
+  const syncFrameSelection = useCallback(() => {
+    if (isPdf || !onMentionLines || frameQuoteInputOpenRef.current) return;
+    const frame = iframeRef.current;
+    let doc: Document | null = null;
+    try {
+      doc = frame?.contentDocument ?? null;
+    } catch {
+      doc = null;
+    }
+    const selection = doc?.getSelection() ?? null;
+    const text = selection?.toString().trim() ?? "";
+    if (!frame || !selection || !text || selection.rangeCount === 0) {
+      setFrameSelection(null);
+      return;
+    }
+    const frameRect = frame.getBoundingClientRect();
+    const rect = selection.getRangeAt(0).getBoundingClientRect();
+    const next = {
+      text,
+      top: Math.min(window.innerHeight - 44, frameRect.top + rect.bottom + 8),
+      left: Math.max(8, Math.min(window.innerWidth - 8, frameRect.left + rect.left + rect.width / 2)),
+    };
+    setFrameSelection((current) => current
+      && current.text === next.text
+      && current.top === next.top
+      && current.left === next.left
+      ? current
+      : next);
+  }, [isPdf, onMentionLines]);
+
+  const detachFrameSelection = useCallback(() => {
+    const doc = frameDocRef.current;
+    if (doc) {
+      doc.removeEventListener("selectionchange", syncFrameSelection);
+      doc.removeEventListener("mouseup", syncFrameSelection);
+    }
+    try {
+      iframeRef.current?.contentWindow?.removeEventListener("scroll", syncFrameSelection, true);
+    } catch { /* the frame is already gone */ }
+    frameDocRef.current = null;
+  }, [syncFrameSelection]);
+
+  const attachFrameSelection = useCallback(() => {
+    detachFrameSelection();
+    const frame = iframeRef.current;
+    let doc: Document | null = null;
+    try {
+      doc = frame?.contentDocument ?? null;
+    } catch {
+      doc = null;
+    }
+    if (!frame || !doc) return;
+    frameDocRef.current = doc;
+    doc.addEventListener("selectionchange", syncFrameSelection);
+    doc.addEventListener("mouseup", syncFrameSelection);
+    try {
+      frame.contentWindow?.addEventListener("scroll", syncFrameSelection, true);
+    } catch { /* the frame is already gone */ }
+  }, [detachFrameSelection, syncFrameSelection]);
+
+  useEffect(() => {
+    frameQuoteInputOpenRef.current = frameQuoteInputOpen;
+  }, [frameQuoteInputOpen]);
+
+  useEffect(() => {
+    setFrameSelection(null);
+    return () => detachFrameSelection();
+  }, [detachFrameSelection, filePath, previewUrl]);
+
+  useEffect(() => {
+    if (!frameSelection) return;
+    const resync = () => syncFrameSelection();
+    window.addEventListener("scroll", resync, true);
+    window.addEventListener("resize", resync);
+    return () => {
+      window.removeEventListener("scroll", resync, true);
+      window.removeEventListener("resize", resync);
+    };
+  }, [frameSelection, syncFrameSelection]);
+
+  const clearFrameSelection = useCallback(() => {
+    try {
+      iframeRef.current?.contentWindow?.getSelection()?.removeAllRanges();
+    } catch { /* the frame is already gone */ }
+    setFrameSelection(null);
+  }, []);
+
+  const addFrameSelectionContext = useCallback(() => {
+    if (!onMentionLines || !frameSelection) return;
+    // No line numbers in a rendered document: the composer falls back to an
+    // unlocated @path snapshot.
+    onMentionLines({
+      relativePath: getRelativeFilePath(filePath, cwd),
+      filePath,
+      sourceSessionId,
+      text: frameSelection.text,
+      startLine: 0,
+      endLine: 0,
+    });
+    clearFrameSelection();
+  }, [clearFrameSelection, cwd, filePath, frameSelection, onMentionLines, sourceSessionId]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <div
@@ -1217,14 +1489,27 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }:
           </div>
         ) : (
           <iframe
+            ref={iframeRef}
             key={previewUrl}
             src={previewUrl}
             sandbox={isPdf ? undefined : "allow-same-origin"}
             title={t("i18n.previewFile", { file: getFileName(filePath) })}
+            onLoad={isPdf ? undefined : attachFrameSelection}
             style={{ width: "100%", height: "100%", border: "none", background: isPdf ? "var(--bg)" : "#eef1f5" }}
           />
         )}
       </div>
+      {frameSelection && onMentionLines && (
+        <FileSelectionQuotePopover
+          top={frameSelection.top}
+          left={frameSelection.left}
+          mentionText={buildAtMentionText(getRelativeFilePath(filePath, cwd), false)}
+          onAskInCurrent={addFrameSelectionContext}
+          onAskInNewChat={onAskInNewChat}
+          onClose={clearFrameSelection}
+          onInputOpenChange={setFrameQuoteInputOpen}
+        />
+      )}
     </div>
   );
 }
@@ -1256,7 +1541,16 @@ export function FileViewer({
     return <VideoViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} />;
   }
   if (isDocumentPreviewPath(filePath)) {
-    return <DocumentViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} />;
+    return (
+      <DocumentViewer
+        filePath={filePath}
+        cwd={cwd}
+        sourceSessionId={sourceSessionId}
+        onMentionLines={onMentionLines}
+        onAskInNewChat={onAskInNewChat}
+        watchEnabled={watchEnabled}
+      />
+    );
   }
   return (
     <TextFileViewer
@@ -1341,10 +1635,6 @@ function TextFileViewer({
   const [selectedLineRange, setSelectedLineRange] = useState<SelectedLineRange | null>(null);
   const [selectionAction, setSelectionAction] = useState<PendingFileSelection | null>(null);
   const [fileQuoteInputOpen, setFileQuoteInputOpen] = useState(false);
-  const [fileQuoteSubmitting, setFileQuoteSubmitting] = useState(false);
-  const [fileQuoteError, setFileQuoteError] = useState<string | null>(null);
-  const fileQuotePopoverRef = useRef<HTMLDivElement | null>(null);
-  const fileQuoteChatInputRef = useRef<ChatInputHandle | null>(null);
   const locationHighlightRef = useRef<HTMLElement[]>([]);
   const markdownLocationApiRef = useRef<MarkdownEditorLocationApi | null>(null);
   const [markdownLocationReadyVersion, setMarkdownLocationReadyVersion] = useState(0);
@@ -1998,70 +2288,16 @@ function TextFileViewer({
     addFileSelection(lineRange, text);
   }, [addFileSelection, selectionAction]);
 
+  const clearFileSelection = useCallback(() => {
+    window.getSelection()?.removeAllRanges();
+    setSelectionAction(null);
+  }, []);
+
   const addSelectedFileContext = useCallback(() => {
     if (!selectionAction) return;
     addFileSelection(selectionAction, selectionAction.text);
-    window.getSelection()?.removeAllRanges();
-    setSelectionAction(null);
-  }, [addFileSelection, selectionAction]);
-
-  const closeFileQuote = useCallback(() => {
-    if (fileQuoteSubmitting) return;
-    setFileQuoteInputOpen(false);
-    setFileQuoteError(null);
-  }, [fileQuoteSubmitting]);
-
-  // Keep the file selector's menu pixel-for-pixel aligned with the chat
-  // selector: fixed popovers need a measured left edge, not a transform that
-  // lets the browser shrink buttons near a viewport edge.
-  useLayoutEffect(() => {
-    const popover = fileQuotePopoverRef.current;
-    if (!popover || !selectionAction) return;
-    const viewport = window.visualViewport;
-    const position = () => {
-      const rect = popover.getBoundingClientRect();
-      const top = viewport?.offsetTop ?? 0;
-      const left = viewport?.offsetLeft ?? 0;
-      popover.style.top = `${Math.max(top + 8, Math.min(selectionAction.top, top + (viewport?.height ?? window.innerHeight) - rect.height - 8))}px`;
-      popover.style.left = `${Math.max(left + 8, Math.min(selectionAction.left - rect.width / 2, left + (viewport?.width ?? window.innerWidth) - rect.width - 8))}px`;
-    };
-    position();
-    const observer = new ResizeObserver(position);
-    observer.observe(popover);
-    viewport?.addEventListener("resize", position);
-    viewport?.addEventListener("scroll", position);
-    return () => {
-      observer.disconnect();
-      viewport?.removeEventListener("resize", position);
-      viewport?.removeEventListener("scroll", position);
-    };
-  }, [fileQuoteError, fileQuoteInputOpen, selectionAction]);
-
-  useEffect(() => {
-    if (!fileQuoteInputOpen || !selectionAction) return;
-    fileQuoteChatInputRef.current?.insertIfEmpty(buildFileLineMentionText(
-      getRelativeFilePath(filePath, cwd),
-      selectionAction.startLine,
-      selectionAction.endLine,
-    ));
-  }, [cwd, filePath, fileQuoteInputOpen, selectionAction]);
-
-  const askFileSelectionInNewChat = useCallback(async (prompt: string) => {
-    if (!onAskInNewChat || !prompt.trim()) return;
-    setFileQuoteSubmitting(true);
-    setFileQuoteError(null);
-    try {
-      await onAskInNewChat(prompt);
-      window.getSelection()?.removeAllRanges();
-      setSelectionAction(null);
-      setFileQuoteInputOpen(false);
-    } catch (error) {
-      fileQuoteChatInputRef.current?.restoreSubmission(prompt);
-      setFileQuoteError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setFileQuoteSubmitting(false);
-    }
-  }, [onAskInNewChat]);
+    clearFileSelection();
+  }, [addFileSelection, clearFileSelection, selectionAction]);
 
   useEffect(() => {
     if (!onMentionLines || displayMode !== "source") return;
@@ -2411,73 +2647,16 @@ function TextFileViewer({
           highlightedSource
         )}
       </div>
-      {selectionAction && !locationTarget && onMentionLines && createPortal(
-        <div
-          ref={fileQuotePopoverRef}
-          role={fileQuoteInputOpen ? "dialog" : "toolbar"}
-          aria-label={t(fileQuoteInputOpen ? "chat.newQuoteChat" : "chat.askSelection")}
-          style={{
-            position: "fixed",
-            top: selectionAction.top,
-            left: selectionAction.left,
-            zIndex: 130,
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 3,
-            width: fileQuoteInputOpen ? "min(420px, calc(100vw - 16px))" : undefined,
-            maxWidth: "calc(100vw - 16px)",
-            maxHeight: "calc(var(--app-viewport-height, 100dvh) - 16px)",
-            overflowY: "auto",
-            padding: fileQuoteInputOpen ? 12 : 3,
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            background: "var(--bg)",
-            boxShadow: "0 2px 10px rgba(0,0,0,0.12)",
-          }}
-        >
-          {fileQuoteInputOpen ? (
-            <fieldset disabled={fileQuoteSubmitting} aria-busy={fileQuoteSubmitting} style={{ width: "100%", minWidth: 0, margin: 0, padding: 0, border: "none", display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600 }}>{t("chat.askInNewChat")}</span>
-                <button type="button" className="file-viewer-icon-button" title={t("i18n.close")} aria-label={t("i18n.close")} disabled={fileQuoteSubmitting} onClick={closeFileQuote} style={{ border: "none" }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
-                </button>
-              </div>
-              <ChatInput ref={fileQuoteChatInputRef} compact onSend={askFileSelectionInNewChat} onAbort={closeFileQuote} isStreaming={false} />
-              {fileQuoteError && <div role="alert" style={{ color: "#dc2626", fontSize: 12, overflowWrap: "anywhere" }}>{fileQuoteError}</div>}
-            </fieldset>
-          ) : <>
-            <button
-              type="button"
-              className="file-viewer-icon-button"
-              title={t("chat.askInCurrent")}
-              aria-label={t("chat.askInCurrent")}
-              onPointerDown={(event) => event.preventDefault()}
-              onClick={addSelectedFileContext}
-              style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
-            >
-              <span aria-hidden="true" style={{ fontSize: 15 }}>@</span>
-              <span>{t("chat.askInCurrent")}</span>
-            </button>
-            {onAskInNewChat && (
-              <button
-                type="button"
-                className="file-viewer-icon-button"
-                title={t("chat.askInNewChat")}
-                aria-label={t("chat.askInNewChat")}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => setFileQuoteInputOpen(true)}
-                style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
-              >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M6 3v12M18 9a9 9 0 0 1-9 9" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
-                </svg>
-                <span>{t("chat.askInNewChat")}</span>
-              </button>
-            )}
-          </>}
-        </div>,
-        document.body,
+      {selectionAction && !locationTarget && onMentionLines && (
+        <FileSelectionQuotePopover
+          top={selectionAction.top}
+          left={selectionAction.left}
+          mentionText={buildFileLineMentionText(getRelativeFilePath(filePath, cwd), selectionAction.startLine, selectionAction.endLine)}
+          onAskInCurrent={addSelectedFileContext}
+          onAskInNewChat={onAskInNewChat}
+          onClose={clearFileSelection}
+          onInputOpenChange={setFileQuoteInputOpen}
+        />
       )}
     </div>
   );

@@ -166,6 +166,9 @@ hooks/
 ### Session files can be fully rewritten
 `parentSession` in the header is **display metadata only** — has zero effect on chat content. Safe to `writeFileSync` the entire file (pi does this itself during migrations). Used when cascade-reparenting children on delete.
 
+### Document preview selection
+- The DOCX preview is a same-origin sandboxed iframe, so its text selection never reaches the parent document's `selectionchange`. `DocumentViewer` reads `iframe.contentDocument.getSelection()` straight from the frame and anchors `FileSelectionQuotePopover` (shared with the text viewer) to the frame's own coordinates; the selection is quoted with `startLine: 0`, which `fileSelectionText()` serializes as an unlocated `@path` snapshot. PDF previews use the browser's built-in viewer and cannot support this.
+
 ### ToolCall field normalization
 Pi stores toolCall blocks as `{type:"toolCall", id, name, arguments}` but `ToolCallContent` uses `{toolCallId, toolName, input}`. `normalizeToolCalls()` in `lib/normalize.ts` handles this — called in both `session-reader.ts` (file load) and `handleAgentEvent` in `hooks/useAgentSession.ts` (streaming).
 
