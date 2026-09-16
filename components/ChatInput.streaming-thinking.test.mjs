@@ -15,8 +15,9 @@ test("shows the reasoning level of the running turn without offering a control",
 test("keeps the read-only level aligned with the neighbouring controls", () => {
   const readOnly = controls.slice(0, controls.indexOf("{!isStreaming && onThinkingLevelChange &&"));
   const dropdown = controls.slice(controls.indexOf("{!isStreaming && onThinkingLevelChange &&"));
-  const padding = /padding: isMobile \? "0 6px" : "8px 12px"/;
-  const height = /height: 32/;
+  // Skin values: this fork tightens the composer controls to 6px 10px / 28px.
+  const padding = /padding: isMobile \? "0 6px" : "6px 10px"/;
+  const height = /height: 28/;
   for (const [label, markup] of [["read-only", readOnly], ["dropdown", dropdown]]) {
     assert.match(markup, padding, `${label} horizontal padding`);
     assert.match(markup, height, `${label} height`);

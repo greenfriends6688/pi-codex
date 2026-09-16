@@ -2666,8 +2666,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   display: "flex", alignItems: "center", gap: 5,
                   // The control row has no gap; each control pads itself, so match
                   // the neighbouring buttons or this sits flush against Stop.
-                  padding: isMobile ? "0 6px" : "8px 12px",
-                  height: 32,
+                  // Values follow the fork's tighter composer controls
+                  // (6px 10px / 28px), not upstream's 8px 12px / 32px.
+                  padding: isMobile ? "0 6px" : "6px 10px",
+                  height: 28,
                   color: "var(--text-dim)", fontSize: 12,
                 }}
               >
