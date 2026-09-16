@@ -92,6 +92,11 @@ async function fetchEntries(dirPath: string): Promise<FileNode[]> {
     throw new Error(message);
   }
   const data = await res.json() as { entries?: FileEntry[] };
+  // A response without an entries array is a failure, not an empty directory:
+  // silently rendering "no files" made a broken listing look like an empty folder.
+  if (!Array.isArray(data.entries)) {
+    throw new Error("Directory listing was unavailable");
+  }
   return (data.entries ?? []).map((e) => ({
     name: e.name,
     fullPath: joinFilePath(dirPath, e.name),

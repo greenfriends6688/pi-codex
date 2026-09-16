@@ -308,6 +308,8 @@ export const zhCNLocale: LocalePlugin = {
     "files.conflict": "冲突",
     "files.newlyUploaded": "刚上传",
     "files.containsChangedFiles": "包含已更改文件",
+    "files.editorUnavailable": "实时编辑器未能加载，当前为只读预览。",
+    "files.editorReload": "重新加载",
     "files.expand": "展开文档（收起文件树）",
     "files.collapse": "收起文档（恢复文件树）",
     "browser.newTab": "新建浏览器标签",

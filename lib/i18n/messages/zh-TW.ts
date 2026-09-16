@@ -308,6 +308,8 @@ export const zhTWLocale: LocalePlugin = {
     "files.conflict": "衝突",
     "files.newlyUploaded": "剛上傳",
     "files.containsChangedFiles": "包含已變更的檔案",
+    "files.editorUnavailable": "即時編輯器未能載入，目前為唯讀預覽。",
+    "files.editorReload": "重新載入",
     "files.expand": "展開文件（收起檔案樹）",
     "files.collapse": "收起文件（恢復檔案樹）",
     "browser.newTab": "新增瀏覽器分頁",

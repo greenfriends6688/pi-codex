@@ -308,6 +308,8 @@ export const enLocale: LocalePlugin = {
     "files.conflict": "Conflict",
     "files.newlyUploaded": "Newly uploaded",
     "files.containsChangedFiles": "Contains changed files",
+    "files.editorUnavailable": "The live editor could not load, so this is the read-only preview.",
+    "files.editorReload": "Reload",
     "files.expand": "Expand document",
     "files.collapse": "Collapse document",
     "browser.newTab": "New browser tab",

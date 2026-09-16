@@ -2685,9 +2685,46 @@ function TextFileViewer({
           />
         ) : liveEditing ? (
           <MarkdownEditorBoundary fallback={(
-            <div className="markdown-body markdown-file-preview markdown-readable-column" style={{ padding: "24px 32px" }}>
-              <MarkdownFilePreview content={content} filePath={filePath} cwd={cwd}
-                sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} />
+            <div>
+              {/* The WYSIWYG editor is a lazy chunk; when it cannot mount (typically a
+                  stale page after a rebuild) editing stops working here. Say so and
+                  offer the one-click recovery instead of silently going read-only. */}
+              <div
+                role="status"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  margin: "8px 12px 0",
+                  padding: "6px 10px",
+                  border: "1px solid color-mix(in srgb, var(--warning) 35%, var(--border))",
+                  borderRadius: "var(--radius-md)",
+                  background: "var(--warning-soft)",
+                  color: "var(--warning)",
+                  fontSize: 12,
+                }}
+              >
+                <span>{t("files.editorUnavailable")}</span>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  style={{
+                    padding: "2px 8px",
+                    border: "1px solid color-mix(in srgb, var(--warning) 45%, var(--border))",
+                    borderRadius: "var(--radius-sm)",
+                    background: "transparent",
+                    color: "inherit",
+                    cursor: "pointer",
+                    font: "inherit",
+                  }}
+                >
+                  {t("files.editorReload")}
+                </button>
+              </div>
+              <div className="markdown-body markdown-file-preview markdown-readable-column" style={{ padding: "16px 32px 24px" }}>
+                <MarkdownFilePreview content={content} filePath={filePath} cwd={cwd}
+                  sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} />
+              </div>
             </div>
           )}>
             <MarkdownFileEditor key={filePath} filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId}
