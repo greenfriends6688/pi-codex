@@ -25,6 +25,7 @@ import { encodeFilePathForApi, getFileName, getRelativeFilePath, sameFilePath } 
 import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { clearLocationTextHighlight, LOCATION_HIGHLIGHT_CLASS } from "@/lib/location-highlight";
 import { MarkdownFilePreview } from "./MarkdownFilePreview";
+import { MarkdownEditorBoundary } from "./MarkdownEditorBoundary";
 import type { MarkdownEditorLocationApi, MarkdownEditorSelection } from "./MarkdownFileEditor";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { parseUnifiedPatch } from "@/lib/patch";
@@ -46,7 +47,18 @@ export interface FileLocationTarget {
   text: string;
 }
 
-const MarkdownFileEditor = dynamic(() => import("./MarkdownFileEditor"), { ssr: false });
+const MarkdownFileEditor = dynamic(() => import("./MarkdownFileEditor"), {
+  ssr: false,
+  // Without a fallback the lazy chunk leaves the pane empty while it loads (and
+  // forever if the import rejects) — see MarkdownEditorBoundary.
+  loading: () => (
+    <div className="markdown-body markdown-file-preview markdown-readable-column" style={{ padding: "24px 32px" }} aria-busy="true">
+      <div className="skeleton-line" style={{ height: 14, width: "42%" }} />
+      <div className="skeleton-line" style={{ height: 14, width: "86%", marginTop: 10 }} />
+      <div className="skeleton-line" style={{ height: 14, width: "74%", marginTop: 10 }} />
+    </div>
+  ),
+});
 const CodeFileEditor = dynamic(() => import("./CodeFileEditor"), { ssr: false });
 
 interface Props {
@@ -2672,18 +2684,25 @@ function TextFileViewer({
              title={t("i18n.htmlPreview")}
           />
         ) : liveEditing ? (
-          <MarkdownFileEditor key={filePath} filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId}
-            onOpenFile={onOpenFile} content={content} watchEnabled={watchEnabled}
-            onLocationReady={handleMarkdownLocationReady}
-            onSelectionChange={(selection: MarkdownEditorSelection | null) => {
-              if (!selection) {
-                setSelectedLineRange(null);
-                setSelectionAction(null);
-                return;
-              }
-              setSelectedLineRange({ startLine: selection.startLine, endLine: selection.endLine });
-              setSelectionAction(selection);
-            }} />
+          <MarkdownEditorBoundary fallback={(
+            <div className="markdown-body markdown-file-preview markdown-readable-column" style={{ padding: "24px 32px" }}>
+              <MarkdownFilePreview content={content} filePath={filePath} cwd={cwd}
+                sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} />
+            </div>
+          )}>
+            <MarkdownFileEditor key={filePath} filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId}
+              onOpenFile={onOpenFile} content={content} watchEnabled={watchEnabled}
+              onLocationReady={handleMarkdownLocationReady}
+              onSelectionChange={(selection: MarkdownEditorSelection | null) => {
+                if (!selection) {
+                  setSelectedLineRange(null);
+                  setSelectionAction(null);
+                  return;
+                }
+                setSelectedLineRange({ startLine: selection.startLine, endLine: selection.endLine });
+                setSelectionAction(selection);
+              }} />
+          </MarkdownEditorBoundary>
         ) : isMarkdown && effectiveDisplayMode === "preview" ? (
           <div className="markdown-body markdown-file-preview markdown-readable-column" style={{ padding: "24px 32px" }}>
             <MarkdownFilePreview content={content} filePath={filePath} cwd={cwd}

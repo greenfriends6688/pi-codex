@@ -165,6 +165,15 @@ export function ExplorerPanel({
             <path d="M3.5 6.5V5.7a1.2 1.2 0 0 1 1.2-1.2h4l1.8 2h8.8a1.2 1.2 0 0 1 1.2 1.2v.8" />
           </svg>
           <span className="file-explorer-title-label">{t("files.explorer")}</span>
+          {/* Which directory this tree is listing: without it an empty tree is
+              indistinguishable from a wrong cwd. */}
+          <span
+            className="file-explorer-title-label"
+            style={{ color: "var(--text-dim)", fontWeight: 400 }}
+            title={cwd}
+          >
+            {cwd.split(/[\/]/).filter(Boolean).at(-1) ?? cwd}
+          </span>
         </button>
         {onOpenTerminal && (
           <ToolbarIconButton

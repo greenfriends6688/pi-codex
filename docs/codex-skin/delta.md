@@ -680,3 +680,18 @@ E2E_SERVER_MODE=start E2E_CHROME_CHANNEL=chrome node e2e/run.mjs   # 需先有�
   需要用户确认 **Source 模式是否正常** 与文件路径。
 - 「文件树显示未找到文件」：本地实测同一组件的树能正常列出 165 个节点，怀疑与该项目的
   目录内容/信任状态有关；需要用户提供那是哪个项目（截图里是「招标改」）。
+
+### 13. 修「markdown 预览空白」（2026-09-16）
+
+**根因**：`FileViewer` 用 `next/dynamic(() => import("./MarkdownFileEditor"), { ssr: false })` 懒加载
+WYSIWYG 编辑器，而 `.md` + Preview + 可编辑时走的正是这个分支（`liveEditing`）。
+**两个缺口**：① 没有 `loading` 回退 → 加载期间空白；② 没有错误回退 → chunk 加载失败（最典型的是
+服务重建后旧页面仍请求已被替换的 chunk，`ChunkLoadError`）就**永久空白且不报错**。
+所以表现为「Source 正常（静态渲染）、Preview 白」，且硬刷新后往往就好了。
+
+**修法**：新增 `components/MarkdownEditorBoundary.tsx`（极小的错误边界），
+失败时回退到静态预览 `MarkdownFilePreview`；`dynamic()` 补 `loading` 骨架。
+即：编辑器拿不到就退化成只读预览，而不是空矩形。
+
+**顺带**：文件树头部原来只显示「文件浏览器」，现在补上它正在列出的目录名（tooltip 是完整路径）——
+否则「空树」和「列错目录」在界面上无法区分。
