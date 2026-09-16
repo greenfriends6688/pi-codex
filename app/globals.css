@@ -828,7 +828,7 @@ button.extension-widget-trigger:focus-visible {
   padding: 3px 12px 8px;
   color: var(--text-muted);
   font-family: var(--font-mono);
-  font-size: var(--text-lg);
+  font-size: var(--extension-widget-font-size, var(--text-lg));
   line-height: 1.45;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
