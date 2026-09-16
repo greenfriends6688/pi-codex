@@ -101,7 +101,7 @@
 
 | theme | dark 类 | --bg | --text | --accent | --primary-bg |
 |---|---|---|---|---|---|
-| light | false | `oklch(0.995 0.004 85)` | `oklch(0.26 0.015 55)` | `oklch(0.66 0.16 250)` | `oklch(0.26 0.015 55)` |
+| light | false | `oklch(1 0 0)` | `oklch(0.26 0 0)` | `oklch(0.66 0.16 250)` | `oklch(0.26 0 0)` |
 | dark | true | `oklch(0.22 0.008 60)` | `oklch(0.94 0.01 85)` | `oklch(0.84 0.08 245)` | `oklch(0.94 0.01 85)` |
 | mist | false | `oklch(0.985 0.005 165)` | `oklch(0.27 0.02 165)` | `oklch(0.46 0.07 178)` | `oklch(0.27 0.02 165)` |
 | rose | false | `oklch(0.987 0.005 20)` | `oklch(0.28 0.015 12)` | `oklch(0.47 0.1 5)` | `oklch(0.28 0.015 12)` |

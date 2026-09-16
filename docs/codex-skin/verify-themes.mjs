@@ -24,7 +24,7 @@ const BASE = "http://127.0.0.1:30141/";
 // 比较时会把 oklch() 归一化，所以这里写作者态的 `oklch(0.995 0.004 85)` 即可，
 // 构建压缩成 `oklch(99.5% .004 85)` 也不会误报。
 const EXPECTED = {
-  light: { dark: false, bg: "oklch(0.995 0.004 85)", text: "oklch(0.26 0.015 55)", accent: "oklch(0.66 0.16 250)", primaryBg: "oklch(0.26 0.015 55)" },
+  light: { dark: false, bg: "oklch(1 0 0)", text: "oklch(0.26 0 0)", accent: "oklch(0.66 0.16 250)", primaryBg: "oklch(0.26 0 0)" },
   dark: { dark: true, bg: "oklch(0.22 0.008 60)", text: "oklch(0.94 0.01 85)", accent: "oklch(0.84 0.08 245)", primaryBg: "oklch(0.94 0.01 85)" },
   mist: { dark: false, bg: "oklch(0.985 0.005 165)", text: "oklch(0.27 0.02 165)", accent: "oklch(0.46 0.07 178)", primaryBg: "oklch(0.27 0.02 165)" },
   rose: { dark: false, bg: "oklch(0.987 0.005 20)", text: "oklch(0.28 0.015 12)", accent: "oklch(0.47 0.1 5)", primaryBg: "oklch(0.28 0.015 12)" },

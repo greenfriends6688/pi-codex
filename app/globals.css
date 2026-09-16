@@ -128,34 +128,37 @@
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* light — warm sand neutrals, blue accent, warm-ink primary action */
+/* light — pure white surfaces with neutral grey hairlines and a blue accent.
+   Deliberately achromatic: a warm cast here reads as a dirty page background
+   (user feedback 2026-09-16), so the light theme keeps chroma 0 and lets the
+   accent carry the colour. The tinted palettes (mist, rose) are opt-in. */
 :root,
 [data-theme="light"] {
   color-scheme: light;
-  --bg: oklch(0.995 0.004 85);
-  --bg-panel: oklch(0.966 0.006 82);
+  --bg: oklch(1 0 0);
+  --bg-panel: oklch(0.98 0 0);
   --bg-elev: oklch(1 0 0);
-  --bg-hover: oklch(0.3 0.02 60 / 0.055);
-  --bg-selected: oklch(0.3 0.02 60 / 0.095);
-  --bg-subtle: oklch(0.3 0.02 60 / 0.032);
-  --border: oklch(0.3 0.02 60 / 0.1);
-  --border-strong: oklch(0.3 0.02 60 / 0.17);
-  --border-faint: oklch(0.3 0.02 60 / 0.055);
-  --text: oklch(0.26 0.015 55);
-  --text-muted: oklch(0.26 0.015 55 / 0.72);
-  --text-dim: oklch(0.26 0.015 55 / 0.52);
+  --bg-hover: oklch(0.3 0 0 / 0.055);
+  --bg-selected: oklch(0.3 0 0 / 0.095);
+  --bg-subtle: oklch(0.3 0 0 / 0.032);
+  --border: oklch(0.3 0 0 / 0.1);
+  --border-strong: oklch(0.3 0 0 / 0.17);
+  --border-faint: oklch(0.3 0 0 / 0.055);
+  --text: oklch(0.26 0 0);
+  --text-muted: oklch(0.26 0 0 / 0.72);
+  --text-dim: oklch(0.26 0 0 / 0.52);
   --accent: oklch(0.66 0.16 250);
   --accent-hover: oklch(0.6 0.17 250);
-  --accent-contrast: oklch(0.995 0.004 85);
+  --accent-contrast: oklch(1 0 0);
   --accent-soft: oklch(0.66 0.16 250 / 0.12);
   --accent-border: oklch(0.66 0.16 250 / 0.5);
-  --primary-bg: oklch(0.26 0.015 55);
-  --primary-fg: oklch(0.995 0.004 85);
-  --primary-hover: oklch(0.36 0.015 55);
-  --user-bg: oklch(0.3 0.02 60 / 0.05);
+  --primary-bg: oklch(0.26 0 0);
+  --primary-fg: oklch(1 0 0);
+  --primary-hover: oklch(0.36 0 0);
+  --user-bg: oklch(0.3 0 0 / 0.05);
   --assistant-bg: transparent;
-  --tool-bg: oklch(0.966 0.006 82);
-  --code-bg: oklch(0.966 0.006 82);
+  --tool-bg: oklch(0.98 0 0);
+  --code-bg: oklch(0.98 0 0);
   --danger: oklch(0.53 0.19 27);
   --danger-soft: oklch(0.53 0.19 27 / 0.11);
   --success: oklch(0.58 0.15 152);
@@ -165,7 +168,7 @@
   --diff-added: oklch(0.58 0.15 152 / 0.16);
   --diff-removed: oklch(0.53 0.19 27 / 0.16);
   --focus-ring: color-mix(in oklab, oklch(0.66 0.16 250) 70%, transparent);
-  --scrim: oklch(0.24 0.01 60 / 0.45);
+  --scrim: oklch(0 0 0 / 0.45);
 }
 
 /* dark — warm brown-black neutrals, pale blue accent, warm-white action */
