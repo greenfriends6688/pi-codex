@@ -2411,3 +2411,12 @@ span.token.table {
 .file-panel-body:has(.file-viewer-shell[data-expanded]) .explorer-column {
   display: none;
 }
+
+/* The workspace-boundary controls sit on top of the panel edge, where the chat's
+   own header artwork reaches them in the empty (no session) state and swallows
+   the click. Keep them above the surfaces they separate, still under modals. */
+.desktop-sidebar-toggle,
+.desktop-secondary-workspace-toggle,
+.desktop-workspace-role-toggle {
+  z-index: 300 !important;
+}
