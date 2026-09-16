@@ -550,3 +550,36 @@ E2E_SERVER_MODE=start E2E_CHROME_CHANNEL=chrome node e2e/run.mjs   # 需先有�
 含 1280px 与 390px 两轮（分页/分支/markdown/代码/工具卡/compaction 导航、扩展弹窗键盘与超时、
 聊天外观持久化）。单测 1126/1130（4 条既有环境性失败），`tsc --noEmit` 干净，
 `audit-tokens` 29 刻度 + 34×5 调色板，`verify-themes` 5/5。
+
+### 批次 C-1（2026-09-16，分支 `pick/c-2026-09-16`）
+
+批次 C 共评估 34 个候选（上游 61 个 open PR 去掉已收的 27 个）。评估口径是**三条污染面**：
+① 依赖/构建配置（会污染每一次上游合并）、② 皮肤文件（将来合上游要重打）、③ 与 fork 刻意设计冲突。
+本轮只收「小改动 + 功能独立 + 皮肤面 ≤3」的，收到 6 个，2 个因结构性重叠转入手工嫁接队列。
+
+**收下（6 个）**
+
+| PR | 内容 | 提交 | 皮肤重打 |
+|---|---|---|---|
+| #855 | 文件选区工具栏不被会话侧栏遮挡 | `166e02f` | 无 |
+| #777 | 运行中的回合显示推理级别 | `e221058` | 新增的只读块原本写死上游控件几何（`8px 12px` / `h32`），按它**自己那条测试的意图**改成 fork 的 `6px 10px` / `h28`，测试断言同步（`5e3dc8b`） |
+| #733 | 扩展 widget 字号设置 | `8bfde49` | `--extension-widget-font-size` 的兜底从字面量 `14px` 改为 `var(--text-lg)` |
+| #830 | 响应被输出上限截断时提示 | `e18cd88` | 琥珀色字面量 → `--warning` / `--warning-soft`；`borderRadius: 6` → `--radius-md`；丢弃 PR 里为 hover 门控加的 `hovered` 状态（fork 的操作行常显） |
+| #836 | 从 minimap 加载更早历史 | `96ff438` | 上游在自己的滚动区里再渲染一个 ChatMinimap；fork 已用 `hasChatMinimap` 挂了一个，故**丢弃那段渲染**、把三个新 prop 接到 fork 已有的挂载点；预览框保留 fork 的 pin 按钮并加上 PR 的「Load earlier」行 |
+| #845 | 「滚动到最新」按钮 | `64e6cd7` | 保留 fork 的底部 marker div（grid 列 + zIndex），只取 PR 的内层按钮块；`32px`/`999px` 对齐到 `--control-lg` / `--radius-pill` |
+
+**转入手工嫁接队列（2 个，本轮未收）**
+
+- **#790 文件面板全宽开关**：5 处冲突全在 `AppShell.tsx` 的同一区域——它的补丁假设上游布局，而 fork 有已收 #838 的「主/副区可切换」布局（`workspace-swapped` / `main-workspace` / `secondary-workspace`）。按台账规矩（结构漂移大的不硬解）放弃 patch，需要读 diff 手工打进 fork 结构。
+- **#841 PDF `#page=` 锚点**：4 处冲突分别叠在 fork 自己的功能上——`file-tab-state.ts` 的 `modeHint: "preview" | "diff"`（#838）、`AppShell` 的 `locationTarget`、`FileViewer` 的选区引用接口（155 行）。其中 `file-tab-state` 还涉及「谁负责 bump revision」的重构，硬解风险高。
+
+**评估结论（供后续批次参考）**
+
+- 34 个里只有 **2 个**碰依赖/构建配置：#725（`package.json` 加依赖）、#801（Windows `bin/` 启动器，且是已收 #838 的子集）→ 都建议不收。
+- 4 个纯文档（#819/#820/#821/#852）→ 不收：fork 的 AGENTS.md 已大改，且 #852 要把 Next 自动生成的规则块提交进仓库。
+- 其余 22 个属「皮肤面 1–5」或「与 fork 设计冲突」（#813 思考级别持久化、#814 模型标签常显、#825 面板拖拽、#834 子代理嵌套），价值/成本见当次评估表，未动。
+
+**踩坑记录**
+
+- **不能在索引有未解冲突时继续叠补丁**：`git apply -3 --check` 会报 `does not exist in index` 并回退成 `direct application`，把后面几个 PR 连带写成冲突态。正确节奏是「一个 PR → 解冲突 → `git commit` → 再 check 下一个」。
+- **`both` 式合并 CSS 要验括号**：冲突两侧直接拼接时，闭合括号可能落在冲突区之外，产物是「无编译错误提示、只有 `next build` 报 `Unclosed block`」。`audit-tokens.mjs` 的括号配平检查只覆盖 `globals.css` / `settings.css`，`*.module.css` 不在内 —— 这次是靠构建才发现的。
