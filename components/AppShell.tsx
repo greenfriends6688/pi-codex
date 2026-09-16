@@ -2364,7 +2364,9 @@ export function AppShell() {
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
               {renderSessionStatsButton(false)}
-              {renderMainFileToggle(false)}
+              {/* The workspace toggle is rendered once, as the boundary control on
+                  .main-panels (line ~2209): a second copy here showed up as two
+                  identical panel icons in the same row. */}
             </div>
           )}
           {isMobile && sessionHasBranches && (
