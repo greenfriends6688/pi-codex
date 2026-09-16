@@ -520,3 +520,33 @@ node docs/codex-skin/capture-themes.mjs     # 重拍 5 套主题 + 设置页截�
 > 从「进行中展开」变为「完成后折叠」是**上游 `isLiveTail` + `defaultExpanded={!finalAnswerMessage}`
 > 的设计**（v0.9.0 原始包即如此），不是这两批改动引入的。这次只是去掉了放大它的
 > `anim-message-in`，闪动感随之减轻；要不要改行为（比如完成后不自动折叠）需另立决策。
+
+### 9. e2e 套件：本机可运行化 + 与 fork 行为对齐（2026-09-15）
+
+背景：这批 pick 的「测试环节」一直没跑完，**根因不是慢，是跑不起来**——
+Playwright 自带的 chromium 在这台机器上不存在（`chromium_headless_shell-1243` 缺失），
+而 macOS 12 又没有 Playwright 1.63 的 chromium 构建，只能用系统 Chrome。
+`e2e/run.mjs` 里是裸 `chromium.launch()`，一启动就死。本机跑法：
+
+```bash
+E2E_SERVER_MODE=start E2E_CHROME_CHANNEL=chrome node e2e/run.mjs   # 需先有生产构建
+```
+
+**改动一：launch 加环境变量门控**（`e2e/run.mjs`）。CI 不设该变量，行为不变。
+
+**改动二：5 处断言与 fork 行为对齐**（上游 e2e 写的是上游数值/行为）：
+
+| 位置 | 上游期望 | fork 实际 | 处理 |
+|---|---|---|---|
+| compacted 会话窗口 | `entryIds[0]=="compact"`、无 user 消息 | `#810` 让窗口只数可见消息，51 条 fixture 整段进窗口 → 首条是 `user` | 改断言：分页含 compaction 分隔条 + 无更早历史（行为本身符合 `buildSessionContext` 的「history pages retain compacted messages」） |
+| 完成态消息的模型名 | 显示 `test/E2E Model` | fork 只在 `isStreaming` 时显示（Codex 安静表面） | 改断言为 0 处 |
+| 聊天宽度/字号默认值 | 820 / 14 / 下限 820 | **860 / 13 / 下限 640**（`useChatAppearance.ts`） | 改断言为 fork 值 |
+| 代码围栏字号 | `16.5px` | CodeBlock 用 `calc(12.5px + offset)` → font=18 时为 **17.5px** | 改断言为 17.5px 并注明公式来源 |
+| 侧栏会话行 tooltip | 裸名字 `[title="X"]` | fork 是 `"<名字> · <相对时间>"` | 改前缀匹配 `[title^="X · "]`，时间文案与语言无关 |
+| 关面板后再读滑块 | 先 `closeSettings()` 再读滑块值 | fork 里 **Escape 会关掉设置面板**，滑块随即从 DOM 消失 | 把该断言移到关闭之前（两处断言意图都保留） |
+| Settings 点击时机 | 一次点击即可 | fork 的入口在侧栏底部，水合更晚；`domcontentloaded` 后立即点会丢事件 | 加 `openSettingsPanel()` 重试直到面板出现 |
+
+实测（Post-rollback 生产构建）：`E2E_SERVER_MODE=start` 下 **8/8 PASS**，
+含 1280px 与 390px 两轮（分页/分支/markdown/代码/工具卡/compaction 导航、扩展弹窗键盘与超时、
+聊天外观持久化）。单测 1126/1130（4 条既有环境性失败），`tsc --noEmit` 干净，
+`audit-tokens` 29 刻度 + 34×5 调色板，`verify-themes` 5/5。
