@@ -1926,8 +1926,11 @@ export function AppShell() {
       title={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
       aria-label={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
       style={{
+        // fork:ui-topbar-align — pinned to `top: 0` these controls sat 9px above
+        // the header's own centre (28px button in a 46px bar), so the boundary
+        // toggle looked out of line with every icon in the bar.
         position: mobile ? "relative" : "absolute",
-        top: mobile ? undefined : 0,
+        top: mobile ? undefined : "calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2)",
         // The sidebar resizer writes this inherited variable on every pointer
         // move. Reading it here keeps the boundary button in lockstep instead
         // of waiting for React to commit the final width on pointer-up.
@@ -1972,8 +1975,9 @@ export function AppShell() {
         aria-label={label}
         data-mobile-toolbar-file={mobile ? "true" : undefined}
         style={{
+          // fork:ui-topbar-align — see the sidebar toggle: same 9px offset.
           position: mobile ? "relative" : "absolute",
-          top: mobile ? undefined : 0,
+          top: mobile ? undefined : "calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2)",
           // The resizer writes this CSS variable on every pointer move, while
           // React state is intentionally committed only when dragging ends.
           // Reading the variable here keeps the divider control in lockstep.
@@ -2017,7 +2021,8 @@ export function AppShell() {
       aria-label={translate("layout.switchChatWorkspace")}
       style={{
         position: "absolute",
-        top: 0,
+        // fork:ui-topbar-align — third boundary control, same centring fix.
+        top: "calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2)",
         right: 0,
         zIndex: 261,
         display: "flex", alignItems: "center", justifyContent: "center",

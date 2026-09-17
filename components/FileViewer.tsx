@@ -1623,16 +1623,10 @@ function TextFileViewer({
   const [displayMode, setDisplayMode] = useState<DisplayMode>(requestedInitialDisplayMode);
   // Fullscreen support for the whole viewer shell (toolbar + content), so a
   // document can be read or edited without the surrounding panels.
-  const shellRef = useRef<HTMLDivElement | null>(null);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   // "Expand" widens the document inside the layout by giving up the tree column —
-  // PiDeck's ⤢ behaviour — and stays separate from true fullscreen.
+  // PiDeck's ⤢ behaviour. The Fullscreen API button that used to sit next to it is
+  // gone: covering the whole screen was not what this control is for.
   const [isExpanded, setIsExpanded] = useState(false);
-  useEffect(() => {
-    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
-    document.addEventListener("fullscreenchange", onChange);
-    return () => document.removeEventListener("fullscreenchange", onChange);
-  }, []);
   const [wrapLines, setWrapLines] = useState(initialWrapLines);
   const [watching, setWatching] = useState(false);
   const esRef = useRef<EventSource | null>(null);
@@ -2402,7 +2396,7 @@ function TextFileViewer({
     : `${language} · ${lines.length} lines · ${formatSize(data!.size)}`;
 
   return (
-    <div ref={shellRef} data-expanded={isExpanded || undefined} className="file-viewer-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
+    <div data-expanded={isExpanded || undefined} className="file-viewer-shell" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}>
       <div
         className="file-viewer-toolbar"
         style={{
@@ -2497,33 +2491,13 @@ function TextFileViewer({
               aria-pressed={isExpanded}
               onClick={() => setIsExpanded((value) => !value)}
             >
+              {/* fork:ui-expand — the ⤢ glyph now belongs to this button. It used
+                  to be a second button that fired the Fullscreen API, which covered
+                  the whole screen even though the user expects the document to fill
+                  the workspace column (the tree gives up its space, nothing else
+                  moves). */}
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 {isExpanded ? (
-                  <>
-                    <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M13 11h5v5" />
-                    <path d="m18 11-5 5" />
-                  </>
-                ) : (
-                  <>
-                    <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M11 16H6v-5" />
-                    <path d="m6 16 5-5" />
-                  </>
-                )}
-              </svg>
-            </button>
-            <button
-              type="button"
-              className="file-viewer-icon-button"
-              title={t(isFullscreen ? "files.exitFullscreen" : "files.fullscreen")}
-              aria-label={t(isFullscreen ? "files.exitFullscreen" : "files.fullscreen")}
-              aria-pressed={isFullscreen}
-              onClick={() => {
-                if (document.fullscreenElement) void document.exitFullscreen();
-                else void shellRef.current?.requestFullscreen();
-              }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                {isFullscreen ? (
                   <>
                     <path d="M9 4v5H4" /><path d="M15 20v-5h5" />
                     <path d="M9 9 4 4" /><path d="m15 15 5 5" />

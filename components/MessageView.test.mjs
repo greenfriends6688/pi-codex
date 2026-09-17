@@ -362,3 +362,17 @@ test("shows tool-result images while the tool details stay collapsed", () => {
   assert.doesNotMatch(html, /captured-1280x720/);
   assert.doesNotMatch(html, /"tabId"/);
 });
+
+test("links the opt-in URL inside a provider error", () => {
+  const message = {
+    role: "assistant",
+    content: [],
+    stopReason: "error",
+    errorMessage: 'OpenAI API error (403): {"type":"DataPolicyError","message":"This model collects data used to improve its quality and requires explicit opt in: https://opencode.ai/workspace/wrk_01KVXVWRFS6QMPTM29S0S8280B/go"}',
+  };
+  const html = renderMessage(message);
+
+  assert.match(html, /<a [^>]*href="https:\/\/opencode\.ai\/workspace\/wrk_01KVXVWRFS6QMPTM29S0S8280B\/go"/);
+  assert.match(html, /target="_blank"/);
+  assert.match(html, /DataPolicyError/);
+});

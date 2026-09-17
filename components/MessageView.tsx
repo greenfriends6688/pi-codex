@@ -100,6 +100,19 @@ function formatMessageBytes(n: number): string {
  * MarkdownBody with an oversized-content guard: huge messages render as a
  * click-to-reveal plain-text <pre> instead of running the markdown pipeline.
  */
+/**
+ * Provider errors routinely carry an actionable URL ("opt in at …", "see …").
+ * Rendering the whole box as plain text made the user copy it by hand, so any
+ * http(s) token inside the message becomes a link. Everything else stays as it
+ * was, including the `pre-wrap` layout.
+ */
+export function splitErrorLinks(text: string): { text: string; link: boolean }[] {
+  return text.split(/(https?:\/\/[^\s"'<>()]+)/g).filter((part) => part !== "").map((part) => ({
+    text: part,
+    link: /^https?:\/\//.test(part),
+  }));
+}
+
 function SafeMarkdownBody({ children, className, ...props }: React.ComponentProps<typeof MarkdownBody>) {
   const { t } = useI18n();
   const [showRaw, setShowRaw] = useState(false);
@@ -831,7 +844,17 @@ function AssistantMessageView({
             overflowWrap: "anywhere",
           }}
         >
-          Error: {providerError}
+          Error: {splitErrorLinks(providerError).map((part, index) => part.link ? (
+            <a
+              key={index}
+              href={part.text}
+              target="_blank"
+              rel="noreferrer noopener"
+              style={{ color: "inherit", textDecoration: "underline", overflowWrap: "anywhere" }}
+            >
+              {part.text}
+            </a>
+          ) : part.text)}
         </div>
       )}
 
