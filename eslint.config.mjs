@@ -15,6 +15,12 @@ const eslintConfig = [
       "react-hooks/set-state-in-effect": "off",
     },
   },
+  {
+    // Last: the Electron main process is CommonJS by construction, and the
+    // shared configs above re-enable the rule.
+    files: ["electron/**/*.js"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
 ];
 
 export default eslintConfig;

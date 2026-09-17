@@ -44,10 +44,7 @@ import {
   serializeSessionReferenceClipboard,
   type SessionReference,
 } from "@/lib/composer-context";
-import {
-  SESSION_ROW_CONTEXT_MENU_EVENT,
-  type SessionRowContextMenuDetail,
-} from "@/lib/session-row-context-menu";
+import type { SessionRowContextMenuDetail } from "@/lib/session-row-context-menu";
 import { ContextMenuProvider } from "./ContextMenu";
 import { SessionRowContextMenuBridge } from "./SessionRowContextMenuBridge";
 import { WallpaperLayer } from "./WallpaperLayer";
