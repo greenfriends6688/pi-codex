@@ -83,6 +83,9 @@ type AutoNameStatus =
   | { kind: "error"; message: string };
 
 const TOP_BAR_ICON_BUTTON_SIZE = 28;
+// The tree column beside a document only renders when the panel is this wide
+// (see the container query on .file-panel-body).
+const EXPLORER_COLUMN_MIN_PANEL_WIDTH = 760;
 const AGENT_PANEL_WIDTH = 420;
 /** Below this rendered panel width the tree column is dropped so the document keeps room. */
 
@@ -1117,13 +1120,17 @@ export function AppShell() {
       setRightPanelOpen(true);
     } else {
       setRightPanelOpen(true);
-      // fork:ui-stable-panel — opening a document used to force the panel to
-      // ~58vw when it was narrower than the tree threshold, and a later reclamp
-      // pulled it back to the responsive maximum. The panel visibly resized on
-      // its own. Width is the user's now: a narrow panel simply keeps the tree
-      // as the panel's single surface (the container query already handles it).
+      // fork:ui-stable-panel — a document only gets the tree *beside* it when
+      // the panel clears the container-query threshold, so widen once when it
+      // does not. The previous version asked for min(58vw, 1020) and the
+      // responsive maximum (viewport - chat - sidebar) then clamped it back,
+      // which is what made the panel resize on its own; clamping the request to
+      // that same maximum keeps the widen a one-shot with no snap-back.
+      if (rightPanelResizer.width < EXPLORER_COLUMN_MIN_PANEL_WIDTH) {
+        rightPanelResizer.setWidth(Math.min(EXPLORER_COLUMN_MIN_PANEL_WIDTH + 60, getResponsiveRightPanelMaxWidth()));
+      }
     }
-  }, [isMobile, workspaceSwapped]);
+  }, [isMobile, rightPanelResizer, workspaceSwapped, getResponsiveRightPanelMaxWidth]);
 
   const handleOpenLinkedFile = useCallback((filePath: string, locationTarget?: Omit<FileLocationTarget, "filePath">) => {
     const baseCwd = selectedSession?.cwd ?? activeCwd;
@@ -1159,9 +1166,12 @@ export function AppShell() {
       setRightPanelOpen(true);
     } else {
       setRightPanelOpen(true);
-      // fork:ui-stable-panel — same as handleOpenFile: no forced widening.
+      // fork:ui-stable-panel — same one-shot widen as handleOpenFile.
+      if (rightPanelResizer.width < EXPLORER_COLUMN_MIN_PANEL_WIDTH) {
+        rightPanelResizer.setWidth(Math.min(EXPLORER_COLUMN_MIN_PANEL_WIDTH + 60, getResponsiveRightPanelMaxWidth()));
+      }
     }
-  }, [isMobile]);
+  }, [isMobile, rightPanelResizer, getResponsiveRightPanelMaxWidth]);
 
   const handleBrowserUrlChange = useCallback((tabId: string, url: string) => {
     setBrowserTabs((tabs) => tabs.map((tab) => (tab.id === tabId ? { ...tab, url } : tab)));

@@ -1048,7 +1048,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onCompact={session || isNew ? handleCompact : undefined}
       onAbortCompaction={handleAbortCompaction}
       isCompacting={isCompacting}
-      contextUsage={contextUsage}
       compactError={compactError}
       compactResult={compactResult}
       toolPreset={toolPreset}

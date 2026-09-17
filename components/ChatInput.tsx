@@ -31,7 +31,6 @@ import { ThinkingIcon } from "./ThinkingIcon";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
 import { ComposerContextStrip } from "./ComposerContextStrip";
-import { ContextUsageRing, contextUsageTitle, type ContextUsage } from "./fork/ContextUsageRing";
 import {
   normalizeSelectionContext,
   normalizeSessionReference,
@@ -70,8 +69,6 @@ interface Props {
   onCompact?: () => void;
   onAbortCompaction?: () => void;
   isCompacting?: boolean;
-  /** fork:ui-context-ring — context-window usage shown as a ring on the compact control. */
-  contextUsage?: ContextUsage | null;
   compactError?: string | null;
   compactResult?: CompactResultInfo | null;
   toolPreset?: ToolPreset;
@@ -577,7 +574,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
-  onCompact, onAbortCompaction, isCompacting, contextUsage, compactError, compactResult, toolPreset, onToolPresetChange,
+  onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
@@ -2880,11 +2877,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     e.currentTarget.style.background = isCompacting ? "var(--danger-soft)" : "none";
                     e.currentTarget.style.color = isCompacting ? "var(--danger)" : "var(--text-muted)";
                   }}
-                   title={isCompacting
-                     ? t("chat.stopCompaction")
-                     : contextUsage?.contextWindow
-                       ? contextUsageTitle(contextUsage, t("chat.compactContext"))
-                       : t("chat.compactContext")}
+                   title={isCompacting ? t("chat.stopCompaction") : t("chat.compactContext")}
                    aria-label={isCompacting ? t("chat.stopCompaction") : t("chat.compactContext")}
                 >
                   {isCompacting ? (
@@ -2984,18 +2977,6 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
-            )}
-            {/* fork:ui-context-ring — the context gauge sits in the input box on
-                its own, next to the send control: the compact button keeps its
-                own identity, this is a readout (hover for the numbers). */}
-            {!isMobile && contextUsage?.contextWindow && (
-              <span
-                title={contextUsageTitle(contextUsage, "")}
-                aria-label={contextUsageTitle(contextUsage, "")}
-                style={{ display: "inline-flex", alignItems: "center", alignSelf: "center", paddingLeft: 4, flexShrink: 0 }}
-              >
-                <ContextUsageRing usage={contextUsage} size={15} />
-              </span>
             )}
             {!isMobile && (isStreaming ? stopButton : sendButton)}
             </div>
