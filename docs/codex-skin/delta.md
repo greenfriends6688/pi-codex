@@ -893,6 +893,21 @@ Windows bash 环境隔离、PTY 运行时、1 条既有 ChatInput 用例）｜ `
 - **ui-10 全量 `DialogShell`**：见上表说明。
 - **ui-14 顶栏次级动作收进 `⋯`**：手机端已有溢出菜单；桌面端需要新增宽度侦测状态，收益仅「少几个图标」。
 
+### 26. 面板宽度不再自己跳 + 壁纸补齐四个漏掉的实心面（2026-09-17）
+
+用户反馈「文件树一会儿大一会儿小」「壁纸没盖到文件树」，以及截图里指出的其它位置。
+
+| 问题 | 真因 | 改法 |
+| --- | --- | --- |
+| 文件树区域自己变大变小 | `handleOpenFile` / `handleOpenBrowser` 在面板窄于 760px 时**强制**把宽度设到 `min(58vw, 1020)`；而 `getRightPanelMaxWidth` 的上限是 `viewport - 420 - sidebar`（1440 视口 + 244 侧栏 = 776），随后一次 reclamp 又把它拉回 776 → 一开一关就来回跳 | 删掉两处强制加宽（含 `EXPLORER_COLUMN_MIN_PANEL_WIDTH` 常量）。宽度只属于用户与响应式默认值；面板窄时树就按既有容器查询退化成单面，本来就设计好了 |
+| 壁纸没盖到文件树 | 面板容器对 `trans` 只是「72%→65% 半透明」，叠在 70% 遮罩上 ≈ 90% 不透明，看着就是白板 | `trans` 现在真的透明（面板不再自建表面）；`blur` = 半透明表面 + `backdrop-filter`；`none` = 实心。三个档位从此语义清晰 |
+| 顶栏那条白带 | 顶栏**外层包装 div**（`AppShell` 里 inline `background: var(--bg)`）没有被壁纸规则覆盖，`.main-workspace-header` 那层才被覆盖 | 用 `:has(> .main-workspace-header)` 选中包装层并透明（纯 CSS，不动 React） |
+| minimap 悬停预览、设置弹窗 | `.preview`（CSS module 作用域）与 `.settings-dialog-surface` 都是实心 `var(--bg)` | 各自改为 `color-mix(--bg 88%, transparent)`；module 里用 `:global(html[data-wallpaper="on"]) .preview` |
+
+**验证**：`tsc`/`lint` 0 错 ｜ `test` 1265/1265 ｜ 浏览器实测（1440、壁纸开、panel=trans）：
+面板宽度 518（= `min(36vw,560)` 默认，不再跳到 835）、`panelBg`/`barWrapBg`/`treeBg` 均为 `rgba(0,0,0,0)`、
+`.chat-wallpaper` 的 left/right 均为 0（图层铺满），截图里侧栏 / 聊天 / 文件面板共用同一张画。
+
 ### 25. 顶栏边界按钮对齐 + ⤢ 不再抢整屏（2026-09-17）
 
 | 反馈 | 实测 | 改法 |

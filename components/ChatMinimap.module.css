@@ -360,3 +360,9 @@
 .turn[data-located="true"] .number {
   color: var(--accent);
 }
+
+/* fork:ui-wallpaper-coverage — keep the hover preview from punching a solid
+   hole in the wallpaper. */
+:global(html[data-wallpaper="on"]) .preview {
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+}

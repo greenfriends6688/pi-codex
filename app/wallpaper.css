@@ -197,3 +197,46 @@ html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-m
 html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-message="blur"]) .chat-content > div {
   background: transparent !important;
 }
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-wallpaper-coverage — the surfaces that stayed solid.
+ *
+ * Four places painted opaque backgrounds far from the wallpaper rules, so the
+ * image stopped at their edges: the wrapper div around the workspace header
+ * (inline `background: var(--bg)`), the file tree's panel, the minimap hover
+ * preview, and the settings dialog. `:has()` keeps this CSS-only — no extra
+ * class needs to travel through React.
+ * ------------------------------------------------------------------------- */
+html[data-wallpaper="on"] .chat-slot > div:has(> .main-workspace-header),
+html[data-wallpaper="on"] .right-panel-container > div:has(> .main-workspace-header) {
+  background: transparent !important;
+}
+
+/* "透明" now means what it says: the panel takes no surface of its own, so the
+   tree sits on the same scrim as the transcript. "毛玻璃" keeps a translucent
+   surface (the alpha knob) plus a backdrop blur; "不透明" stays solid. */
+html[data-wallpaper="on"][data-wallpaper-panel="trans"] :is(.sidebar-container, .right-panel-container) {
+  background: transparent !important;
+}
+
+html[data-wallpaper="on"][data-wallpaper-panel="blur"] :is(.sidebar-container, .right-panel-container) {
+  background: color-mix(in srgb, var(--bg-panel) var(--wp-panel-alpha), transparent) !important;
+  backdrop-filter: blur(var(--wp-blur-panel));
+}
+
+html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) :is(
+  .file-explorer-section,
+  .file-explorer-body,
+  .file-panel-main,
+  .file-panel-body,
+  .explorer-column,
+  .file-viewer-shell
+) {
+  background: transparent !important;
+}
+
+/* Surfaces that float above the layout keep a light scrim instead of a solid
+   fill, so the image stays continuous behind them. */
+html[data-wallpaper="on"] .settings-dialog-surface {
+  background: color-mix(in srgb, var(--bg) 88%, transparent) !important;
+}

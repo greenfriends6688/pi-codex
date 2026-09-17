@@ -85,8 +85,6 @@ type AutoNameStatus =
 const TOP_BAR_ICON_BUTTON_SIZE = 28;
 const AGENT_PANEL_WIDTH = 420;
 /** Below this rendered panel width the tree column is dropped so the document keeps room. */
-const EXPLORER_COLUMN_MIN_PANEL_WIDTH = 760;
-void EXPLORER_COLUMN_MIN_PANEL_WIDTH;
 
 function parkedNewSessionDraftKey(cwd: string): string {
   return `parked-new:${cwd}`;
@@ -1119,15 +1117,13 @@ export function AppShell() {
       setRightPanelOpen(true);
     } else {
       setRightPanelOpen(true);
-      if (rightPanelResizer.width < EXPLORER_COLUMN_MIN_PANEL_WIDTH) {
-        const viewport = typeof window === "undefined" ? 1600 : window.innerWidth;
-        rightPanelResizer.setWidth(Math.min(
-          Math.round(viewport * 0.58),
-          EXPLORER_COLUMN_MIN_PANEL_WIDTH + 260,
-        ));
-      }
+      // fork:ui-stable-panel — opening a document used to force the panel to
+      // ~58vw when it was narrower than the tree threshold, and a later reclamp
+      // pulled it back to the responsive maximum. The panel visibly resized on
+      // its own. Width is the user's now: a narrow panel simply keeps the tree
+      // as the panel's single surface (the container query already handles it).
     }
-  }, [isMobile, rightPanelResizer, workspaceSwapped]);
+  }, [isMobile, workspaceSwapped]);
 
   const handleOpenLinkedFile = useCallback((filePath: string, locationTarget?: Omit<FileLocationTarget, "filePath">) => {
     const baseCwd = selectedSession?.cwd ?? activeCwd;
@@ -1163,12 +1159,9 @@ export function AppShell() {
       setRightPanelOpen(true);
     } else {
       setRightPanelOpen(true);
-      if (rightPanelResizer.width < EXPLORER_COLUMN_MIN_PANEL_WIDTH) {
-        const viewport = typeof window === "undefined" ? 1600 : window.innerWidth;
-        rightPanelResizer.setWidth(Math.min(Math.round(viewport * 0.58), EXPLORER_COLUMN_MIN_PANEL_WIDTH + 260));
-      }
+      // fork:ui-stable-panel — same as handleOpenFile: no forced widening.
     }
-  }, [isMobile, rightPanelResizer]);
+  }, [isMobile]);
 
   const handleBrowserUrlChange = useCallback((tabId: string, url: string) => {
     setBrowserTabs((tabs) => tabs.map((tab) => (tab.id === tabId ? { ...tab, url } : tab)));
