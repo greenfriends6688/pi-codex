@@ -370,6 +370,7 @@ export const zhTWLocale: LocalePlugin = {
     "sidebar.deleteWithShiftClick": "刪除（按住 Shift 點選可跳過確認）",
     "sidebar.expandSubagents": "展開子代理",
     "sidebar.collapseSubagents": "摺疊子代理",
+    "sidebar.more": "更多操作",
     "sidebar.messagesCount": "{count} 則訊息",
     "sidebar.worktreePath": "Worktree：{path}",
     "sidebar.removeWorktreeTitle": "移除 worktree checkout {path}；保留分支",

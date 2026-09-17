@@ -351,7 +351,9 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | "more" | null>(null);
+  /** fork:ui-14 — the ⋯ menu width, so it hangs off the right edge of the bar. */
+  const TOP_BAR_MORE_MENU_WIDTH = 200;
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
@@ -367,7 +369,7 @@ export function AppShell() {
   }, [hasSubagentSessions]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "session",
+    panel: "agents" | "branches" | "system" | "tools" | "session" | "more",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -466,6 +468,16 @@ export function AppShell() {
           top: topBarRect.bottom,
           left: topBarRect.left,
           width: Math.min(AGENT_PANEL_WIDTH, topBarRect.width),
+        });
+        return;
+      }
+      // fork:ui-14 — the overflow menu is a narrow popover pinned to the right
+      // edge, not a full-width panel like the reference surfaces.
+      if (activeTopPanel === "more") {
+        setTopPanelPos({
+          top: topBarRect.bottom,
+          left: Math.max(8, topBarRect.right - TOP_BAR_MORE_MENU_WIDTH),
+          width: TOP_BAR_MORE_MENU_WIDTH,
         });
         return;
       }
@@ -1626,6 +1638,9 @@ export function AppShell() {
             hasSession
           />
         ))}
+        {/* fork:ui-14 — on desktop these two live in the ⋯ menu below; the
+            phone keeps them inline because it already overflows. */}
+        {mobile && (<>
         <button
           ref={systemBtnRef}
           type="button"
@@ -1696,6 +1711,33 @@ export function AppShell() {
           </svg>
 
         </button>
+        </>)}
+        {!mobile && (
+          <button
+            type="button"
+            onClick={() => toggleTopPanel("more", false)}
+            title={translate("sidebar.more")}
+            aria-label={translate("sidebar.more")}
+            aria-haspopup="menu"
+            aria-expanded={activeTopPanel === "more"}
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center",
+              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE,
+              alignSelf: "center", borderRadius: "var(--radius-md)", margin: 0, padding: 0,
+              background: activeTopPanel === "more" ? "var(--bg-selected)" : "none",
+              border: "none",
+              color: activeTopPanel === "more" ? "var(--text)" : "var(--text-muted)",
+              cursor: "pointer", fontSize: 11, whiteSpace: "nowrap",
+              transition: "color 0.1s, background 0.1s",
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = activeTopPanel === "more" ? "var(--text)" : "var(--text-muted)"; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" />
+            </svg>
+          </button>
+        )}
       </div>
     );
   };
@@ -2396,6 +2438,38 @@ export function AppShell() {
                   tools={systemTools}
                   translate={translate}
                 />
+              )}
+              {activeTopPanel === "more" && (
+                // fork:ui-14 — desktop overflow menu (upstream collapses the
+                // reference panels into a ⋯ in TaskHeader). Same two actions,
+                // one click deeper, so the bar stops carrying five icons.
+                <div style={{
+                  margin: 4,
+                  padding: 4,
+                  background: "var(--bg-elev)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-lg)",
+                  boxShadow: "var(--shadow-lg)",
+                }}>
+                  {(["system", "tools"] as const).map((panel) => (
+                    <button
+                      key={panel}
+                      type="button"
+                      onClick={() => handleSystemInfoToggle(panel)}
+                      style={{
+                        display: "flex", alignItems: "center", width: "100%", height: 30,
+                        padding: "0 10px", background: "none", border: "none",
+                        borderRadius: "var(--radius-md)", color: "var(--text)",
+                        cursor: "pointer", fontSize: 13, textAlign: "left",
+                        transition: "background 0.12s",
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
+                    >
+                      {panel === "system" ? translate("system.prompt") : translate("tools.title")}
+                    </button>
+                  ))}
+                </div>
               )}
               {activeTopPanel === "session" && (
                 <div className="session-info-popover" style={{

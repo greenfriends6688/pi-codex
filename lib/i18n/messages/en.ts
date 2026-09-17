@@ -370,6 +370,7 @@ export const enLocale: LocalePlugin = {
     "sidebar.deleteWithShiftClick": "Delete (Shift+click to delete without confirmation)",
     "sidebar.expandSubagents": "Expand subagents",
     "sidebar.collapseSubagents": "Collapse subagents",
+    "sidebar.more": "More actions",
     "sidebar.messagesCount": "{count} msgs",
     "sidebar.worktreePath": "Worktree: {path}",
     "sidebar.removeWorktreeTitle": "Remove worktree checkout {path}; the branch is kept",

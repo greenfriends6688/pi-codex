@@ -893,6 +893,28 @@ Windows bash 环境隔离、PTY 运行时、1 条既有 ChatInput 用例）｜ `
 - **ui-10 全量 `DialogShell`**：见上表说明。
 - **ui-14 顶栏次级动作收进 `⋯`**：手机端已有溢出菜单；桌面端需要新增宽度侦测状态，收益仅「少几个图标」。
 
+### 20. 补上 §19 没落的三项 + 顶栏溢出菜单（2026-09-17 第二轮）
+
+用户反馈「分析过的还没加上」，回头把计划里剩下能安全落地的做掉：
+
+| 编号 | 改了什么 | 接触面 | 回滚 |
+| --- | --- | --- | --- |
+| ui-context-ring | **输入框旁的上下文圆环**（`components/fork/ContextUsageRing.tsx`）：13px `conic-gradient` 环 + 中心挖空，按 >70% warning / >90% danger 取色；放进现有「压缩」按钮当图标 —— 悬停显示「83% used / 827.8k / 1.0M tokens / 压缩上下文」，点击仍是压缩。不新增控件、不动手机控件行。数据走 `ChatWindow` 已持有的 `contextUsage` → `ChatInput` 新可选 prop | T0 + 2 处接线 | 删组件与 prop，恢复原压缩图标 |
+| ui-08（结构版） | 设置改**左列导航**：`SettingsPanel` 新增 `.settings-dialog-body` 两列壳，184px 竖向导航（选中 = `--bg-selected` + 左侧 accent 竖条 2×16），横向 tab 那套 96px/下划线规则删除；手机仍用顶部 select | T1（SettingsPanel 结构）+ fork 自有 CSS | 恢复 `settings-section-tabs` 的横向规则与 nav 的 DOM 位置 |
+| ui-width | 正文列宽 **860 → 800**（`--chat-content-max-width` 与 `CHAT_CONTENT_WIDTH_DEFAULT`）：上游 760、Wegent 768，860 的段落行太长。用户可在「设置 → 通用」覆盖（下限 640 不变） | T1（globals.css + hook 常量 + 测试期望） | 两处常量改回 860 |
+| ui-14（溢出） | 顶栏「系统提示词 / 工具定义」收进 `⋯` 菜单（桌面端）：`activeTopPanel` 新增 `"more"`，弹出面板右对齐、宽 200px；手机端保留原内联按钮（它本来就有溢出层） | T1（AppShell 1 处按钮搬家 + 菜单分支） | 还原两个按钮的渲染条件与菜单分支 |
+
+**仍然没做的两项，以及为什么**
+
+- **ui-06 底部面板**：需要先把 `activeFileTabId` 拆成「右栏 tab / 底栏 tab」两个 id，并给 `useResizablePanel` 加竖向模式；
+  `handleCloseFileTab` 里还混着工作区翻转逻辑。这不是样式改动而是标签模型重构，应单独一轮做（并在浏览器里四档实测）。
+- **ui-10 全量 `DialogShell`**：手机 bottom-sheet 已经拿到（§19），剩下的部分是桌面端一致性，可视收益接近零。
+
+**验证**：`tsc` 0 错 ｜ `lint` 0 错 ｜ `test` 1264/1264 ｜ prod 构建后 Chrome 实测：
+圆环 13×13 且 83% 时为 warning 色、title 三段齐全；设置导航 `flex-direction: column` / 宽 184 / 选中 `oklch(0.3 0 0 / .095)`；
+正文列 800px、composer 832px；顶栏按钮变为「完整历史 / 生成标题 / 更多操作」，
+`⋯` 菜单含「系统提示词 / 工具定义」，点第一项后系统提示面板正常展开（宽 1196）。
+
 **验证**（本次全部通过）：`tsc --noEmit` 0 错 ｜ `npm run lint` 0 错（8 条 warning 全是既有的）｜
 `npm test` 1264/1264 ｜ `npm run prod` 后在真实 Chrome（Playwright + 系统 Chrome）实测：
 空态首页 1440/390 两档（4 卡、手机两列、点击只填输入框）、用户气泡右对齐且右边缘与列对齐（`gap=0`，
