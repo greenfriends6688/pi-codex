@@ -138,7 +138,9 @@ export function WallpaperSettings() {
 
       {error && <p className="settings-wallpaper-error" role="alert">{error}</p>}
 
-      {url && active && (
+      {/* fork:ui-wallpaper — the scrim slider and the per-area modes drive the
+          built-in painting too, so they must not be gated on a user image. */}
+      {enabled && (
         <>
           <div className="settings-chat-option settings-chat-range-option">
             <div className="settings-chat-range-header">

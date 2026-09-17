@@ -66,6 +66,13 @@ html:not([data-wallpaper="on"]) .chat-wallpaper {
 /* --- Per-area frost radii -------------------------------------------------
    `blur` implies `trans`; `none` leaves the surface fully opaque so the
    wallpaper does not show through that area at all. */
+/* One knob for the whole UI: the scrim slider also decides how much image the
+   panels let through (5% less than the message area, with a 35% floor so text
+   stays readable over a busy photo). Wegent/desktop fork use fixed 62-72%. */
+html[data-wallpaper="on"] {
+  --wp-panel-alpha: max(35%, calc(var(--wallpaper-scrim, 70%) - 5%));
+}
+
 html[data-wallpaper="on"][data-wallpaper-input="blur"] { --wp-blur-input: 12px; }
 html[data-wallpaper="on"]:is([data-wallpaper-input="trans"], [data-wallpaper-input="none"]) { --wp-blur-input: 0px; }
 html[data-wallpaper="on"][data-wallpaper-panel="blur"] { --wp-blur-panel: 14px; }
@@ -86,11 +93,11 @@ html[data-wallpaper="on"][data-wallpaper-panel="blur"] .right-panel-container {
 }
 
 html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .sidebar-container {
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-panel) var(--wp-panel-alpha), transparent) !important;
 }
 
 html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .right-panel-container {
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-panel) var(--wp-panel-alpha), transparent) !important;
 }
 
 /* --- Composer ------------------------------------------------------------
@@ -174,9 +181,16 @@ html[data-wallpaper="on"] .app-shell-layout {
 
 /* Top bar and composer join the panel surfaces instead of punching white
    holes into the image. */
-html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) > body .main-workspace-header,
 html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .main-workspace-header {
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent) !important;
+  background: color-mix(in srgb, var(--bg-panel) var(--wp-panel-alpha), transparent) !important;
+}
+
+/* The right panel's own surfaces paint opaque backgrounds (the tree column, the
+   viewer shell, the body row). Without these the panel stayed a solid slab even
+   though its container was translucent — which read as "the wallpaper only
+   covers the middle". */
+html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) :is(.explorer-column, .file-panel-body, .file-panel-main, .file-viewer-shell) {
+  background: transparent !important;
 }
 
 html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-message="blur"]) .chat-content > div[style*="var(--bg)"],
