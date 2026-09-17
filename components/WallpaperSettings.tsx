@@ -32,7 +32,6 @@ export function WallpaperSettings() {
     inputMode,
     panelMode,
     messageMode,
-    active,
     usingBuiltin,
     choose,
     remove,
