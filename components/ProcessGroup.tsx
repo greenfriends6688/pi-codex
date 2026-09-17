@@ -425,18 +425,9 @@ function Duration({ seconds }: { seconds?: number }) {
   return <span className="process-step-duration">{seconds}s</span>;
 }
 
-function ReasoningBody({
-  blocks,
-  clamped,
-  onToggleClamp,
-}: {
-  blocks: ProcessContentBlock[];
-  clamped: boolean;
-  onToggleClamp: () => void;
-}) {
-  const { t } = useI18n();
+function ReasoningBody({ blocks }: { blocks: ProcessContentBlock[] }) {
   return (
-    <div className={`process-step-body process-reasoning-body${clamped ? " is-clamped" : ""}`}>
+    <div className="process-step-body process-reasoning-body">
       {blocks.map((block) => (
         <div key={block.id} className={`process-step-reasoning is-${block.type}`}>
           <MarkdownBody>
@@ -448,13 +439,10 @@ function ReasoningBody({
           </MarkdownBody>
         </div>
       ))}
-      {/* The fade only appears while clamped, so there is no affordance to
-          collapse a body that is already fully visible. */}
-      {clamped && (
-        <button type="button" className="process-reasoning-more" onClick={onToggleClamp}>
-          {t("process.expandFull")}
-        </button>
-      )}
+      {/* fork:ui-process-full — the body used to be clamped to ~6 lines behind a
+          "展开全文" button. The row itself already opens and closes, so the second
+          collapsible layer only hid the reasoning the reader had just asked for
+          (and its button sat under the fade, which read as a rendering bug). */}
     </div>
   );
 }
@@ -537,20 +525,16 @@ function StepBody({
   step,
   toolResults,
   onOpenSession,
-  clamped,
-  onToggleClamp,
 }: {
   step: Step;
   toolResults?: Map<string, ToolResultMessage>;
   onOpenSession?: (sessionId: string) => void;
-  clamped: boolean;
-  onToggleClamp: () => void;
 }) {
   if (step.blocks.length === 0) return null;
   const first = step.blocks[0];
   // Reasoning-only steps render as prose; everything else as tool surfaces.
   if (step.reasoning) {
-    return <ReasoningBody blocks={step.blocks} clamped={clamped} onToggleClamp={onToggleClamp} />;
+    return <ReasoningBody blocks={step.blocks} />;
   }
   if (first.type === "custom") {
     // `CustomMessage.content` is string | (TextContent|ImageContent)[]; going
@@ -607,7 +591,6 @@ export function ProcessGroup({
   );
   /** Explicit user overrides; absent = follow `defaultOpen`. */
   const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
   const [activeChip, setActiveChip] = useState<string | null>(null);
 
   if (steps.length === 0) return null;
@@ -626,15 +609,6 @@ export function ProcessGroup({
     setOverrides((current) => {
       const next = new Map(current);
       next.set(id, !isStepOpen(id));
-      return next;
-    });
-  };
-
-  const toggleClamp = (id: string) => {
-    setExpandedIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
       return next;
     });
   };
@@ -716,8 +690,6 @@ export function ProcessGroup({
                     step={step}
                     toolResults={toolResults}
                     onOpenSession={onOpenSession}
-                    clamped={step.reasoning === true && !expandedIds.has(id)}
-                    onToggleClamp={() => toggleClamp(id)}
                   />
                 )}
               </li>
@@ -731,8 +703,6 @@ export function ProcessGroup({
           step={chipStep}
           toolResults={toolResults}
           onOpenSession={onOpenSession}
-          clamped={chipStep.reasoning === true && !expandedIds.has(chipStep.id)}
-          onToggleClamp={() => toggleClamp(chipStep.id)}
         />
       )}
     </section>

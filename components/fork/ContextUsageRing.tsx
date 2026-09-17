@@ -82,6 +82,6 @@ export function contextUsageTitle(usage: ContextUsage, actionLabel: string): str
   } else {
     lines.push(`${formatCompact(usage.contextWindow)} tokens`);
   }
-  lines.push(actionLabel);
+  if (actionLabel) lines.push(actionLabel);
   return lines.join("\n");
 }

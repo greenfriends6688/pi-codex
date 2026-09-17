@@ -149,3 +149,37 @@ html[data-wallpaper="on"][data-wallpaper-message="blur"] .process-step-body,
 html[data-wallpaper="on"][data-wallpaper-message="blur"] .process-tabstrip {
   backdrop-filter: blur(var(--wp-blur-message));
 }
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-wallpaper — make the wallpaper actually visible.
+ *
+ * The shell row (`.app-shell-layout`) and the chat column (`.chat-slot`) paint
+ * an opaque `var(--bg)` — one inline, one in globals.css — so with the feature
+ * switched on the image sat underneath them and the app just looked flat grey.
+ * The scrim drawn by `.chat-wallpaper::after` is the surface the text is
+ * supposed to sit on, so these two layers step aside.
+ *
+ * `.chat-slot` stays opaque below the split breakpoint: there it can become a
+ * fixed overlay, and a see-through overlay would show the editor underneath.
+ * ------------------------------------------------------------------------- */
+html[data-wallpaper="on"] .app-shell-layout {
+  background: transparent !important;
+}
+
+@media (min-width: 960px) {
+  html[data-wallpaper="on"] .chat-slot {
+    background: transparent !important;
+  }
+}
+
+/* Top bar and composer join the panel surfaces instead of punching white
+   holes into the image. */
+html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) > body .main-workspace-header,
+html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .main-workspace-header {
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent) !important;
+}
+
+html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-message="blur"]) .chat-content > div[style*="var(--bg)"],
+html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-message="blur"]) .chat-content > div {
+  background: transparent !important;
+}

@@ -1946,7 +1946,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   <span style={{ color: "var(--success)", flexShrink: 0 }}>✓</span>
               </div>
             )}
-              <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>已添加的工作区</div>
+              {/* fork:ui-project-wording — same vocabulary as the new-task picker and the
+              sidebar sections: 在项目中 / 不在项目中. */}
+              <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>{t("sidebar.projects")}</div>
               {visibleProjects.slice(0, 8).map((project) => (
                 <button
                   key={project.key}

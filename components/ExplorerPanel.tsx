@@ -72,6 +72,7 @@ export function ExplorerPanel({
   onExplorerRefresh,
   onAtMention,
   onAtMentions,
+  trailingActions,
 }: {
   cwd: string;
   onOpenFile: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "preview" | "diff" }) => void;
@@ -80,6 +81,9 @@ export function ExplorerPanel({
   onExplorerRefresh?: () => void;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   onAtMentions?: (relativePaths: string[]) => void;
+  /** fork:ui-panel-row — panel-level buttons (new browser tab) rendered inline so
+   *  the panel header stays a single row of icons. */
+  trailingActions?: React.ReactNode;
 }) {
   const { t } = useI18n();
   const [explorerOpen, setExplorerOpen] = useState(true);
@@ -186,18 +190,26 @@ export function ExplorerPanel({
             </svg>
           </ToolbarIconButton>
         )}
-        {explorerOpen && changesCount > 0 && (
+        {/* fork:ui-review-button — the changed-files switch was hidden entirely
+            while the tree was clean (so the "review" affordance disappeared) and
+            its glyph read as a minus. It now stays in the row, names itself, and
+            wears a diff glyph. */}
+        {explorerOpen && (
           <ToolbarIconButton
             onClick={() => setChangesCollapsed((v) => !v)}
-            title={t("sidebar.changedFiles", { count: changesCount })}
-            ariaPressed={!changesCollapsed}
-            color={changesCollapsed ? "var(--text-dim)" : "var(--accent)"}
-            background={changesCollapsed ? "none" : "var(--bg-selected)"}
+            disabled={changesCount === 0}
+            title={changesCount > 0
+              ? t("sidebar.reviewChanges", { count: changesCount })
+              : t("sidebar.noChanges")}
+            ariaPressed={changesCount > 0 && !changesCollapsed}
+            color={changesCount > 0 && !changesCollapsed ? "var(--accent)" : "var(--text-dim)"}
+            background={changesCount > 0 && !changesCollapsed ? "var(--bg-selected)" : "none"}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M3 12h6" />
-              <path d="M15 12h6" />
+              <path d="M9 3v12a3 3 0 0 0 3 3h3" />
+              <circle cx="6" cy="6" r="3" />
+              <path d="M18 12v6" />
+              <path d="m15 15 3 3 3-3" />
             </svg>
           </ToolbarIconButton>
         )}
@@ -255,6 +267,7 @@ export function ExplorerPanel({
             </svg>
           )}
         </ToolbarIconButton>
+        {trailingActions}
       </div>
       {explorerOpen && (
         <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>

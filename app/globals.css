@@ -2805,50 +2805,13 @@ button.process-file-chip:hover {
   }
 }
 
-/* Reasoning / note bodies render open by default, clamped to a few lines with a
-   fade — so the timeline shows what the model was thinking without a click, and
-   a long block cannot dominate the transcript. */
+/* Reasoning / note bodies render in full.
+   fork:ui-process-full — they used to be clamped to ~6 lines with a fade and a
+   "展开全文" button. The row already has its own open/closed chevron, so the
+   second collapsible layer contradicted it and its button ended up half-hidden
+   under the fade. */
 .process-reasoning-body {
   position: relative;
-}
-
-.process-reasoning-body.is-clamped {
-  max-height: 6.2em;
-  overflow: hidden;
-}
-
-/* The fade is a separate element rather than a mask so it can sit above the
-   markdown's own backgrounds (code blocks, tables) without blending them. */
-.process-reasoning-body.is-clamped::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2.4em;
-  pointer-events: none;
-  background: linear-gradient(to bottom, transparent, var(--bg));
-}
-
-.process-reasoning-more {
-  align-self: flex-start;
-  margin-top: 2px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text-dim);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-
-.process-reasoning-more:hover {
-  color: var(--accent);
-  text-decoration: underline;
-}
-
-.process-reasoning-more:focus-visible {
-  outline: 2px solid var(--focus-ring);
-  outline-offset: 1px;
 }
 
 /* Duration sits immediately after the label / chips, the way a shell transcript

@@ -893,6 +893,25 @@ Windows bash 环境隔离、PTY 运行时、1 条既有 ChatInput 用例）｜ `
 - **ui-10 全量 `DialogShell`**：见上表说明。
 - **ui-14 顶栏次级动作收进 `⋯`**：手机端已有溢出菜单；桌面端需要新增宽度侦测状态，收益仅「少几个图标」。
 
+### 21. 用户截图反馈的一批问题（2026-09-17 第三轮）
+
+用户拿八张截图逐条指出问题，全部落地：
+
+| 图 | 问题 | 改法 |
+| --- | --- | --- |
+| 1 | 推理块被截断，底部浮着一个半透明的「展开全文」，看着像坏了；而且不知道为什么要有第二层折叠 | **删掉整层 clamp**：`ReasoningBody` 不再接 `clamped`/`onToggleClamp`，删除 `expandedIds`/`toggleClamp`、`is-clamped` 与 `::after` 渐变、`process-reasoning-more` 按钮及相关 CSS。行的 chevron 已经是唯一的开合控件（推理块本身**是**实时渲染的：每步结束时立即出现，不是切会话后才补） |
+| 2a | 设置页右侧一大片空白 | `.settings-general` 的 `max-width: 680px` → `840px`（原来是内容列比容器窄 200 多 px） |
+| 2b | **壁纸打开后完全没反应** | 真因：外壳 `.app-shell-layout` 与聊天列 `.chat-slot` 各自画着不透明的 `var(--bg)`，图片被压在下面，只能靠 sidebar 的 72% 半透明透一点。现在 `html[data-wallpaper="on"]` 时这两层让位（`.chat-slot` 仅在 ≥960 分栏时让位：窄屏它可能是覆盖层，透明会露出下面的编辑器），顶栏与 composer 并入面板半透明层 |
+| 3 | minimap 悬停预览太密，一屏全是字 | 预览密度：用户提示 4 行 → 2 行、字号 14→13；助手行降级为 12px/`--text-muted` 且只保留前 5 行（`.outline > :nth-child(n+6)`）；当前 turn 的序号改用 accent 色 |
+| 4 | 圆环不该替换压缩图标 —— 圆环要独立放在输入框里 | `ContextUsageRing` 从「压缩」按钮里挪出来，作为独立读数放在发送键左侧（15px、hover 出百分比/tokens），压缩按钮恢复原图标 + 文案 |
+| 5–7 | 项目选择器 / 侧栏用词不统一 | 三语统一为「在项目中 / 不在项目中」：侧栏分区头 `sidebar.projects` → 在项目中、`sidebar.chatWorkspace` → 不在项目中；新建任务选择器标题与项目 `⋯` 菜单标题同词（后者原本是硬编码中文「已添加的工作区」，已改走 i18n）、菜单底部「使用默认目录」→「不在项目中（聊天）」 |
+| 8 | 文件浏览器两排图标、且少了审查按钮 | `ExplorerPanel` 新增 `trailingActions` 槽：树在面板里时，面板级的「新建浏览器标签」并进树工具栏 → 只有一排（标题 + 终端/审查/搜索/上传/刷新/浏览器 = 7 个）。新增 `fork:ui-review-button`：变更数 0 时按钮**不再消失**（原来 `changesCount > 0` 才渲染，于是审查入口时有时无），改灰色禁用 + tooltip「没有未提交的改动」，有变更时 tooltip「审查变更（N 个文件）」 |
+
+**验证**：`tsc` 0 错 ｜ `lint` 0 错 ｜ `test` 1264/1264 ｜ prod 构建 + Chrome 实测：
+`.chat-slot` 背景变透明、两处 header 为 `0.72` 半透明（壁纸可见，见截图）；`.process-reasoning-body.is-clamped`
+与 `.process-reasoning-more` 均为 0 个；圆环独立存在（title「83% used / 827.8k / 1.0M tokens」）
+且 conic-gradient 只剩 1 处（压缩键已恢复原图标）；树工具栏一行 7 个按钮含「没有未提交的改动」的审查键。
+
 ### 20. 补上 §19 没落的三项 + 顶栏溢出菜单（2026-09-17 第二轮）
 
 用户反馈「分析过的还没加上」，回头把计划里剩下能安全落地的做掉：

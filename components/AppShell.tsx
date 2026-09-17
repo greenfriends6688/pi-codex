@@ -2039,6 +2039,32 @@ export function AppShell() {
   // The tree is rendered in two places: as the panel's own content when no tab is
   // open, and as a right-hand column beside the active viewer. Sharing one node
   // keeps the two spots from drifting apart.
+  // fork:ui-panel-row — true when the tree itself occupies the panel, i.e. no
+  // file/terminal/browser tab is active. Then the panel-level buttons move into
+  // the tree's toolbar row.
+  const showExplorerToolbarRow = Boolean(
+    activeCwd
+    && !activeFileTab?.filePath
+    && !terminalTabs.some((tab) => tab.id === activeFileTabId)
+    && !browserTabs.some((tab) => tab.id === activeFileTabId),
+  );
+
+  const browserTabButton = (
+    <button
+      type="button"
+      className="file-viewer-icon-button"
+      title={translate("browser.newTab")}
+      aria-label={translate("browser.newTab")}
+      onClick={() => handleOpenBrowser()}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M3 12h18" />
+        <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18Z" />
+      </svg>
+    </button>
+  );
+
   const explorerPanel = activeCwd ? (
     <ExplorerPanel
       cwd={activeCwd}
@@ -2048,6 +2074,7 @@ export function AppShell() {
       onExplorerRefresh={handleExplorerRefresh}
       onAtMention={handleAtMention}
       onAtMentions={handleAtMentions}
+      trailingActions={showExplorerToolbarRow ? browserTabButton : null}
     />
   ) : null;
   // Only wide panels can afford a tree column next to the document (PiDeck-style
@@ -2814,19 +2841,10 @@ export function AppShell() {
               onCloseTab={handleCloseFileTab}
             />
           </div>
-          <button
-            type="button"
-            className="file-viewer-icon-button"
-            title={translate("browser.newTab")}
-            aria-label={translate("browser.newTab")}
-            onClick={() => handleOpenBrowser()}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M3 12h18" />
-              <path d="M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18Z" />
-            </svg>
-          </button>
+          {/* fork:ui-panel-row — while the file tree is the panel content this
+              button lives in the tree's own toolbar row, so the panel shows one
+              row of icons instead of two stacked ones. */}
+          {!showExplorerToolbarRow && browserTabButton}
           {isMobile && (
             <button
               type="button"

@@ -2890,15 +2890,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   {isCompacting ? (
                     <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compacting")}</span>}</>
                   ) : (
-                    // fork:ui-context-ring — when usage is known the ring replaces
-                    // the shrink glyph, so the context window is readable from the
-                    // composer while the click still compacts.
-                    <>{contextUsage?.contextWindow
-                      ? <ContextUsageRing usage={contextUsage} />
-                      : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
-                        <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
-                      </svg>}{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compact")}</span>}</>
+                    <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
+                      <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
+                    </svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compact")}</span>}</>
                   )}
                 </button>
               </div>
@@ -2989,6 +2984,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
               </button>
+            )}
+            {/* fork:ui-context-ring — the context gauge sits in the input box on
+                its own, next to the send control: the compact button keeps its
+                own identity, this is a readout (hover for the numbers). */}
+            {!isMobile && contextUsage?.contextWindow && (
+              <span
+                title={contextUsageTitle(contextUsage, "")}
+                aria-label={contextUsageTitle(contextUsage, "")}
+                style={{ display: "inline-flex", alignItems: "center", alignSelf: "center", paddingLeft: 4, flexShrink: 0 }}
+              >
+                <ContextUsageRing usage={contextUsage} size={15} />
+              </span>
             )}
             {!isMobile && (isStreaming ? stopButton : sendButton)}
             </div>

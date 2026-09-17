@@ -317,3 +317,46 @@
   outline: 1px solid color-mix(in srgb, var(--text-muted) 65%, transparent);
   outline-offset: 1px;
 }
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-minimap-preview — density pass on the hover preview.
+ *
+ * The preview listed up to four lines of the user prompt plus every paragraph
+ * of the answer, so a turn read as a wall of text and the scan target (which
+ * turn am I jumping to) was lost. Now: two lines of prompt in slightly smaller
+ * type, answer lines dimmed and capped at five, and the current turn's number
+ * picks up the accent.
+ * ------------------------------------------------------------------------- */
+.user {
+  min-height: 28px;
+  max-height: 60px;
+  padding: 6px 10px 6px 40px;
+  font-size: 13px;
+}
+
+.userText {
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.paragraph {
+  min-height: 22px;
+  padding: 3px 10px 3px 40px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* Keep the preview scannable: the first few answer lines are the shape of the
+   turn, the rest is noise at this zoom level. */
+.outline > :nth-child(n + 6) {
+  display: none;
+}
+
+.turn:hover {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+
+.turn[data-located="true"] .number {
+  color: var(--accent);
+}
