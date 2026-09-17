@@ -1048,6 +1048,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       onCompact={session || isNew ? handleCompact : undefined}
       onAbortCompaction={handleAbortCompaction}
       isCompacting={isCompacting}
+      contextUsage={contextUsage}
       compactError={compactError}
       compactResult={compactResult}
       toolPreset={toolPreset}
@@ -1198,7 +1199,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
-            <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 860px)", margin: "0 auto" }}>
+            <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 800px)", margin: "0 auto" }}>
             {(() => {
               let lastUserIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {

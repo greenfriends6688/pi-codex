@@ -104,17 +104,20 @@
   --z-modal: 1000;
   --z-toast: 1100;
 
-  /* Layout metrics lifted from the Codex app: thread content 860px, toolbar
+  /* Layout metrics lifted from the Codex app: thread content 800px, toolbar
      46px, composer radius 5.5脳spacing, and a 16px inline overhang that lets
-     the composer sit wider than the thread. */
-  --chat-content-max-width: 860px;
+     the composer sit wider than the thread.
+     800 rather than the original 860: at 860 the prose column ran wider than
+     upstream (760) and Wegent (768, `max-w-3xl`) both settle on, and long
+     paragraphs started losing the line. User-overridable in 设置 → 通用. */
+  --chat-content-max-width: 800px;
   /* Right-hand file-tree column inside the workspace panel. Container-query
      gated (see .file-panel-body below), so it only appears when the panel is
      wide enough to seat both the viewer and the tree. */
   --explorer-column-width: 264px;
   /* Readable column for the Markdown workspace editor / preview (upstream
      PR #838). Deliberately wider than the chat thread: prose reads better
-     at ~900px than at the 860px the chat column uses. */
+     at ~900px than at the 800px the chat column uses. */
   --readable-content-max-width: 900px;
   --composer-max-width: calc(var(--chat-content-max-width) + 32px);
   /* 22px: the Codex composer pill, expressed on the radius scale. */

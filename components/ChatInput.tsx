@@ -31,6 +31,7 @@ import { ThinkingIcon } from "./ThinkingIcon";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
 import { ComposerContextStrip } from "./ComposerContextStrip";
+import { ContextUsageRing, contextUsageTitle, type ContextUsage } from "./fork/ContextUsageRing";
 import {
   normalizeSelectionContext,
   normalizeSessionReference,
@@ -69,6 +70,8 @@ interface Props {
   onCompact?: () => void;
   onAbortCompaction?: () => void;
   isCompacting?: boolean;
+  /** fork:ui-context-ring — context-window usage shown as a ring on the compact control. */
+  contextUsage?: ContextUsage | null;
   compactError?: string | null;
   compactResult?: CompactResultInfo | null;
   toolPreset?: ToolPreset;
@@ -574,7 +577,7 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
-  onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
+  onCompact, onAbortCompaction, isCompacting, contextUsage, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
   retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
@@ -2877,16 +2880,25 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                     e.currentTarget.style.background = isCompacting ? "var(--danger-soft)" : "none";
                     e.currentTarget.style.color = isCompacting ? "var(--danger)" : "var(--text-muted)";
                   }}
-                   title={isCompacting ? t("chat.stopCompaction") : t("chat.compactContext")}
+                   title={isCompacting
+                     ? t("chat.stopCompaction")
+                     : contextUsage?.contextWindow
+                       ? contextUsageTitle(contextUsage, t("chat.compactContext"))
+                       : t("chat.compactContext")}
                    aria-label={isCompacting ? t("chat.stopCompaction") : t("chat.compactContext")}
                 >
                   {isCompacting ? (
                     <><svg width="10" height="10" viewBox="0 0 10 10" fill="none"><rect x="2" y="2" width="6" height="6" rx="1" fill="currentColor" /></svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compacting")}</span>}</>
                   ) : (
-                    <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
-                      <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
-                    </svg>{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compact")}</span>}</>
+                    // fork:ui-context-ring — when usage is known the ring replaces
+                    // the shrink glyph, so the context window is readable from the
+                    // composer while the click still compacts.
+                    <>{contextUsage?.contextWindow
+                      ? <ContextUsageRing usage={contextUsage} />
+                      : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" />
+                        <line x1="10" y1="14" x2="3" y2="21" /><line x1="21" y1="3" x2="14" y2="10" />
+                      </svg>}{(!isMobile || controlsMenuOpen) && <span style={{ whiteSpace: "nowrap" }}>{t("chat.compact")}</span>}</>
                   )}
                 </button>
               </div>

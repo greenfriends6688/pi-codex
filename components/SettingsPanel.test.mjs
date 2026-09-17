@@ -101,15 +101,18 @@ test("keeps General free of divider rows", () => {
   assert.doesNotMatch(panelSource, /borderLeft: index > 0/);
 });
 
-test("uses top navigation on desktop and one compact section picker on mobile", () => {
+test("uses a left section column on desktop and one compact picker on mobile", () => {
   assert.match(panelSource, /className="settings-mobile-section-picker"/);
   assert.match(panelSource, /className="settings-section-tabs"/);
   assert.match(panelSource, /className="settings-section-tab"/);
-  // fork:ui-08 — tabs size to their label instead of a fixed 96px cell.
-  assert.match(cssSource, /\.settings-section-tab \{[\s\S]*?width: auto/);
+  // fork:ui-08 — a vertical column (upstream 0.14.6 layout) instead of a row of
+  // fixed 96px cells.
+  assert.match(panelSource, /className="settings-dialog-body"/);
+  assert.match(cssSource, /\.settings-section-tabs \{[\s\S]*?flex-direction: column/);
+  assert.match(cssSource, /\.settings-section-tabs \{[\s\S]*?width: 184px/);
   assert.match(cssSource, /\.settings-section-tab \{[\s\S]*?flex: 0 0 auto/);
   assert.match(cssSource, /\.settings-section-icon \{[\s\S]*?flex-shrink: 0/);
-  assert.match(cssSource, /\.settings-section-tab::after \{[\s\S]*?width: 24px/);
+  assert.match(cssSource, /\.settings-section-tab::after \{[\s\S]*?width: 2px/);
   assert.match(cssSource, /\.settings-section-tab\[aria-current="page"\]::after/);
   assert.match(cssSource, /\.settings-section-tab:focus-visible:not\(\[aria-current="page"\]\)/);
   // 焦点环改由 globals.css 的皮肤覆盖层统一提供，这一支不再清掉 outline。

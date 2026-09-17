@@ -531,6 +531,14 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
               </option>
             ))}
           </select>
+
+          <button type="button" onClick={onClose} title={t("i18n.close")} aria-label={t("i18n.close")} className="config-close-button settings-dialog-close">×</button>
+        </div>
+
+        {/* fork:ui-08 — sections are a left column now (upstream 0.14.6 uses
+            `grid-template-columns: 184px minmax(0,1fr)`); the phone keeps the
+            select picker above and hides this column in CSS. */}
+        <div className="settings-dialog-body">
           <nav aria-label={t("settings.title")} className="settings-section-tabs">
             {sections.map((item) => {
               const selected = section === item.id;
@@ -551,16 +559,15 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
               );
             })}
           </nav>
-          <button type="button" onClick={onClose} title={t("i18n.close")} aria-label={t("i18n.close")} className="config-close-button settings-dialog-close">×</button>
-        </div>
 
-        <main className="settings-dialog-main">
-          {sectionHost("general", <GeneralSettings cwd={cwd} sessionId={sessionId} onSessionReloaded={onSessionReloaded} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={onQuoteSelectionChange} />)}
-          {sectionHost("models", <ModelsConfig embedded onClose={onClose} />)}
-          {cwd && sectionHost("skills", <SkillsConfig embedded key={cwd} cwd={cwd} onClose={onClose} />)}
-          {cwd && sectionHost("agents", <AgentsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
-          {cwd && sectionHost("plugins", <PluginsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
-        </main>
+          <main className="settings-dialog-main">
+            {sectionHost("general", <GeneralSettings cwd={cwd} sessionId={sessionId} onSessionReloaded={onSessionReloaded} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={onQuoteSelectionChange} />)}
+            {sectionHost("models", <ModelsConfig embedded onClose={onClose} />)}
+            {cwd && sectionHost("skills", <SkillsConfig embedded key={cwd} cwd={cwd} onClose={onClose} />)}
+            {cwd && sectionHost("agents", <AgentsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
+            {cwd && sectionHost("plugins", <PluginsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
+          </main>
+        </div>
       </div>
     </div>
   );
