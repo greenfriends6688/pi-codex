@@ -27,18 +27,25 @@ import { activeThemeIdentity, resolveWallpaperSrc } from "@/lib/wallpaper-builti
 export function WallpaperLayer() {
   const [url, setUrl] = useState("");
   const [theme, setTheme] = useState({ palette: "", piTheme: "" });
+  /** fork:ui-perf — gate for the <img>: no wallpaper, no request. */
+  const [enabled, setEnabled] = useState(false);
 
   useEffect(() => {
     const syncUrl = () => setUrl(readStoredWallpaperUrl());
     const syncTheme = () => setTheme(activeThemeIdentity());
+    const syncEnabled = () => setEnabled(document.documentElement.getAttribute("data-wallpaper") === "on");
     syncUrl();
     syncTheme();
+    syncEnabled();
 
     window.addEventListener(WALLPAPER_CHANGED_EVENT, syncUrl);
-    const observer = new MutationObserver(syncTheme);
+    const observer = new MutationObserver(() => {
+      syncTheme();
+      syncEnabled();
+    });
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["data-theme", "data-pi-theme"],
+      attributeFilter: ["data-theme", "data-pi-theme", "data-wallpaper"],
     });
     return () => {
       window.removeEventListener(WALLPAPER_CHANGED_EVENT, syncUrl);
@@ -46,21 +53,26 @@ export function WallpaperLayer() {
     };
   }, []);
 
-  const src = resolveWallpaperSrc(url, theme.palette, theme.piTheme);
+  // fork:ui-perf — the built-in painting is ~860KB. It used to be resolved (and
+  // therefore downloaded) even with the wallpaper switched off, so every first
+  // paint paid for an image nobody saw. No src, no request.
+  const src = enabled ? resolveWallpaperSrc(url, theme.palette, theme.piTheme) : null;
 
   return (
     <div className="chat-wallpaper" aria-hidden="true">
       {/* next/image is not usable here: the source is either a local data URL
           that must not be routed through the image optimizer, or a static asset
           with no query-string variants. */}
-      {/* eslint-disable-next-line @next/next/no-img-element -- data URL / static asset, not optimizer-routable */}
-      <img
-        src={src}
-        alt=""
-        draggable={false}
-        onLoad={() => { document.documentElement.dataset.wallpaperReady = "1"; }}
-        onError={() => { document.documentElement.dataset.wallpaperReady = "1"; }}
-      />
+      {src ? (
+        /* eslint-disable-next-line @next/next/no-img-element -- data URL / static asset, not optimizer-routable */
+        <img
+          src={src}
+          alt=""
+          draggable={false}
+          onLoad={() => { document.documentElement.dataset.wallpaperReady = "1"; }}
+          onError={() => { document.documentElement.dataset.wallpaperReady = "1"; }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -893,6 +893,31 @@ Windows bash 环境隔离、PTY 运行时、1 条既有 ChatInput 用例）｜ `
 - **ui-10 全量 `DialogShell`**：见上表说明。
 - **ui-14 顶栏次级动作收进 `⋯`**：手机端已有溢出菜单；桌面端需要新增宽度侦测状态，收益仅「少几个图标」。
 
+### 23. 性能：git status 3.7s→0.16s、首屏 3.6s→0.9s（2026-09-17）
+
+用户反馈「加载慢」。实测（prod 构建 + curl/Playwright，非估算）：
+
+| 位置 | 改前 | 改后 | 根因 |
+| --- | --- | --- | --- |
+| `GET /api/git/status` | **3.699s / 3.6MB** | **0.156s 冷 / 0.007s 缓存 / 8.6KB** | `--untracked-files=all` 在这个工作区列出 **18164** 条未跟踪路径（`.playwright-mcp/`、`release/`、截图…），其中逐文件 `readFileSync` 数行数占了约 3.4s |
+| 首屏加载 | 3.6s | 0.75–0.95s | 就是上面那个调用阻塞了 `networkidle`（其余接口全部 ≤32ms） |
+| 内置壁纸 | 每次加载拉 860KB | 壁纸关闭时 **0 请求** | `WallpaperLayer` 无论开关都解析内置画作 `<img src>`，CSS 只是把它藏了 |
+
+改法（`fork:ui-perf`）：
+
+- `readStatusEntries`: `--untracked-files=all` → `normal`（未跟踪目录折叠成一行，和所有 git UI 一致；同一个树 18164 条 → 57 条）。
+- `countUntrackedTextLines` 加**字节预算**（2MB）：行数只是摘要，不值得为它读满整个工作区。
+- `getGitStatus` 加 **2.5s TTL 缓存**（`globalThis.__piGitStatusCache`，热重载安全，上限 32 条）：explorer 在刷新、展开目录、切会话时会重复问同一个 cwd。
+- `WallpaperLayer`：只有 `data-wallpaper="on"` 时才给 `<img>` 设 `src`（enabled 进 state，`MutationObserver` 的 attributeFilter 加 `data-wallpaper`）。
+
+**顺带查到的两个事实**（未改，留作下一轮）：
+
+1. 变更按钮之前**恒显示「暂无改动」**——不是命名问题，是这份 3.6MB 响应在客户端侧拿不到结果，`changesCount` 一直是 0。修完之后实测按钮显示「变更（59 个文件）」。
+2. `GET /api/sessions/<id>` 单次 **5.8MB**（95 条消息：`toolResult` 4.1MB + `user` 1.3MB，最大两条分别 2.3MB / 1.8MB）。这是切长会话的主要开销，属于响应瘦身（大 toolResult 截断 + 按需展开），需要单独一轮。
+
+**验证**：`tsc`/`lint`/`test`（1264）全绿；`/api/git/status` 连测三次 0.156s → 0.007s → 0.006s；
+首屏连测三次 955/918/751ms；壁纸关闭时 `monet-artworks` 请求数为 0。
+
 ### 22. 第三轮反馈的收尾修正（2026-09-17）
 
 | 反馈 | 改法 |

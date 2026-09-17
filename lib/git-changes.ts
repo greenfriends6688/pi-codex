@@ -45,11 +45,15 @@ function toGitPath(filePath: string): string {
 }
 
 async function readStatusEntries(repositoryRoot: string): Promise<GitPorcelainEntry[]> {
+  // fork:ui-perf — `--untracked-files=all` listed every file inside untracked
+  // directories. On a working copy with scratch/build dirs that meant 18k
+  // entries and a 3.6MB JSON body; `normal` collapses them into one row per
+  // directory (what every git UI does) and returns 57 rows for the same tree.
   const output = await git(repositoryRoot, [
     "status",
     "--porcelain=v1",
     "-z",
-    "--untracked-files=all",
+    "--untracked-files=normal",
   ]);
   return parseGitPorcelainV1(output);
 }
@@ -86,20 +90,54 @@ async function readTrackedLineStats(
   }
 }
 
-function countUntrackedTextLines(filePath: string): number {
+const UNTRACKED_LINE_COUNT_BUDGET_BYTES = 2_000_000;
+
+function countUntrackedTextLines(filePath: string, budget = Number.POSITIVE_INFINITY): { lines: number; bytes: number } {
   try {
     const stat = fs.lstatSync(filePath);
-    if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES) return 0;
+    // Untracked directories (the `--untracked-files=normal` case) are not files.
+    if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES || stat.size > budget) {
+      return { lines: 0, bytes: 0 };
+    }
     const content = fs.readFileSync(filePath);
-    if (hasNullByte(content) || content.length === 0) return 0;
+    if (hasNullByte(content) || content.length === 0) return { lines: 0, bytes: content.length };
     const text = content.toString("utf8");
-    return text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
+    const lines = text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
+    return { lines, bytes: content.length };
   } catch {
-    return 0;
+    return { lines: 0, bytes: 0 };
   }
 }
 
+/**
+ * fork:ui-perf — the explorer asks for the same status on every refresh, tree
+ * reload and session switch. A short TTL keeps those instant without making the
+ * refresh button feel stale. `globalThis` survives hot reload, like the other
+ * registries in this repo.
+ */
+const GIT_STATUS_CACHE_TTL_MS = 2500;
+const GIT_STATUS_CACHE_MAX_ENTRIES = 32;
+
+function gitStatusCache(): Map<string, { at: number; data: GitStatusResponse }> {
+  const holder = globalThis as typeof globalThis & {
+    __piGitStatusCache?: Map<string, { at: number; data: GitStatusResponse }>;
+  };
+  if (!holder.__piGitStatusCache) holder.__piGitStatusCache = new Map();
+  return holder.__piGitStatusCache;
+}
+
 export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
+  const cache = gitStatusCache();
+  const cached = cache.get(cwd);
+  if (cached && Date.now() - cached.at < GIT_STATUS_CACHE_TTL_MS) return cached.data;
+
+  const data = await computeGitStatus(cwd);
+  if (cache.size >= GIT_STATUS_CACHE_MAX_ENTRIES) cache.clear();
+  cache.set(cwd, { at: Date.now(), data });
+  return data;
+}
+
+async function computeGitStatus(cwd: string): Promise<GitStatusResponse> {
   const repositoryRoot = await findRepositoryRoot(cwd);
   if (!repositoryRoot) {
     return {
@@ -126,10 +164,15 @@ export async function getGitStatus(cwd: string): Promise<GitStatusResponse> {
       worktreeStatus: entry.worktreeStatus,
     }];
   });
-  const untrackedAdditions = files.reduce(
-    (total, file) => total + (file.status === "untracked" ? countUntrackedTextLines(file.filePath) : 0),
-    0,
-  );
+  // Reading every untracked file to count its lines is what actually cost 3.4s
+  // on a scratch-heavy tree. The number is only a summary, so it gets a budget.
+  let remainingUntrackedBudget = UNTRACKED_LINE_COUNT_BUDGET_BYTES;
+  const untrackedAdditions = files.reduce((total, file) => {
+    if (file.status !== "untracked" || remainingUntrackedBudget <= 0) return total;
+    const counted = countUntrackedTextLines(file.filePath, remainingUntrackedBudget);
+    remainingUntrackedBudget -= counted.bytes;
+    return total + counted.lines;
+  }, 0);
 
   return {
     isGitRepository: true,
