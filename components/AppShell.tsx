@@ -48,6 +48,10 @@ import {
   SESSION_ROW_CONTEXT_MENU_EVENT,
   type SessionRowContextMenuDetail,
 } from "@/lib/session-row-context-menu";
+import { ContextMenuProvider } from "./ContextMenu";
+import { SessionRowContextMenuBridge } from "./SessionRowContextMenuBridge";
+import { WallpaperLayer } from "./WallpaperLayer";
+import { initWallpaper } from "@/hooks/useWallpaper";
 import {
   clearLastOpen,
   getLastOpenSession,
@@ -260,6 +264,11 @@ export function AppShell() {
   useEffect(() => {
     setMobileSidebarReady(true);
   }, []);
+  // Re-apply the persisted wallpaper on mount. The bootstrap script cannot do
+  // this: the image is an <img> child of the React tree, not a CSS variable.
+  useEffect(() => {
+    initWallpaper();
+  }, []);
   useEffect(() => {
     if (!rightPanelOpen) return;
     reclampSidebarWidth();
@@ -323,8 +332,6 @@ export function AppShell() {
   }, []);
   const [copiedSessionField, setCopiedSessionField] = useState<SessionCopyField | null>(null);
   const sessionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [sessionContextMenu, setSessionContextMenu] = useState<SessionRowContextMenuDetail | null>(null);
-  const sessionContextMenuRef = useRef<HTMLDivElement>(null);
   const handleCopySessionField = useCallback((field: SessionCopyField, value: string) => {
     void copyText(value).then(() => {
       if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
@@ -548,34 +555,6 @@ export function AppShell() {
     setFileTabs((prev) => saveFileViewerState(prev, tabId, viewerRevision, viewerState));
   }, []);
 
-  useEffect(() => {
-    const handleSessionContextMenu = (event: CustomEvent<SessionRowContextMenuDetail>) => {
-      event.preventDefault();
-      setSessionContextMenu(event.detail);
-    };
-    window.addEventListener(SESSION_ROW_CONTEXT_MENU_EVENT, handleSessionContextMenu as EventListener);
-    return () => window.removeEventListener(SESSION_ROW_CONTEXT_MENU_EVENT, handleSessionContextMenu as EventListener);
-  }, []);
-
-  useEffect(() => {
-    if (!sessionContextMenu) return;
-    const close = (event?: Event) => {
-      if (event && sessionContextMenuRef.current?.contains(event.target as Node)) return;
-      setSessionContextMenu(null);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      close();
-    };
-    document.addEventListener("pointerdown", close, true);
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", close, true);
-      document.removeEventListener("keydown", onKeyDown, true);
-    };
-  }, [sessionContextMenu]);
-
   const copySessionReference = useCallback(async (detail: SessionRowContextMenuDetail) => {
     const reference: SessionReference = {
       id: detail.id,
@@ -585,7 +564,6 @@ export function AppShell() {
     const text = serializeSessionReferenceClipboard(reference);
     if (!text) return;
     await copyText(text);
-    setSessionContextMenu(null);
   }, []);
 
   const handleFileLocationHandled = useCallback((target: FileLocationTarget) => {
@@ -2147,6 +2125,11 @@ export function AppShell() {
       overflow: "hidden",
       background: "var(--bg)",
     } as React.CSSProperties}>
+      {/* Full-window wallpaper, behind the sidebar, chat and right panel.
+          First child of the workspace row so every later sibling paints above
+          it, and a sibling of the chat column for the scrim rules in
+          app/wallpaper.css. */}
+      <WallpaperLayer />
       {/* Mobile overlay backdrop */}
       <div
         className={`sidebar-overlay-backdrop${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
@@ -2863,57 +2846,11 @@ export function AppShell() {
       </div>
       </div>
     </div>
-    {sessionContextMenu && (
-      <div
-        ref={sessionContextMenuRef}
-        role="menu"
-        onContextMenu={(event) => event.preventDefault()}
-        style={{
-          position: "fixed",
-          zIndex: 300,
-          top: Math.min(sessionContextMenu.clientY, Math.max(8, (typeof window !== "undefined" ? window.innerHeight : 800) - 64)),
-          left: Math.min(sessionContextMenu.clientX, Math.max(8, (typeof window !== "undefined" ? window.innerWidth : 1200) - 180)),
-          minWidth: 150,
-          padding: 4,
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          background: "var(--bg-panel)",
-          boxShadow: "0 10px 28px rgba(0,0,0,0.22)",
-        }}
-      >
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => void copySessionReference(sessionContextMenu)}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            width: "100%",
-            minHeight: 34,
-            padding: "0 9px",
-            border: "none",
-            borderRadius: 5,
-            background: "transparent",
-            color: "var(--text)",
-            cursor: "pointer",
-            textAlign: "left",
-            fontSize: 12,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
-          onMouseLeave={(event) => { event.currentTarget.style.background = "transparent"; }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="9" y="9" width="11" height="11" rx="2" />
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-          </svg>
-          <span>{translate("session.copyReference")}</span>
-        </button>
-      </div>
-    )}
+    <ContextMenuProvider>
+      <SessionRowContextMenuBridge onCopyReference={copySessionReference} />
+    </ContextMenuProvider>
     {settingsSection && (
       <SettingsPanel
-        cwd={projectTrustCwd}
         sessionId={selectedSession?.id ?? null}
         initialSection={settingsSection}
         quoteSelectionEnabled={quoteSelectionEnabled}
@@ -2923,6 +2860,7 @@ export function AppShell() {
           setModelsRefreshKey((key) => key + 1);
         }}
         onSessionReloaded={() => setSessionKey((key) => key + 1)}
+        cwd={projectTrustCwd}
       />
     )}
     {projectTrustDialogOpen && projectTrustCwd && (

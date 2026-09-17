@@ -6,7 +6,11 @@ const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8"
 
 function fileContentBlock() {
   const start = source.indexOf("{/* Body: the active viewer");
-  const end = source.indexOf("\n    {sessionContextMenu && (", start);
+  // The right-hand slice ends at the first overlay rendered after the workspace
+  // shell. It used to anchor on the hand-rolled session context menu; that menu
+  // now lives in components/ContextMenu.tsx and renders through a portal, so the
+  // anchor moved to the settings panel mount point.
+  const end = source.indexOf("\n    {settingsSection && (");
   assert.notEqual(start, -1, "file content comment not found");
   assert.notEqual(end, -1, "end of file content block not found");
   return source.slice(start, end);

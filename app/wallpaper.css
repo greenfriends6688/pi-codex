@@ -1,0 +1,151 @@
+/* ---------------------------------------------------------------------------
+   Wallpaper: a user-supplied background image behind the whole workspace.
+
+   One fixed layer covers the window; its ::after scrim paints the theme's own
+   `--bg` over the image at the user-chosen opacity, which is what keeps text
+   contrast intact in all six Codex palettes. The sidebar, the right panel, the
+   composer and the user bubble then become translucent or frosted surfaces on
+   top of it.
+
+   The image renders as an <img src> child (never a CSS background-image):
+   Chromium silently drops CSS property values above ~1MB, and a photo data URL
+   easily exceeds that. DOM attributes have no such limit.
+
+   Driven entirely by <html> state (see hooks/useWallpaper.ts):
+     data-wallpaper="on"        enabled + an image is present
+     data-wallpaper-ready="1"   decoded (fade-in gate)
+     --wallpaper-scrim          scrim percentage
+     data-wallpaper-input / -panel / -message
+                                per-area mode: none | trans | blur
+--------------------------------------------------------------------------- */
+
+.chat-wallpaper {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  /* left/right follow the panels' own width animation so the wallpaper edge
+     glides with the sidebar as it folds. */
+  transition: opacity 0.4s, left 0.2s ease, right 0.2s ease;
+}
+
+html[data-wallpaper-ready="1"] .chat-wallpaper {
+  opacity: 1;
+}
+
+html:not([data-wallpaper="on"]) .chat-wallpaper {
+  display: none;
+}
+
+.chat-wallpaper img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* Scrim: the message-area background colour over the image at user opacity.
+   `--bg` is a palette token, so every theme dims the image with its own
+   surface colour instead of a hard-coded black. */
+.chat-wallpaper::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg) var(--wallpaper-scrim, 70%), transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-wallpaper {
+    transition: none;
+  }
+}
+
+/* --- Per-area frost radii -------------------------------------------------
+   `blur` implies `trans`; `none` leaves the surface fully opaque so the
+   wallpaper does not show through that area at all. */
+html[data-wallpaper="on"][data-wallpaper-input="blur"] { --wp-blur-input: 12px; }
+html[data-wallpaper="on"]:is([data-wallpaper-input="trans"], [data-wallpaper-input="none"]) { --wp-blur-input: 0px; }
+html[data-wallpaper="on"][data-wallpaper-panel="blur"] { --wp-blur-panel: 14px; }
+html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="none"]) { --wp-blur-panel: 0px; }
+html[data-wallpaper="on"][data-wallpaper-message="blur"] { --wp-blur-message: 10px; }
+html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-message="none"]) { --wp-blur-message: 0px; }
+
+/* --- Sidebars / panels ---------------------------------------------------
+   Both paint their background inline, so `!important` is required to win.
+
+   The frost lives on the panel element itself. Neither panel hosts a
+   fixed-position descendant in this app (the composer's dropdowns are anchored
+   to the chat column, not to a panel), so the stacking context that
+   `backdrop-filter` creates is harmless here. */
+html[data-wallpaper="on"][data-wallpaper-panel="blur"] .sidebar-container,
+html[data-wallpaper="on"][data-wallpaper-panel="blur"] .right-panel-container {
+  backdrop-filter: blur(var(--wp-blur-panel));
+}
+
+html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .sidebar-container {
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent) !important;
+}
+
+html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .right-panel-container {
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent) !important;
+}
+
+/* --- Composer ------------------------------------------------------------
+   The frost lives on ::before, never on the shell itself: `backdrop-filter`
+   creates a stacking context, and the shell hosts the model / thinking / tools
+   dropdowns. Putting it on a descendant-less pseudo-element keeps their
+   containing block unchanged.
+
+   `inset: -1px` expands the pseudo to the border box: at `inset: 0` it would sit
+   1px inside the 1px border, so its inherited corner radius would be centred one
+   pixel further out than the border's inner curve and leave an unfilled wedge at
+   each corner where the raw wallpaper shows through unfrosted. */
+html[data-wallpaper="on"] .chat-input-shell {
+  position: relative;
+}
+
+html[data-wallpaper="on"] .chat-input-shell::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  z-index: -1;
+  pointer-events: none;
+}
+
+html[data-wallpaper="on"][data-wallpaper-input="blur"] .chat-input-shell::before {
+  backdrop-filter: blur(var(--wp-blur-input));
+}
+
+html[data-wallpaper="on"]:is([data-wallpaper-input="trans"], [data-wallpaper-input="blur"]) .chat-input-shell {
+  background: transparent !important;
+}
+
+html[data-wallpaper="on"]:is([data-wallpaper-input="trans"], [data-wallpaper-input="blur"]) .chat-input-shell::before {
+  background: color-mix(in srgb, var(--bg-elev) 68%, transparent);
+}
+
+/* --- Message surfaces ----------------------------------------------------
+   The message column itself stays fully transparent so the transcript scrolls
+   over a clean image; only surfaces with their own fill become translucent. */
+html[data-wallpaper="on"][data-wallpaper-message="blur"] .markdown-code-block,
+html[data-wallpaper="on"][data-wallpaper-message="blur"] .markdown-code-block pre {
+  backdrop-filter: blur(var(--wp-blur-message));
+}
+
+html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-message="blur"]) .markdown-code-block,
+html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-message="blur"]) .markdown-code-block pre {
+  background: color-mix(in srgb, var(--code-bg) 74%, transparent) !important;
+}
+
+/* Inline code (backtick spans) deliberately keeps its solid background: an
+   inline box shares its line box with neighbouring words, so `backdrop-filter`
+   on it would frost whatever sits behind that line — including the words. */
+
+html[data-wallpaper="on"][data-wallpaper-message="blur"] .process-step-body,
+html[data-wallpaper="on"][data-wallpaper-message="blur"] .process-tabstrip {
+  backdrop-filter: blur(var(--wp-blur-message));
+}

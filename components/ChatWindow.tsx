@@ -20,6 +20,9 @@ import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
+import { ProcessGroup, summarizeProcessBlocks } from "./ProcessGroup";
+import { useProcessDisplayMode } from "@/hooks/useProcessDisplayMode";
+import { messageToProcessContentBlocks, type ProcessContentBlock } from "@/lib/process-content";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -245,13 +248,18 @@ function withAssistantBlocks(
   return next;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = false, reveal = false, children, t }: { messageCount: number; toolCallCount: number; defaultExpanded?: boolean; reveal?: boolean; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
+function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = false, reveal = false, summaryText, children, t }: { messageCount: number; toolCallCount: number; defaultExpanded?: boolean; reveal?: boolean; summaryText?: string; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   useLayoutEffect(() => {
     if (reveal) setExpanded(true);
   }, [reveal]);
+  // The grouped renderer supplies its own summary (tool count, failures,
+  // thoughts). Composing the default label on top of it produced two stacked
+  // count lines — "处理详情 · 29 条消息 · 29 次工具调用" above
+  // "29 次工具调用 · 5 段思考" — so the caller can replace it wholesale.
   const parts = [t("chat.processDetails"), `${messageCount} ${t(messageCount === 1 ? "chat.message" : "chat.messages")}`];
   if (toolCallCount > 0) parts.push(`${toolCallCount} ${t(toolCallCount === 1 ? "chat.toolCall" : "chat.toolCalls")}`);
+  const label = summaryText ?? parts.join(" · ");
 
   return (
     <div style={{ marginBottom: 14 }}>
@@ -279,7 +287,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
           <polyline points="4 2.5 7.5 6 4 9.5" />
         </svg>
         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {parts.join(" · ")}
+          {label}
         </span>
       </button>
       {(expanded || reveal) && (
@@ -294,6 +302,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
 export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  const { displayMode: processDisplayMode } = useProcessDisplayMode();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
@@ -1305,14 +1314,27 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 const finalProcessBlocks = finalAssistant.content.slice(0, finalProcessEnd < 0 ? undefined : finalProcessEnd);
 
                 const processViews: ReactNode[] = [];
+                const groupedProcessBlocks: ProcessContentBlock[] = [];
                 let processToolCount = 0;
                 let processRefIdx: number | undefined;
                 let revealProcess = false;
+                const grouped = processDisplayMode !== "legacy";
 
                 for (let processIdx = userIdx + 1; processIdx <= finalAssistantIdx; processIdx++) {
                   const processMessage = messages[processIdx];
                   if (processMessage.role === "custom") {
-                    revealProcess ||= Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[processIdx]);
+                    const customReveal = Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[processIdx]);
+                    revealProcess ||= customReveal;
+                    if (grouped) {
+                      processRefIdx ??= visibleRefIndexByMessage.get(processIdx);
+                      groupedProcessBlocks.push(...messageToProcessContentBlocks(processMessage, {
+                        messageIndex: processIdx,
+                        entryId: entryIds[processIdx],
+                        phase: "process",
+                        toolResults: toolResultsMap,
+                      }));
+                      continue;
+                    }
                     processViews.push(renderMessage(processIdx, { attachRef: false, keyPrefix: "process" }));
                     continue;
                   }
@@ -1325,6 +1347,18 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   processRefIdx ??= visibleRefIndexByMessage.get(processIdx);
                   processToolCount += countToolCallBlocks(blocks);
                   revealProcess ||= Boolean(pendingSearchScroll && entryIds[processIdx] === pendingSearchScroll.entryId && (!searchBlock || blocks.includes(searchBlock)));
+                  if (grouped) {
+                    // The grouped renderer consumes semantic blocks instead of the
+                    // per-message flat views, so nothing is pushed into processViews
+                    // in this branch.
+                    groupedProcessBlocks.push(...messageToProcessContentBlocks(message, {
+                      messageIndex: processIdx,
+                      entryId: entryIds[processIdx],
+                      phase: "process",
+                      toolResults: toolResultsMap,
+                    }));
+                    continue;
+                  }
                   processViews.push(renderMessage(processIdx, {
                     attachRef: false,
                     keyPrefix: "process",
@@ -1333,14 +1367,36 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   }));
                 }
 
-                if (processViews.length > 0) {
+                if (processViews.length > 0 || groupedProcessBlocks.length > 0) {
+                  // The group header is the only place a summary is rendered, so
+                  // the grouped renderer computes its digest here and hands it
+                  // down instead of printing a second count line inside itself.
+                  const groupedSummary = grouped
+                    ? summarizeProcessBlocks(groupedProcessBlocks, (key, params) => t(key, params), (key) => t(key))
+                    : "";
                   rendered.push(
                     <div
                       key={`process-group-${entryIds[userIdx] ?? userIdx}`}
                       ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
                     >
-                      <ProcessDetailsGroup messageCount={processViews.length} toolCallCount={processToolCount} defaultExpanded={!finalAnswerMessage} reveal={revealProcess} t={t}>
-                        {processViews}
+                      <ProcessDetailsGroup
+                        messageCount={grouped ? Math.max(1, processToolCount) : processViews.length}
+                        toolCallCount={processToolCount}
+                        defaultExpanded={!finalAnswerMessage}
+                        reveal={revealProcess}
+                        summaryText={grouped ? groupedSummary : undefined}
+                        t={t}
+                      >
+                        {grouped ? (
+                          <ProcessGroup
+                            blocks={groupedProcessBlocks}
+                            isStreaming={streamState.isStreaming && finalAssistantIdx === messages.length - 1}
+                            toolResults={toolResultsMap}
+                            onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
+                            onOpenSession={onOpenSession}
+                            reveal={revealProcess}
+                          />
+                        ) : processViews}
                       </ProcessDetailsGroup>
                     </div>,
                   );

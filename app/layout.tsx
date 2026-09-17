@@ -2,9 +2,11 @@ import type { Metadata, Viewport } from "next";
 import { Noto_Sans_Mono } from "next/font/google";
 import { PwaRegistration } from "@/components/PwaRegistration";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
+import { PI_THEME_INIT_SCRIPT } from "@/lib/pi-theme-client";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./settings.css";
+import "./wallpaper.css";
 
 // A previously installed production worker can cache Turbopack chunks under the
 // same local origin. Run this before Next's client code in development so a
@@ -102,6 +104,13 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: THEME_INIT_SCRIPT,
+          }}
+        />
+        {/* Runs after THEME_INIT_SCRIPT: the pi CLI theme overlay is applied before
+            first paint so reloading with a pi theme never flashes a Codex palette. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: PI_THEME_INIT_SCRIPT,
           }}
         />
       </head>

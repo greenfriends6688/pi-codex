@@ -4,6 +4,8 @@ import path from "path";
 import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
 import { isExistingPathWithinRoots, isPathWithinRoots } from "./path-security";
 import { listAllSessions } from "./session-reader";
+// fork:chat-workspace — standalone chat workspace root (see docs/patches/0001-chat-workspace.md)
+import { getChatWorkspacePath } from "./chat-workspace";
 export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
 export { isWindowsAbsolutePath } from "./paths";
 
@@ -41,6 +43,10 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
   } catch {
     // ignore if home is unreadable
   }
+
+  // fork:chat-workspace — browsable before its first session exists, so the file
+  // explorer works while composing the very first standalone chat.
+  roots.add(normalizeSlashes(getChatWorkspacePath()));
 
   for (const root of getAdditionalAllowedRoots()) roots.add(root);
 

@@ -2,15 +2,20 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import type { SessionInfo } from "@/lib/types";
-import { listSessionFamilies } from "@/lib/session-family";
+import { listSessionFamilies, type SessionFamily } from "@/lib/session-family";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
-import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
+import { chatProjectOf, getProjectActivity, getRecentProjects, sessionsForProject, withoutChatProject } from "@/lib/project-groups";
+import type { RecentProject } from "@/lib/project-groups";
+import { applySessionFlags, archivedSessions, useSessionFlags } from "@/lib/session-flags";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import { getFileName } from "@/lib/file-paths";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
+// fork:chat-workspace — standalone chat section (docs/patches/0001-chat-workspace.md)
+import { ChatWorkspaceRow } from "./ChatWorkspaceRow";
+import { NewTaskPicker } from "./NewTaskPicker";
 import { SessionSearch } from "./SessionSearch";
 import { useIsMobile } from "@/hooks/useIsMobile";
 
@@ -495,8 +500,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const isMobile = useIsMobile();
   const [validatedProject, setValidatedProject] = useState<ValidatedProject | null>(null);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
+  // fork:chat-workspace — standalone chat workspace, identified by the server key.
+  const [chatWorkspace, setChatWorkspace] = useState<{ cwd: string; key: string } | null>(null);
+  const [chatWorkspaceBusy, setChatWorkspaceBusy] = useState(false);
+  const [chatPathOpen, setChatPathOpen] = useState(false);
+  const [chatPathError, setChatPathError] = useState<string | null>(null);
   // ponytail: 每個項目獨立展開，避免只能看選中項的傻折疊
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  // 归档区默认折叠；每个项目独立记忆展开状态（取消归档的右键菜单入口）。
+  const [expandedArchivedProjects, setExpandedArchivedProjects] = useState<Set<string>>(new Set());
+  const toggleArchivedSection = useCallback((projectKey: string) => {
+    setExpandedArchivedProjects((prev) => {
+      const next = new Set(prev);
+      if (next.has(projectKey)) next.delete(projectKey);
+      else next.add(projectKey);
+      return next;
+    });
+  }, []);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const sessionListRef = useRef<HTMLDivElement>(null);
   const [sessionListOffsetTop, setSessionListOffsetTop] = useState(0);
@@ -516,6 +536,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const sessionSearchActive = sessionSearchOpen && Boolean(sessionSearchQuery.trim());
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
   const [unreadSessionIds, setUnreadSessionIds] = useState<Set<string>>(() => loadUnreadSessionIds());
+  const { flags: sessionFlags } = useSessionFlags();
   const previousRunningSessionIdsRef = useRef<Set<string>>(new Set());
   const currentSuppressedCompletionSessionIdsRef = useRef<Set<string>>(new Set());
   const previousSuppressedCompletionSessionIdsRef = useRef<Set<string>>(new Set());
@@ -741,6 +762,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }).catch(() => {});
   }, []);
 
+  // fork:chat-workspace — read (and create) the standalone chat workspace once per
+  // mount. It lives in state instead of being derived from sessions so the section
+  // stays available with zero chats.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/chat-workspace", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { cwd?: string; projectKey?: string } | null) => {
+        if (cancelled || !d?.cwd || !d.projectKey) return;
+        setChatWorkspace({ cwd: d.cwd, key: d.projectKey });
+        // Seed the validated identity so projectFor() resolves the server key
+        // before the first standalone chat session exists.
+        setValidatedProject((prev) => prev ?? { cwd: d.cwd!, root: d.cwd!, key: d.projectKey! });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   const restoredRef = useRef(false);
 
   const projectSelection = useCallback((root: string, key: string): ProjectSelection => ({
@@ -840,7 +879,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   // Auto-select cwd and restore session from URL on first load
   useEffect(() => {
-    if (allSessions.length === 0 || skipInitialProjectSelection) return;
+    // fork:chat-workspace — with zero sessions the chat workspace is still a valid
+    // landing spot, so only the URL-restore skip short-circuits here.
+    if (skipInitialProjectSelection || (allSessions.length === 0 && !chatWorkspace)) return;
 
     if (selectedCwd === null) {
       // If restoring a session, set cwd to match that session
@@ -856,9 +897,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         onInitialRestoreDone?.();
       }
       const projects = getRecentProjects(allSessions);
-      if (projects.length > 0) setSelectedCwd(projects[0].root);
+      // fork:chat-workspace — projects win; with none, land on the chat workspace so
+      // the composer is the first screen instead of the "getting started" panel.
+      const fallback = projects[0]?.root ?? chatWorkspace?.cwd ?? null;
+      if (fallback) setSelectedCwd(fallback);
     }
-  }, [allSessions, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
+  }, [allSessions, chatWorkspace, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
 
   // Prefer an exact UI selection while a refetch is in flight. Once the
   // response catches up, the server-resolved path handles Windows case and
@@ -1070,14 +1114,74 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     onSelectSession(s, false, entryId, blockIndex);
   }, [onSelectSession]);
 
-  const handleNewSession = useCallback(() => {
-    // ponytail: 允许不在项目中工作 — 没有选目录时用 homeDir 兜底
-    const effectiveCwd = selectedCwd || homeDir || "/";
+  // fork:chat-workspace — persist a different chat directory, and follow it when it
+  // was the active workspace.
+  const commitChatWorkspace = useCallback(async (path: string) => {
+    if (chatWorkspaceBusy) return;
+    setChatWorkspaceBusy(true);
+    setChatPathError(null);
+    try {
+      const res = await fetch("/api/chat-workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: path }),
+      });
+      const data = await res.json().catch(() => ({})) as { cwd?: string; projectKey?: string; error?: string };
+      if (!res.ok || !data.cwd || !data.projectKey) {
+        setChatPathError(data.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      const identity = { cwd: data.cwd, root: data.cwd, key: data.projectKey };
+      setChatWorkspace({ cwd: identity.cwd, key: identity.key });
+      setValidatedProject(identity);
+      if (chatWorkspace && selectedCwd === chatWorkspace.cwd) setSelectedCwd(identity.cwd);
+      setChatPathOpen(false);
+    } catch (e) {
+      setChatPathError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChatWorkspaceBusy(false);
+    }
+  }, [chatWorkspace, chatWorkspaceBusy, selectedCwd]);
+
+  // fork:chat-workspace — start a session in an explicit workspace (chat or project):
+  // move the workspace first so the explorer, file tabs and per-workspace session
+  // memory follow it.
+  const startSessionIn = useCallback((cwd: string) => {
     const tempId = typeof crypto.randomUUID === "function"
       ? crypto.randomUUID()
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
-    onNewSession?.(tempId, effectiveCwd);
-  }, [selectedCwd, homeDir, onNewSession]);
+    setSelectedCwd(cwd);
+    setCustomPathError(null);
+    setProjectMenuOpen(false);
+    onNewSession?.(tempId, cwd);
+  }, [onNewSession]);
+
+  // fork:chat-workspace — resolve the default workspace when a task is started.
+  // Reading it from render state handed `""`/`"/"` to the API whenever the async
+  // /api/home or /api/chat-workspace response had not landed yet, which created a
+  // session whose cwd was the filesystem root.
+  const resolveDefaultCwd = useCallback(async (): Promise<string | null> => {
+    if (selectedCwd) return selectedCwd;
+    if (chatWorkspace?.cwd) return chatWorkspace.cwd;
+    try {
+      const res = await fetch("/api/chat-workspace", { cache: "no-store" });
+      const data = await res.json() as { cwd?: string; projectKey?: string };
+      if (data.cwd && data.projectKey) {
+        setChatWorkspace({ cwd: data.cwd, key: data.projectKey });
+        setValidatedProject((prev) => prev ?? { cwd: data.cwd!, root: data.cwd!, key: data.projectKey! });
+        return data.cwd;
+      }
+    } catch {
+      // fall back to the home directory below
+    }
+    return homeDir || null;
+  }, [chatWorkspace, homeDir, selectedCwd]);
+
+  const handleNewSession = useCallback(() => {
+    void resolveDefaultCwd().then((cwd) => {
+      if (cwd) startSessionIn(cwd);
+    });
+  }, [resolveDefaultCwd, startSessionIn]);
 
   // Sessions of every worktree in the selected project are shown together
   const selectedProject = projectFor(selectedCwd);
@@ -1086,8 +1190,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (!selectedProject || recent.some((project) => project.key === selectedProject.key)) return recent;
     return [{ key: selectedProject.key, root: selectedProject.root }, ...recent];
   }, [allSessions, selectedProject]);
+  // fork:chat-workspace — 聊天 与 项目 平级：聊天工作区永远在最上面，且从项目列表
+  // （和工作区下拉）里剔除；两者靠各自的标题行区分，标题下各自渲染自己的会话。
+  const chatProjectKey = chatWorkspace?.key ?? null;
   // 项目全部展示，靠外层滚动查看，不再截断
-  const visibleProjects = projectChoices;
+  const visibleProjects = withoutChatProject(projectChoices, chatProjectKey);
+  const chatProject: RecentProject | null = chatWorkspace
+    ? chatProjectOf(projectChoices, chatProjectKey) ?? { key: chatWorkspace.key, root: chatWorkspace.cwd }
+    : null;
 
   // Per-project activity counts (running / unread) for the workspace selector.
   // Uses the same stable server key as the project list and filtering.
@@ -1141,7 +1251,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         }
       : null);
 
-  const sessionFamilies = listSessionFamilies(filteredSessions);
+  const sessionFamilies = listSessionFamilies(applySessionFlags(filteredSessions, sessionFlags));
 
   useLayoutEffect(() => {
     const list = listScrollRef.current;
@@ -1160,7 +1270,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     observer.observe(list);
     observer.observe(section);
     return () => observer.disconnect();
-  }, [selectedProject?.key, sessionFamilies.length, visibleProjects.length]);
+  }, [expandedProjects, selectedProject?.key, sessionFamilies.length, visibleProjects.length]);
 
   const virtualIndices = getSessionListIndices(
     sessionFamilies.length,
@@ -1181,6 +1291,20 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             setCustomPathError(null);
           }}
           onSelect={(path) => void commitCustomPath(path)}
+        />
+      )}
+      {/* fork:chat-workspace — the chat directory picker is separate from the project one
+          so the validated-project flow above stays untouched. */}
+      {chatPathOpen && (
+        <DirectoryPicker
+          initialPath={chatWorkspace?.cwd ?? homeDir}
+          busy={chatWorkspaceBusy}
+          error={chatPathError}
+          onCancel={() => {
+            setChatPathOpen(false);
+            setChatPathError(null);
+          }}
+          onSelect={(path) => void commitChatWorkspace(path)}
         />
       )}
       {/* Header */}
@@ -1212,141 +1336,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          <SidebarNavButton
-            label={t("sidebar.newTask")}
-            onClick={handleNewSession}
-            active={!selectedSessionId}
-            disabled={false}
-            title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.newTask")}
-          />
-        </div>
-
-        <div
-          style={{
-            marginTop: 18,
-            marginBottom: 6,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            minHeight: 28,
-            paddingLeft: 10,
-            position: "relative",
-          }}
-          ref={projectMenuRef}
-        >
-          <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-dim)" }}>
-            {t("sidebar.projects")}
-          </span>
-          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <button
-              type="button"
-              onClick={() => setProjectMenuOpen((open) => !open)}
-              title={t("sidebar.projectActions")}
-              aria-label={t("sidebar.projectActions")}
-              aria-expanded={projectMenuOpen}
-              style={{
-                width: 28,
-                height: 28,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 0,
-                background: projectMenuOpen ? "var(--bg-selected)" : "transparent",
-                border: "none",
-                borderRadius: "var(--radius-md)",
-                color: projectMenuOpen ? "var(--text)" : "var(--text-dim)",
-                cursor: "pointer",
-              }}
-            >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                <circle cx="5" cy="12" r="1.5" />
-                <circle cx="12" cy="12" r="1.5" />
-                <circle cx="19" cy="12" r="1.5" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={handleAddProjectClick}
-              disabled={nativePicking || customPathValidating}
-              title={nativePicking ? t("sidebar.checking") : t("sidebar.addProject")}
-              aria-label={t("sidebar.addProject")}
-              aria-busy={nativePicking}
-              style={{
-                width: 28,
-                height: 28,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                padding: 0,
-                background: "transparent",
-                border: "none",
-                borderRadius: "var(--radius-md)",
-                color: "var(--text-dim)",
-                cursor: nativePicking ? "wait" : "pointer",
-                opacity: nativePicking ? 0.6 : 1,
-              }}
-            >
-              {nativePicking ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 0.8s linear infinite" }}>
-                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                </svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              )}
-            </button>
-          </div>
-          <AnimatedDropdown
-            open={projectMenuOpen}
-            style={{
-              position: "absolute",
-              top: "calc(100% + 2px)",
-              left: 0,
-              right: 0,
-              zIndex: 100,
-              background: "var(--bg-elev)",
-              border: "1px solid var(--border)",
-              borderRadius: "var(--radius-lg)",
-              boxShadow: "var(--shadow-lg)",
-              overflow: "hidden",
-              padding: "6px 0",
-            }}
-          >
-            {selectedProject && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", color: "var(--text)", fontWeight: 600, fontSize: 13 }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)" }} aria-hidden="true">
-                  <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-                </svg>
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(selectedProject.root) || selectedProject.root}</span>
-                <span style={{ color: "var(--success)", flexShrink: 0 }}>✓</span>
+          {/* fork:chat-workspace — the primary action stays upstream's SidebarNavButton;
+              the picker beside it chooses a project or "not in a project". */}
+          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <SidebarNavButton
+                label={t("sidebar.newTask")}
+                onClick={handleNewSession}
+                active={!selectedSessionId}
+                disabled={false}
+                title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.newTask")}
+              />
             </div>
-          )}
-            <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>已添加的工作区</div>
-            {projectChoices.slice(0, 8).map((project) => (
-              <button
-                key={project.key}
-                type="button"
-                onClick={() => {
-                  setSelectedCwd(project.root);
-                  setCustomPathError(null);
-                  setProjectMenuOpen(false);
-                }}
-                title={project.root}
-                style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: project.key === selectedProject?.key ? "var(--bg-selected)" : "transparent", border: "none", color: project.key === selectedProject?.key ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
-                  <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-                </svg>
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(project.root) || project.root}</span>
-              </button>
-            ))}
-            <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
-            <button type="button" onClick={() => void handleDefaultCwd()} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
-              {t("sidebar.useDefaultDirectory")}
-            </button>
-          </AnimatedDropdown>
+            <NewTaskPicker
+              projects={visibleProjects.map((project) => ({ key: project.key, root: project.root, name: getFileName(project.root) || project.root }))}
+              activeKey={selectedProject?.key ?? null}
+              chatPath={chatProject?.root ?? null}
+              onNewIn={startSessionIn}
+              onAddProject={() => void handleAddProjectClick()}
+            />
+          </div>
         </div>
 
         {sessionSearchOpen && (
@@ -1738,11 +1747,232 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {error}
             </div>
           )}
-          {!loading && !error && visibleProjects.length === 0 && (
+          {!loading && !error && visibleProjects.length === 0 && !chatProject && (
             <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
               {t("sidebar.noSessions")}
             </div>
           )}
+          {/* fork:chat-workspace — 聊天分区：固定在最上面，自带标题行（新建 / 设置目录 /
+              折叠），会话列表沿用项目那套高亮与虚拟窗口逻辑。 */}
+          {chatProject && (() => {
+            const isSelectedChat = chatProject.key === selectedProject?.key;
+            const isChatExpanded = expandedProjects.has(chatProject.key);
+            const chatFamilies = listSessionFamilies(applySessionFlags(sessionsForProject(allSessions, chatProject.key), sessionFlags));
+            const chatArchivedFamilies = listSessionFamilies(archivedSessions(sessionsForProject(allSessions, chatProject.key), sessionFlags));
+            const chatArchivedSection = (
+              <ArchivedSessionsSection
+                families={chatArchivedFamilies}
+                expanded={expandedArchivedProjects.has(chatProject.key)}
+                onToggle={() => toggleArchivedSection(chatProject.key)}
+                selectedSessionId={selectedSessionId}
+                runningSessionIds={runningSessionIds}
+                unreadSessionIds={unreadSessionIds}
+                onSelectSession={handleSelectSessionFromList}
+                onRenamed={loadSessions}
+                onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
+              />
+            );
+            const toggleChatExpanded = () => {
+              setExpandedProjects((prev) => {
+                const next = new Set(prev);
+                if (next.has(chatProject.key)) next.delete(chatProject.key);
+                else next.add(chatProject.key);
+                return next;
+              });
+            };
+            return (
+              <div>
+                <ChatWorkspaceRow
+                  label={t("sidebar.chatWorkspace")}
+                  title={chatProject.root}
+                  selected={isSelectedChat}
+                  expanded={isChatExpanded}
+                  busy={chatWorkspaceBusy}
+                  activity={projectActivity.get(chatProject.key)}
+                  onToggle={toggleChatExpanded}
+                  onConfigure={() => {
+                    setChatPathError(null);
+                    setChatPathOpen(true);
+                  }}
+                  onNewChat={() => startSessionIn(chatProject.root)}
+                  onSelect={() => {
+                    if (isSelectedChat) {
+                      toggleChatExpanded();
+                      return;
+                    }
+                    setSelectedCwd(chatProject.root);
+                    setCustomPathError(null);
+                    setProjectMenuOpen(false);
+                  }}
+                />
+                {isChatExpanded && (chatFamilies.length === 0 && chatArchivedFamilies.length === 0 ? (
+                  <div style={{ padding: "6px 0 6px 24px", color: "var(--text-dim)", fontSize: 12 }}>{t("sidebar.noTasks")}</div>
+                ) : isSelectedChat ? (
+                  <div ref={sessionListRef} style={{ minHeight: chatFamilies.length * SESSION_LIST_ITEM_HEIGHT }}>
+                    <div style={{ position: "relative", height: chatFamilies.length * SESSION_LIST_ITEM_HEIGHT }}>
+                      {virtualIndices.map((index) => {
+                        const family = chatFamilies[index];
+                        const familySessions = [family.root, ...family.subagents];
+                        const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
+                        return (
+                          <div key={family.root.id} data-session-id={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {chatArchivedSection}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {chatFamilies.map((family) => {
+                      const familySessions = [family.root, ...family.subagents];
+                      const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
+                      return (
+                        <div key={family.root.id}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {chatArchivedSection}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          <div
+            style={{
+              marginTop: 18,
+              marginBottom: 6,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              minHeight: 28,
+              paddingLeft: 10,
+              position: "relative",
+            }}
+            ref={projectMenuRef}
+          >
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-dim)" }}>
+              {t("sidebar.projects")}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+              <button
+                type="button"
+                onClick={() => setProjectMenuOpen((open) => !open)}
+                title={t("sidebar.projectActions")}
+                aria-label={t("sidebar.projectActions")}
+                aria-expanded={projectMenuOpen}
+                style={{
+                  width: 28,
+                  height: 28,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  background: projectMenuOpen ? "var(--bg-selected)" : "transparent",
+                  border: "none",
+                  borderRadius: "var(--radius-md)",
+                  color: projectMenuOpen ? "var(--text)" : "var(--text-dim)",
+                  cursor: "pointer",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <circle cx="5" cy="12" r="1.5" />
+                  <circle cx="12" cy="12" r="1.5" />
+                  <circle cx="19" cy="12" r="1.5" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                onClick={handleAddProjectClick}
+                disabled={nativePicking || customPathValidating}
+                title={nativePicking ? t("sidebar.checking") : t("sidebar.addProject")}
+                aria-label={t("sidebar.addProject")}
+                aria-busy={nativePicking}
+                style={{
+                  width: 28,
+                  height: 28,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: "var(--radius-md)",
+                  color: "var(--text-dim)",
+                  cursor: nativePicking ? "wait" : "pointer",
+                  opacity: nativePicking ? 0.6 : 1,
+                }}
+              >
+                {nativePicking ? (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 0.8s linear infinite" }}>
+                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                )}
+              </button>
+            </div>
+            <AnimatedDropdown
+              open={projectMenuOpen}
+              style={{
+                position: "absolute",
+                top: "calc(100% + 2px)",
+                left: 0,
+                right: 0,
+                zIndex: 100,
+                background: "var(--bg-elev)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-lg)",
+                boxShadow: "var(--shadow-lg)",
+                overflow: "hidden",
+                padding: "6px 0",
+              }}
+            >
+              {selectedProject && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", color: "var(--text)", fontWeight: 600, fontSize: 13 }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)" }} aria-hidden="true">
+                    <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+                  </svg>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(selectedProject.root) || selectedProject.root}</span>
+                  <span style={{ color: "var(--success)", flexShrink: 0 }}>✓</span>
+              </div>
+            )}
+              <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>已添加的工作区</div>
+              {visibleProjects.slice(0, 8).map((project) => (
+                <button
+                  key={project.key}
+                  type="button"
+                  onClick={() => {
+                    setSelectedCwd(project.root);
+                    setCustomPathError(null);
+                    setProjectMenuOpen(false);
+                  }}
+                  title={project.root}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: project.key === selectedProject?.key ? "var(--bg-selected)" : "transparent", border: "none", color: project.key === selectedProject?.key ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                    <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+                  </svg>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(project.root) || project.root}</span>
+                </button>
+              ))}
+              <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+              <button type="button" onClick={() => void handleDefaultCwd()} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+                {t("sidebar.useDefaultDirectory")}
+              </button>
+            </AnimatedDropdown>
+          </div>
+
           {visibleProjects.map((project) => {
             const isSelectedProject = project.key === selectedProject?.key;
             const count = sessionsForProject(allSessions, project.key).length;
@@ -1782,8 +2012,23 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 />
                 {isExpanded &&
                   (() => {
-                    const families = listSessionFamilies(sessionsForProject(allSessions, project.key));
-                    if (families.length === 0) {
+                    const projectSessions = sessionsForProject(allSessions, project.key);
+                    const families = listSessionFamilies(applySessionFlags(projectSessions, sessionFlags));
+                    const archivedFamilies = listSessionFamilies(archivedSessions(projectSessions, sessionFlags));
+                    const archivedSection = (
+                      <ArchivedSessionsSection
+                        families={archivedFamilies}
+                        expanded={expandedArchivedProjects.has(project.key)}
+                        onToggle={() => toggleArchivedSection(project.key)}
+                        selectedSessionId={selectedSessionId}
+                        runningSessionIds={runningSessionIds}
+                        unreadSessionIds={unreadSessionIds}
+                        onSelectSession={handleSelectSessionFromList}
+                        onRenamed={loadSessions}
+                        onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
+                      />
+                    );
+                    if (families.length === 0 && archivedFamilies.length === 0) {
                       return (
                         <div style={{ padding: "6px 0 6px 34px", color: "var(--text-dim)", fontSize: 12 }}>{t("sidebar.noTasks")}</div>
                       );
@@ -1807,6 +2052,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                               })}
                             </div>
                           )}
+                          {archivedSection}
                         </div>
                       );
                     }
@@ -1823,6 +2069,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             </div>
                           );
                         })}
+                        {archivedSection}
                       </div>
                     );
                   })()}
@@ -1940,6 +2187,105 @@ function showProjectActivity(
         </span>
       )}
     </span>
+  );
+}
+
+/**
+ * Collapsed-by-default recovery list for one project's archived sessions.
+ *
+ * Archived rows are hidden from the main list by `applySessionFlags`, so this
+ * section is the only place a row can be right-clicked back to unarchived.
+ * Rows reuse `SessionItem` unchanged (the row dispatches the context-menu
+ * event), and stay non-virtualized because an expanded archive is bounded by
+ * how many sessions the user chose to hide.
+ */
+function ArchivedSessionsSection({
+  families,
+  expanded,
+  onToggle,
+  selectedSessionId,
+  runningSessionIds,
+  unreadSessionIds,
+  onSelectSession,
+  onRenamed,
+  onDeleted,
+}: {
+  families: SessionFamily[];
+  expanded: boolean;
+  onToggle: () => void;
+  selectedSessionId: string | null;
+  runningSessionIds: Set<string>;
+  unreadSessionIds: Set<string>;
+  onSelectSession: (session: SessionInfo) => void;
+  onRenamed: () => void;
+  onDeleted: (id: string) => void;
+}) {
+  const { t } = useI18n();
+  const [hovered, setHovered] = useState(false);
+  if (families.length === 0) return null;
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={t("sidebar.archivedCount", { count: families.length })}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          width: "100%",
+          height: 28,
+          boxSizing: "border-box",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "0 9px",
+          marginTop: 2,
+          background: hovered ? "var(--bg-hover)" : "transparent",
+          border: "none",
+          borderRadius: "var(--radius-md)",
+          color: "var(--text-dim)",
+          cursor: "pointer",
+          textAlign: "left",
+          fontSize: 12,
+          transition: "background 0.12s",
+        }}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ flexShrink: 0, transform: expanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {t("sidebar.archived")}
+        </span>
+        <span style={{ flexShrink: 0, minWidth: 14, textAlign: "right" }}>{families.length}</span>
+      </button>
+      {expanded && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+          {families.map((family) => {
+            const familySessions = [family.root, ...family.subagents];
+            const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
+            return (
+              <div key={family.root.id}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => onSelectSession(family.root)} onRenamed={onRenamed} onDeleted={onDeleted} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 

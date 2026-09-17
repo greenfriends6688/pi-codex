@@ -24,7 +24,7 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Design tokens — the Codex skin laid over upstream v0.9.1's six-palette
+   Design tokens 鈥?the Codex skin laid over upstream v0.9.1's six-palette
    theme system.
 
    hooks/useTheme.ts writes `data-theme` on <html> and keeps the `.dark` class
@@ -40,7 +40,7 @@
 
 /* Theme-independent: geometry, elevation, layout metrics, motion. */
 :root {
-  /* Geometry — Codex corner-radius scale (base × 1.25) */
+  /* Geometry 鈥?Codex corner-radius scale (base 脳 1.25) */
   --corner-radius-scale: 1.25;
   --radius-xs: calc(4px * var(--corner-radius-scale));
   --radius-sm: calc(6px * var(--corner-radius-scale));
@@ -50,22 +50,22 @@
   --radius-2xl: calc(16px * var(--corner-radius-scale));
   --radius-pill: 999px;
 
-  /* Elevation — one ladder, four steps, every step built from the same warm
+  /* Elevation 鈥?one ladder, four steps, every step built from the same warm
      hairline stroke plus stacked warm-black shadows. Names are kept because
      components reference --shadow-sm|md|lg|xl inline; the ladder itself is what
-     changed. See docs/codex-skin/visual-spec.md §3. */
+     changed. See docs/codex-skin/visual-spec.md 搂3. */
   --elevation-stroke: 0 0 0 0.5px var(--border-strong);
   --shadow-sm: var(--elevation-stroke), 0 1px 2px -1px oklch(0.2 0.02 60 / 0.1);
   --shadow-md: var(--elevation-stroke), 0 2px 4px -1px oklch(0.2 0.02 60 / 0.09), 0 6px 12px -4px oklch(0.2 0.02 60 / 0.08);
   --shadow-lg: var(--elevation-stroke), 0 4px 8px -2px oklch(0.2 0.02 60 / 0.09), 0 12px 24px -6px oklch(0.2 0.02 60 / 0.1);
   --shadow-xl: var(--elevation-stroke), 0 8px 16px -4px oklch(0.2 0.02 60 / 0.12), 0 24px 48px -12px oklch(0.2 0.02 60 / 0.14);
 
-  /* Terminal island — a fixed dark surface in every theme, because the xterm
+  /* Terminal island 鈥?a fixed dark surface in every theme, because the xterm
      palette is constructed in JS (components/TerminalPanel.tsx) and is not
      theme-aware. `--terminal-surface` MUST equal that theme's `background`,
      otherwise the panel chrome and the canvas show a seam between two near
      blacks. Making the terminal follow the theme means editing that JS palette,
-     which is out of scope for a CSS-only pass (visual-spec.md §7). */
+     which is out of scope for a CSS-only pass (visual-spec.md 搂7). */
   --terminal-surface: #111318;
   --terminal-chrome: #171b22;
   --terminal-border: #262b34;
@@ -73,8 +73,8 @@
   --terminal-text: #d7dce5;
   --terminal-text-dim: #8b93a1;
 
-  /* Type scale — every font-size literal in the app maps to exactly one step:
-     10→2xs  11→xs  12→sm  13→md  14→lg  15→xl  18→2xl  24→3xl */
+  /* Type scale 鈥?every font-size literal in the app maps to exactly one step:
+     10鈫?xs  11鈫抶s  12鈫抯m  13鈫抦d  14鈫抣g  15鈫抶l  18鈫?xl  24鈫?xl */
   --text-2xs: 10px;
   --text-xs: 11px;
   --text-sm: 12px;
@@ -84,7 +84,7 @@
   --text-2xl: 18px;
   --text-3xl: 24px;
 
-  /* Control sizes — one ladder for every interactive box. */
+  /* Control sizes 鈥?one ladder for every interactive box. */
   --control-xs: 22px;
   --control-sm: 26px;
   --control-md: 28px;
@@ -105,9 +105,13 @@
   --z-toast: 1100;
 
   /* Layout metrics lifted from the Codex app: thread content 860px, toolbar
-     46px, composer radius 5.5×spacing, and a 16px inline overhang that lets
+     46px, composer radius 5.5脳spacing, and a 16px inline overhang that lets
      the composer sit wider than the thread. */
   --chat-content-max-width: 860px;
+  /* Right-hand file-tree column inside the workspace panel. Container-query
+     gated (see .file-panel-body below), so it only appears when the panel is
+     wide enough to seat both the viewer and the tree. */
+  --explorer-column-width: 264px;
   /* Readable column for the Markdown workspace editor / preview (upstream
      PR #838). Deliberately wider than the chat thread: prose reads better
      at ~900px than at the 860px the chat column uses. */
@@ -121,14 +125,14 @@
   --conversation-item-gap: 16px;
   --chat-content-font-size: 13px;
 
-  /* Motion — durations/easings still referenced by the panel transitions. */
+  /* Motion 鈥?durations/easings still referenced by the panel transitions. */
   --motion-fast: 120ms;
   --motion-base: 150ms;
   --motion-slow: 250ms;
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* light — pure white surfaces with neutral grey hairlines and a blue accent.
+/* light 鈥?pure white surfaces with neutral grey hairlines and a blue accent.
    Deliberately achromatic: a warm cast here reads as a dirty page background
    (user feedback 2026-09-16), so the light theme keeps chroma 0 and lets the
    accent carry the colour. The tinted palettes (mist, rose) are opt-in. */
@@ -171,7 +175,7 @@
   --scrim: oklch(0 0 0 / 0.45);
 }
 
-/* dark — warm brown-black neutrals, pale blue accent, warm-white action */
+/* dark 鈥?warm brown-black neutrals, pale blue accent, warm-white action */
 html.dark,
 [data-theme="dark"] {
   color-scheme: dark;
@@ -211,7 +215,7 @@ html.dark,
   --scrim: oklch(0 0 0 / 0.62);
 }
 
-/* mist — warm-white surfaces with a faint green cast, teal accent */
+/* mist 鈥?warm-white surfaces with a faint green cast, teal accent */
 [data-theme="mist"] {
   color-scheme: light;
   --bg: oklch(0.985 0.005 165);
@@ -250,7 +254,7 @@ html.dark,
   --scrim: oklch(0.24 0.01 165 / 0.45);
 }
 
-/* rose — warm-white surfaces with a rose cast, wine accent */
+/* rose 鈥?warm-white surfaces with a rose cast, wine accent */
 [data-theme="rose"] {
   color-scheme: light;
   --bg: oklch(0.987 0.005 20);
@@ -289,7 +293,7 @@ html.dark,
   --scrim: oklch(0.24 0.01 12 / 0.45);
 }
 
-/* pine — warm brown-black surfaces with a green cast, pale-green accent */
+/* pine 鈥?warm brown-black surfaces with a green cast, pale-green accent */
 html[data-theme="pine"],
 [data-theme="pine"] {
   color-scheme: dark;
@@ -1700,7 +1704,7 @@ pre, code {
   }
 }
 
-/* File viewer markdown preview — larger headings */
+/* File viewer markdown preview 鈥?larger headings */
 .markdown-file-preview h1 { font-size: 1.8em; }
 .markdown-file-preview h2 { font-size: 1.4em; }
 .markdown-file-preview h3 { font-size: 1.15em; }
@@ -1846,7 +1850,7 @@ span.token.table {
   border-radius: var(--radius-xs);
 }
 
-/* Static loading placeholder — no shimmer (see delta.md, motion layer removed). */
+/* Static loading placeholder 鈥?no shimmer (see delta.md, motion layer removed). */
 .skeleton-line {
   border-radius: var(--radius-sm);
   background: var(--bg-hover);
@@ -2078,7 +2082,7 @@ span.token.table {
     overflow: hidden;
     /* The panel fills its grid track; the track itself is sized by
        --right-panel-width on .main-panels. The fork's old `transition: width`
-       is dead here because width no longer changes — the grid track does,
+       is dead here because width no longer changes 鈥?the grid track does,
        and .main-panels already transitions grid-template-columns. */
     width: 100% !important;
     min-width: 0 !important;
@@ -2289,7 +2293,7 @@ span.token.table {
 /* --- Composer: the one floating surface inside the chat column -------------
    Hook: the composer box is the only element carrying the inline
    `--radius-composer`. The compact (quote) variant renders borderRadius 0, so
-   it never matches — if that inline radius is ever changed, retarget this. */
+   it never matches 鈥?if that inline radius is ever changed, retarget this. */
 .chat-content div[style*="--radius-composer"] {
   border-radius: var(--radius-composer) !important;
   box-shadow: var(--shadow-sm) !important;
@@ -2364,12 +2368,12 @@ span.token.table {
    File panel body: the active viewer plus an optional tree column. The tree used
    to be the panel's fallback content, which meant opening a document hid it; it
    now sits beside the document instead (PiDeck-style "document in the middle,
-   file tree on the right"). Only rendered on wide panels — see AppShell's
+   file tree on the right"). Only rendered on wide panels 鈥?see AppShell's
    EXPLORER_COLUMN_MIN_PANEL_WIDTH.
 --------------------------------------------------------------------------- */
 .file-panel-body {
   /* The tree column is gated on the *rendered* panel width, which the layout
-     grid decides (1fr in the main region) — not on the resizer state. */
+     grid decides (1fr in the main region) 鈥?not on the resizer state. */
   container-type: inline-size;
   display: flex;
   flex: 1 1 auto;
@@ -2406,8 +2410,7 @@ span.token.table {
   }
 }
 
-/* Expanded document: the tree column yields its room to the viewer (PiDeck's ⤢
-   behaviour). True fullscreen stays on its own button. */
+/* Expanded document: the tree column yields its room to the viewer (PiDeck's 猡?   behaviour). True fullscreen stays on its own button. */
 .file-panel-body:has(.file-viewer-shell[data-expanded]) .explorer-column {
   display: none;
 }
@@ -2423,11 +2426,549 @@ span.token.table {
 
 /* The tree column spans the panel's full height so its header lines up with the
    tab bar row (the tab bar lives in .file-panel-main, the column is its sibling
-   inside .file-panel-body — hence the negative offset). */
+   inside .file-panel-body 鈥?hence the negative offset). */
 .explorer-column {
   margin-top: calc(-1 * var(--height-toolbar-pane, 40px));
 }
 
 .explorer-column .file-explorer-header {
   min-height: var(--height-toolbar-pane, 40px);
+}
+
+/* ---------------------------------------------------------------------------
+   Grouped process renderer (components/ProcessGroup.tsx)
+
+   Between the user's message and the final answer, an assistant turn is a long
+   run of reasoning + tool calls. The grouped renderer shows that run as a
+   terminal-style transcript: one summary line, then one compact row per step,
+   joined by tree connectors.
+
+   The connectors are drawn with borders (a vertical line plus a rounded elbow),
+   not with box-drawing glyphs — a glyph would depend on the active font having
+   U+251C/U+2514 in the right width, and this app's monospace stack is
+   configurable.
+
+   Only existing Codex tokens are used. Colour is reserved for meaning: a failed
+   step borrows --danger, a reasoning step the accent, and everything else stays
+   on the muted foreground so a long run reads as quiet output.
+--------------------------------------------------------------------------- */
+
+.process-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* --- Timeline ------------------------------------------------------------- */
+
+.process-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.process-step {
+  position: relative;
+  padding-left: 22px;
+}
+
+/* Vertical trunk. Runs the full row height for every step but the last, so the
+   line is continuous across the list. */
+.process-step::before {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+.process-step.is-last::before {
+  bottom: calc(100% - 15px);
+}
+
+/* Horizontal elbow from the trunk to the row. */
+.process-step::after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 14px;
+  width: 9px;
+  height: 1px;
+  background: var(--border);
+}
+
+.process-step.is-last::after {
+  border-bottom-left-radius: var(--radius-sm);
+  border-left: 1px solid var(--border);
+  width: 10px;
+}
+
+.process-step-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 6px 0 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  text-align: left;
+  cursor: pointer;
+}
+
+.process-step-row:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.process-step-row:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -1px;
+}
+
+.process-step-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--text-dim);
+}
+
+.process-step.is-open > .process-step-row .process-step-icon,
+.process-step-row:hover .process-step-icon {
+  color: var(--text-muted);
+}
+
+/* Reasoning reads as a different register, not a different colour weight. */
+.process-step.is-thinking > .process-step-row .process-step-icon,
+.process-step.is-thinking > .process-step-row .process-step-label {
+  color: var(--accent);
+}
+
+.process-step-label {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.process-step-row:hover .process-step-label {
+  color: var(--text);
+}
+
+.process-step-count {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* Secondary text (the shell command). Shrinks first, truncating with an
+   ellipsis, so the row never wraps. */
+.process-step-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.process-step-duration {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.process-step.is-failed > .process-step-row {
+  color: var(--danger);
+}
+
+.process-step.is-failed > .process-step-row .process-step-label,
+.process-step.is-failed > .process-step-row .process-step-icon,
+.process-step.is-failed > .process-step-row .process-step-duration {
+  color: var(--danger);
+}
+
+.process-step-failed {
+  flex-shrink: 0;
+  color: var(--danger);
+  font-size: var(--text-xs);
+}
+
+.process-step.is-failed > .process-step-row .process-step-duration {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.process-step.is-failed .process-step-failed {
+  margin-left: 0;
+}
+
+.process-step.is-failed > .process-step-row .process-step-failed {
+  order: 1;
+}
+
+.process-step.is-failed > .process-step-row .process-step-duration {
+  order: 0;
+}
+
+/* --- File chips -----------------------------------------------------------
+   Small raised tokens carrying the file-type icon, so a change is identifiable
+   without opening it. */
+.process-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  max-width: 190px;
+  height: 19px;
+  padding: 0 6px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-xs);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+
+button.process-file-chip {
+  cursor: pointer;
+}
+
+button.process-file-chip:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.process-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.process-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-file-more {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* --- Step body ------------------------------------------------------------ */
+
+.process-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 8px;
+  padding-left: 9px;
+  border-left: 1px solid var(--border-faint);
+}
+
+.process-step-reasoning {
+  color: var(--text-muted);
+  font-size: var(--text-md);
+  line-height: 1.6;
+}
+
+.process-step-reasoning.is-thinking {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.process-step-tools {
+  gap: 2px;
+}
+
+/* --- Chips (tabs mode) ----------------------------------------------------
+   A wrapped strip, not a horizontal scroller: the whole turn fits on screen at
+   a glance, which is the point of this mode. Selecting a chip opens its detail
+   underneath. */
+.process-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.process-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 27px;
+  padding: 0 9px;
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: border-color var(--motion-fast) var(--ease-out),
+              background-color var(--motion-fast) var(--ease-out),
+              color var(--motion-fast) var(--ease-out);
+}
+
+.process-chip > svg {
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+.process-chip:hover {
+  border-color: var(--border);
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.process-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.process-chip.is-active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.process-chip.is-active > svg {
+  color: var(--accent);
+}
+
+.process-chip.is-thinking,
+.process-chip.is-thinking > svg {
+  color: var(--accent);
+}
+
+.process-chip.is-failed,
+.process-chip.is-failed > svg {
+  color: var(--danger);
+}
+
+.process-chip.is-failed {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: var(--danger-soft);
+}
+
+.process-chip-label {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.process-chip-detail {
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.process-chip-failed {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+}
+
+.process-chip .process-step-duration {
+  margin-left: 0;
+  padding-left: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .process-chip {
+    transition: none;
+  }
+}
+
+/* Reasoning / note bodies render open by default, clamped to a few lines with a
+   fade — so the timeline shows what the model was thinking without a click, and
+   a long block cannot dominate the transcript. */
+.process-reasoning-body {
+  position: relative;
+}
+
+.process-reasoning-body.is-clamped {
+  max-height: 6.2em;
+  overflow: hidden;
+}
+
+/* The fade is a separate element rather than a mask so it can sit above the
+   markdown's own backgrounds (code blocks, tables) without blending them. */
+.process-reasoning-body.is-clamped::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.4em;
+  pointer-events: none;
+  background: linear-gradient(to bottom, transparent, var(--bg));
+}
+
+.process-reasoning-more {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.process-reasoning-more:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.process-reasoning-more:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+/* Duration sits immediately after the label / chips, the way a shell transcript
+   prints timings — not pinned to the right edge, which reads as a separate
+   column and strands short rows in a sea of whitespace. */
+.process-step-duration {
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.process-step-detail,
+.process-step-row .process-step-detail {
+  max-width: 52%;
+}
+
+/* A reasoning row is visually lighter than a tool row: the icon and label stay
+   muted so the prose reads as the content and the label as its caption. */
+.process-step.is-reasoning > .process-step-row .process-step-label {
+  color: var(--text-dim);
+}
+
+/* --- Context menu ---------------------------------------------------------
+   `components/ContextMenu.tsx` renders through a portal on `document.body`, so
+   nothing here may depend on an ancestor. Position stays inline (pointer
+   coordinates, already flipped at the viewport edges); the rest is class-based
+   so the menu follows the active palette and the pi-theme overlay. */
+.context-menu {
+  position: fixed;
+  z-index: var(--z-modal);
+  max-width: 300px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-lg);
+  transform-origin: top left;
+  transition: opacity 90ms ease, transform 90ms ease;
+  user-select: none;
+}
+
+.context-menu.is-closing {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+}
+
+.context-menu-submenu {
+  z-index: calc(var(--z-modal) + 1);
+}
+
+.context-menu-item-wrap {
+  position: relative;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Keyboard and pointer share one highlight: the component sets `is-active`
+   from `onMouseEnter`, so a `:hover` rule would be a second source of truth. */
+.context-menu-item.is-active {
+  background: var(--bg-hover);
+}
+
+.context-menu-item:disabled {
+  color: var(--text-dim);
+  opacity: 0.55;
+  cursor: default;
+}
+
+.context-menu-item.is-danger {
+  color: var(--danger);
+}
+
+.context-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+.context-menu-item.is-danger .context-menu-icon {
+  color: inherit;
+}
+
+.context-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-menu-hint {
+  flex-shrink: 0;
+  margin-left: 12px;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.context-menu-caret {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+.context-menu-separator {
+  height: 1px;
+  margin: 4px -4px;
+  background: var(--border);
 }

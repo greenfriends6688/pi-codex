@@ -779,3 +779,70 @@ x=1546 新建浏览器标签 / x=1572 交换聊天区与工作区
 - ①是后加进聊天顶栏动作组的同类按钮，于是同一排出现两个一模一样的图标。
 - 修法：删掉①，保留②（唯一实例），并在原处留注释说明原因。
   复测确认 `隐藏右侧工作区` 只剩 1 个。
+
+### 18. 从 pi-web-desktop 借鉴：主题引擎 / 过程分组 / 壁纸 / 右键菜单（2026-09-16）
+
+来源是 `参考项目/pi-web-desktop-main`（`@iswitthere/pi-web-desktop` 0.8.10-f，在上游 0.7.16 处
+分叉后独立演进）。完整对比与 PR 拆分见
+[`docs/desktop-ui-borrowing-plan-2026-09-16.md`](../desktop-ui-borrowing-plan-2026-09-16.md)。
+
+本轮落地的东西：
+
+**皮肤面（会进 `globals.css` / `settings.css`，合上游时要重打）**
+
+| 内容 | 落点 |
+|---|---|
+| 过程分组样式（树状连接线 / 文件 chip / chip 面板 / 推理截断与渐隐） | `globals.css` 末尾新增块 |
+| 通用右键菜单样式 | 同上 |
+| pi 主题选择器样式 + 设置分组小标题 | `settings.css` |
+| 壁纸设置样式 | `settings.css` |
+| `--explorer-column-width` 从「只写 fallback」补成 `:root` 里的真 token | `globals.css` 几何块 |
+
+**新增文件**
+
+- `lib/pi-theme.ts` + `lib/pi-theme-builtin.ts` + `lib/pi-theme-client.ts` —— pi CLI 主题引擎。
+  把 pi 的 53 个 token 映射到本 fork 的 **34 个强制令牌**（不是照搬 desktop 的 29 个：两边 token 名
+  只有 14 个交集）。**分层**而非替换：`data-theme` 仍然选六套 Codex 色板，pi 主题以 `<html>` 内联
+  自定义属性叠在上面；切回色板必须 `removeProperty()` 全部 34 个，否则会留残留色。
+- `components/PiThemePicker.tsx` / `app/api/themes/{route.ts,[name]/route.ts}`
+- `lib/border-depth.ts` + `hooks/useBorderDepth.ts` —— 三级描边联动滑杆。快照 `--border-*-orig`
+  后再混合，避免反复拖动叠加漂移。
+- `lib/wallpaper.ts` / `lib/wallpaper-builtin.ts` / `hooks/useWallpaper.ts` / `components/WallpaperLayer.tsx` / `app/wallpaper.css`
+- `lib/step-categorizer.ts` / `lib/process-content.ts` / `lib/stream-update-scheduler.ts` /
+  `lib/mention-tokens.ts` / `lib/file-mentions.ts` / `lib/time-groups.ts` / `lib/time-group-state.ts` /
+  `lib/session-flags.ts` / `lib/ui-scale.ts` / `lib/git-graph-*.ts`（后两项本轮未接线）
+- `components/ProcessGroup.tsx` / `components/ContextMenu.tsx` / `components/SessionRowContextMenuBridge.tsx`
+- `hooks/useProcessDisplayMode.ts` / `hooks/usePiTheme.ts`
+- `public/monet-artworks/*.jpg`（6 张，5.5MB，取自 desktop 的内置壁纸）
+
+**三个必须记住的坑**
+
+1. **描边深度的「淡出」必须混 `transparent`，不能混 `--bg`**。Codex 的三级描边是
+   `oklch(… / 0.1)` 这种**半透明**色，而 `--bg` 不透明 → `color-mix(orig, --bg)` 会把 alpha
+   **抬高**：往「隐藏」滑反而画出更实的一条灰线。浏览器实测：深度 0 得到的是
+   `color-mix(… 0%, white 100%)`，即一块纯色面。已改为混 `transparent`，并用 gamma 0.6/0.7
+   让中段可感知（线性映射会让有用区间全挤在两端）。
+2. **`lib/pi-theme.ts` 用 `fs`/`os`，绝不能被客户端 import 值**。`PI_THEME_CSS_VARS` 因此在
+   `lib/pi-theme-client.ts` 里有一份副本，由 `lib/pi-theme-tokens.test.mjs` 断言两份必须逐项相同。
+3. **过程分组只渲染一份摘要**。`ProcessDetailsGroup` 的表头就是唯一的摘要行，
+   `ProcessGroup` 再渲染一次会叠出两行计数（实测出现过
+   「处理详情 · 29 条消息 · 29 次工具调用」+「29 次工具调用 · 5 段思考」）。
+   现在由 `summarizeProcessBlocks()` 算好交给表头。
+
+**与既有设计的冲突与取舍**
+
+- **不搬 desktop 的三栏壳**：本 fork 的 `[会话][聊天][文档][文件树]` + 容器查询闸门是自研资产（§11–§17）。
+- **不合并六套色板**：desktop 是「一套 token 两种模式」，与本 fork 的产品定位冲突，只借它的主题 JSON 解析层。
+- **过程分组默认仍是 `legacy`**：`hooks/useProcessDisplayMode.ts` 默认值保持平铺渲染，
+  分组渲染是设置里的显式选择（`设置 → 通用 → 过程显示`）。
+- **欢迎大厅未做**（用户明确不要）。
+- **UI 缩放（zoom）只铺了 `lib/ui-scale.ts`，没开开关**：CSS `zoom` 会让 JS 视口坐标与 CSS 像素错位，
+  本 fork 有 5 处浮层/拖拽依赖它，需逐项浏览器核对后再决定。
+- **`tsconfig.json` 把 `参考项目/` 加进 `exclude`**：它导致全量 `tsc` 直接 OOM（8GB 机器），
+  是这轮最大的隐性阻塞。
+
+**验证**：`tsc --noEmit` 0 错 ｜ 1325 个测试 1314 通过（9 个环境性失败：无 git 装不了 worktree、
+Windows bash 环境隔离、PTY 运行时、1 条既有 ChatInput 用例）｜ `audit-tokens` 通过
+（顺手补了 3 个历史遗留未定义 token，并把 `app/wallpaper.css` 纳入审计范围）｜
+`verify-themes` 5/5 ｜ `scripts/probe-theme-ui.mjs` 用 Playwright 实测描边 0/25/50/75/100 五档、
+`/api/themes`、内置壁纸路径均正常。

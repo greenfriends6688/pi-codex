@@ -125,7 +125,9 @@ test("does not expose disk-backed actions for transient sessions", () => {
 });
 
 test("hides subagent rows and aggregates their state into the main session row", () => {
-  assert.match(source, /const sessionFamilies = listSessionFamilies\(filteredSessions\)/);
+  // The session list feeds through the client-side pin/archive flags before it is
+  // grouped into families, so a pinned row sorts first and an archived row drops out.
+  assert.match(source, /const sessionFamilies = listSessionFamilies\(applySessionFlags\(filteredSessions, sessionFlags\)\)/);
   assert.match(source, /familySessions\.some\(\(session\) => session\.id === selectedSessionId\)/);
   assert.match(source, /familySessions\.some\(\(session\) => runningSessionIds\.has\(session\.id\)\)/);
   assert.doesNotMatch(source, /function SessionTreeItem/);
@@ -147,4 +149,26 @@ test("renders projects as primary rows with the selected project's tasks nested 
   assert.doesNotMatch(source, /showMoreProjects/);
   assert.doesNotMatch(source, /showFewerProjects/);
   assert.doesNotMatch(source, /PROJECTS_COLLAPSED_LIMIT/);
+});
+
+// fork:chat-workspace
+test("keeps a standalone chat section above the projects", () => {
+  assert.match(source, /<ChatWorkspaceRow/);
+  assert.match(source, /<NewTaskPicker/);
+  assert.match(source, /const visibleProjects = withoutChatProject\(projectChoices, chatProjectKey\)/);
+  assert.match(source, /fetch\("\/api\/chat-workspace"/);
+  // 聊天 与 项目 平级：聊天分区排在项目标题行与项目行之前，各自渲染自己的会话。
+  assert.ok(
+    source.indexOf("<ChatWorkspaceRow") < source.indexOf('{t("sidebar.projects")}'),
+    "the chat section renders above the projects caption",
+  );
+  assert.ok(
+    source.indexOf("{chatProject && (() => {") < source.indexOf("{visibleProjects.map((project) => {"),
+    "the chat section renders above the project rows",
+  );
+  // The default workspace is resolved at click time — never the "" / "/" render value.
+  assert.match(source, /const resolveDefaultCwd = useCallback\(async \(\): Promise<string \| null> => \{/);
+  assert.match(source, /if \(selectedCwd\) return selectedCwd;/);
+  assert.doesNotMatch(source, /selectedCwd \|\| homeDir \|\| "\/"/);
+  assert.doesNotMatch(source, /chatWorkspace\?\.cwd \|\| homeDir \|\| "\/"/);
 });

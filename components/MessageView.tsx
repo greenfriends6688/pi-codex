@@ -1103,7 +1103,9 @@ function ToolCallIcon({ toolName }: { toolName: string }) {
   );
 }
 
-function ToolCallBlock({ block, result, duration, onOpenSession, expanded: controlledExpanded, onToggle }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSession?: (sessionId: string) => void; expanded?: boolean; onToggle?: () => void }) {
+/** Exported for `components/ProcessGroup.tsx`, which reuses the exact same
+ *  tool-call surface so the grouped and flat renderers cannot drift apart. */
+export function ToolCallBlock({ block, result, duration, onOpenSession, expanded: controlledExpanded, onToggle }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSession?: (sessionId: string) => void; expanded?: boolean; onToggle?: () => void }) {
   const { t } = useI18n();
   const [localExpanded, setLocalExpanded] = useState(false);
   const isControlled = controlledExpanded !== undefined && onToggle !== undefined;
@@ -1845,7 +1847,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
   );
 }
 
-function getMessageText(content: CustomMessage["content"] | UserMessage["content"]): string {
+export function getMessageText(content: CustomMessage["content"] | UserMessage["content"]): string {
   if (typeof content === "string") return content;
   return content
     .filter((b): b is TextContent => b.type === "text")
@@ -1853,12 +1855,12 @@ function getMessageText(content: CustomMessage["content"] | UserMessage["content
     .join("\n");
 }
 
-function getMessageImages(content: CustomMessage["content"] | UserMessage["content"]): ImageContent[] {
+export function getMessageImages(content: CustomMessage["content"] | UserMessage["content"]): ImageContent[] {
   if (typeof content === "string") return [];
   return content.filter((b): b is ImageContent => b.type === "image");
 }
 
-function imageSource(img: ImageContent): string {
+export function imageSource(img: ImageContent): string {
   const flat = img as unknown as { data?: string; mimeType?: string };
   if (img.source) {
     return img.source.type === "base64"

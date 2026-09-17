@@ -15,7 +15,7 @@ import { join, extname } from "node:path";
 
 const SCAN_DIRS = ["app", "components", "lib", "hooks"];
 const EXT = new Set([".ts", ".tsx", ".css", ".mjs"]);
-const CSS_FILES = ["app/globals.css", "app/settings.css"];
+const CSS_FILES = ["app/globals.css", "app/settings.css", "app/wallpaper.css"];
 
 // 由 JS 在运行时写进 inline style / next-font 的变量，不是缺失。
 const RUNTIME_SET = new Set([
@@ -32,6 +32,17 @@ const RUNTIME_SET = new Set([
   // absolutely-positioned controls by exactly one top-bar button (PR #838).
   "--main-workspace-header-leading-inset",
   "--main-workspace-header-trailing-inset",
+  // Written by hooks/useChatAppearance.ts (extension widget text size).
+  "--extension-widget-font-size",
+  // Written by hooks/useBorderDepth.ts: the slider blends from these snapshots
+  // so repeated drags cannot compound the blend.
+  "--border-orig",
+  "--border-strong-orig",
+  "--border-faint-orig",
+  // Written by hooks/useUiScale.ts (whole-app text/UI scale).
+  "--app-ui-scale",
+  // Written by hooks/useWallpaper.ts (scrim opacity percentage).
+  "--wallpaper-scrim",
 ]);
 
 // 每套主题都必须完整重定义的色板。少一个就会从 :root 泄漏成另一套主题的值。

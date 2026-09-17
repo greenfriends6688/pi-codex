@@ -37,6 +37,9 @@
   ],
   "exclude": [
     "node_modules",
-    "release"
+    "release",
+    "参考项目",
+    "pi参考项目",
+    "家里电脑跑的"
   ]
 }

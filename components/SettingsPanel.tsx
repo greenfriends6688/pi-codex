@@ -33,6 +33,16 @@ import { SkillsConfig } from "./SkillsConfig";
 import { AgentsConfig } from "./AgentsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
+import { PiThemePicker } from "./PiThemePicker";
+import { WallpaperSettings } from "./WallpaperSettings";
+import { useBorderDepth } from "@/hooks/useBorderDepth";
+import { usePiTheme } from "@/hooks/usePiTheme";
+import {
+  PROCESS_RENDERER_STORAGE_KEY,
+  useProcessDisplayMode,
+  type ProcessRendererPreference,
+} from "@/hooks/useProcessDisplayMode";
+import { BORDER_DEPTH_MAX, BORDER_DEPTH_MIN } from "@/lib/border-depth";
 
 interface Props {
   cwd: string | null;
@@ -65,9 +75,12 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
   return <svg {...common}><path d="M9 7V2M15 7V2M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0ZM12 19v3" /></svg>;
 }
 
-function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange }: Pick<Props, "sessionId" | "onSessionReloaded" | "quoteSelectionEnabled" | "onQuoteSelectionChange">) {
+function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange }: Pick<Props, "cwd" | "sessionId" | "onSessionReloaded" | "quoteSelectionEnabled" | "onQuoteSelectionChange">) {
   const { locale, setLocale, supportedLocales, t } = useI18n();
   const { preference, setThemePreference } = useTheme();
+  const { piThemeName, setPiTheme } = usePiTheme();
+  const { borderDepth, setBorderDepth } = useBorderDepth();
+  const { displayMode: processDisplayMode, setDisplayMode: setProcessDisplayMode } = useProcessDisplayMode();
   const { width: chatContentWidth, setWidth: setChatContentWidth, fontSize, setFontSize, extensionWidgetFontSize, setExtensionWidgetFontSize } = useChatAppearance();
   const [shellSettings, setShellSettings] = useState<ShellToolSettingsResponse | null>(null);
   const [shellSaving, setShellSaving] = useState(false);
@@ -168,7 +181,10 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
         <h3 className="settings-general-heading">{t("settings.appearance")}</h3>
         <div role="radiogroup" aria-label={t("settings.appearance")} className="settings-theme-options">
           {THEME_OPTIONS.map((option) => {
-            const selected = preference === option.id;
+            // A Codex palette and a pi theme are mutually exclusive: the palette
+            // block is what paints those colours, so selecting one has to drop
+            // the inline pi-theme overrides first.
+            const selected = piThemeName === "" && preference === option.id;
             return (
               <label
                 key={option.id}
@@ -179,7 +195,10 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
                   name="theme"
                   value={option.id}
                   checked={selected}
-                  onChange={() => setThemePreference(option.id)}
+                  onChange={() => {
+                    if (piThemeName) void setPiTheme("");
+                    setThemePreference(option.id);
+                  }}
                   className="sr-only"
                 />
                 <ThemeIcon preference={option.id} />
@@ -188,6 +207,51 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
             );
           })}
         </div>
+
+        {/* One section, two sources: a separate "pi 主题" section read as a
+            competing second theme picker. */}
+        <PiThemePicker cwd={cwd} />
+
+        <div className="settings-chat-option settings-chat-range-option">
+          <div className="settings-chat-range-header">
+            <label htmlFor="settings-border-depth">{t("settings.borderDepth")}</label>
+            <output htmlFor="settings-border-depth">{borderDepth}</output>
+            <ConfigButton
+              variant="ghost"
+              size="small"
+              className="settings-chat-reset"
+              title={t("settings.borderDepthTheme")}
+              aria-label={t("settings.borderDepthTheme")}
+              onClick={() => setBorderDepth(50)}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5" />
+              </svg>
+            </ConfigButton>
+          </div>
+          <input
+            id="settings-border-depth"
+            type="range"
+            min={BORDER_DEPTH_MIN}
+            max={BORDER_DEPTH_MAX}
+            step={1}
+            value={borderDepth}
+            aria-label={t("settings.borderDepth")}
+            aria-valuetext={`${borderDepth}`}
+            onChange={(event) => setBorderDepth(Number(event.target.value))}
+          />
+          <div className="settings-chat-range-scale" aria-hidden="true">
+            <span>{t("settings.borderDepthInvisible")}</span>
+            <span>{t("settings.borderDepthTheme")}</span>
+            <span>{t("settings.borderDepthContrast")}</span>
+          </div>
+          <p className="settings-chat-range-hint">{t("settings.borderDepthDescription")}</p>
+        </div>
+      </section>
+
+      <section className="settings-general-section">
+        <h3 className="settings-general-heading">{t("settings.wallpaper")}</h3>
+        <WallpaperSettings />
       </section>
 
       <section className="settings-general-section">
@@ -203,6 +267,20 @@ function GeneralSettings({ sessionId, onSessionReloaded, quoteSelectionEnabled, 
                 setThinkingExpanded(enabled);
               }}
             />
+          </div>
+          <div className="settings-chat-option">
+            <span className="settings-chat-option-label">{t("settings.processDisplay")}</span>
+            <select
+              className="settings-select"
+              value={processDisplayMode}
+              aria-label={t("settings.processDisplay")}
+              onChange={(event) => setProcessDisplayMode(event.target.value as ProcessRendererPreference)}
+            >
+              <option value={PROCESS_RENDERER_STORAGE_KEY.legacy}>{t("settings.processDisplayLegacy")}</option>
+              <option value={PROCESS_RENDERER_STORAGE_KEY.timeline}>{t("settings.processDisplayTimeline")}</option>
+              <option value={PROCESS_RENDERER_STORAGE_KEY.tabs}>{t("settings.processDisplayTabs")}</option>
+            </select>
+            <p className="settings-chat-range-hint">{t("settings.processDisplayDescription")}</p>
           </div>
           <div className="settings-chat-option settings-chat-range-option">
             <div className="settings-chat-range-header">
@@ -477,7 +555,7 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
         </div>
 
         <main className="settings-dialog-main">
-          {sectionHost("general", <GeneralSettings sessionId={sessionId} onSessionReloaded={onSessionReloaded} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={onQuoteSelectionChange} />)}
+          {sectionHost("general", <GeneralSettings cwd={cwd} sessionId={sessionId} onSessionReloaded={onSessionReloaded} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={onQuoteSelectionChange} />)}
           {sectionHost("models", <ModelsConfig embedded onClose={onClose} />)}
           {cwd && sectionHost("skills", <SkillsConfig embedded key={cwd} cwd={cwd} onClose={onClose} />)}
           {cwd && sectionHost("agents", <AgentsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}

@@ -51,3 +51,25 @@ export function sessionsForProject(
 ): SessionInfo[] {
   return sessions.filter((session) => workspaceKeyOf(session) === projectKey);
 }
+
+// fork:chat-workspace — the standalone chat workspace is rendered as its own
+// section, so it must never appear again in the project list. Identification is
+// by the server-computed project key: the browser never compares paths.
+
+/** The chat workspace entry when the recent-project list contains it. */
+export function chatProjectOf(
+  projects: readonly RecentProject[],
+  chatProjectKey: string | null | undefined,
+): RecentProject | null {
+  if (!chatProjectKey) return null;
+  return projects.find((project) => project.key === chatProjectKey) ?? null;
+}
+
+/** Recent projects without the chat workspace, order preserved. */
+export function withoutChatProject(
+  projects: readonly RecentProject[],
+  chatProjectKey: string | null | undefined,
+): RecentProject[] {
+  if (!chatProjectKey) return [...projects];
+  return projects.filter((project) => project.key !== chatProjectKey);
+}

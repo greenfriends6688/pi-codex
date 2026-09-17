@@ -2,6 +2,8 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { isDarkTheme, isThemePreference, type ThemePreference, type ResolvedTheme } from "@/lib/theme";
+import { refreshPiThemeForMode } from "@/hooks/usePiTheme";
+import { applyStoredBorderDepth, clearDepthOverrides, resetBorderDepthSnapshot } from "@/hooks/useBorderDepth";
 
 export type { ThemePreference, ResolvedTheme } from "@/lib/theme";
 
@@ -46,6 +48,14 @@ function applyDomTheme(theme: ResolvedTheme): void {
   if (typeof document === "undefined") return;
   document.documentElement.dataset.theme = theme;
   document.documentElement.classList.toggle("dark", isDarkTheme(theme));
+  // A new palette invalidates two derived layers that blend off its colours:
+  // the border-depth snapshot and the pi-theme overlay's light/dark variant.
+  // The inline depth blend has to go first — `ensureBorderOrig()` reads the
+  // computed cascade, which would otherwise still see the previous blend.
+  clearDepthOverrides();
+  resetBorderDepthSnapshot();
+  applyStoredBorderDepth();
+  void refreshPiThemeForMode(isDarkTheme(theme));
 }
 
 function ensureState(): ThemeState {
