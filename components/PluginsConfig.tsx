@@ -1026,13 +1026,22 @@ export function PluginsConfig({
   onClose,
   onReloaded,
   embedded = false,
+  only,
 }: {
   cwd: string;
   sessionId: string | null;
   onClose: () => void;
   onReloaded?: () => void;
   embedded?: boolean;
+  /**
+   * fork:mcp-section — `"mcp"` renders this component as the standalone MCP page
+   * (its own settings entry) and hides everything plugin-related; the default hides
+   * the MCP half. Both halves share the loaders and the action plumbing, which is
+   * why this is a mode rather than a second copy of 500 lines.
+   */
+  only?: "mcp";
 }) {
+  const mcpOnly = only === "mcp";
   const { t } = useI18n();
   const [data, setData] = useState<PluginsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1050,7 +1059,7 @@ export function PluginsConfig({
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
   // MCP server state
-  const [view, setView] = useState<"plugins" | "mcp">("plugins");
+  const [view, setView] = useState<"plugins" | "mcp">(mcpOnly ? "mcp" : "plugins");
   const [mcpData, setMcpData] = useState<McpResponse | null>(null);
   const [mcpLoading, setMcpLoading] = useState(true);
   const [mcpSelected, setMcpSelected] = useState<string | null>(null);
@@ -1520,6 +1529,7 @@ export function PluginsConfig({
         <ConfigSplitView>
           <ConfigSidebar>
             <ConfigSidebarList>
+              {mcpOnly ? null : (<>
               {loading ? (
                 <div className="config-sidebar-message">
                   Loading...
@@ -1596,7 +1606,8 @@ export function PluginsConfig({
                   ))}
                 </>
               )}
-                  <div className="config-sidebar-group">
+              </>)}
+                  {mcpOnly && <div className="config-sidebar-group">
                     <ConfigSidebarGroupLabel>
                       {t("mcp.sectionTitle")}
                     </ConfigSidebarGroupLabel>
@@ -1648,9 +1659,9 @@ export function PluginsConfig({
                         ))}
                       </>
                     )}
-                  </div>
+                  </div>}
             </ConfigSidebarList>
-            <ConfigListAction
+            {!mcpOnly && <ConfigListAction
                 active={view === "plugins" && addMode}
                 onClick={() => {
                   setView("plugins");
@@ -1660,8 +1671,8 @@ export function PluginsConfig({
                 }}
               >
                  {t("i18n.addPlugin")}
-            </ConfigListAction>
-            <ConfigListAction
+            </ConfigListAction>}
+            {mcpOnly && <ConfigListAction
                 active={view === "mcp" && mcpAddMode}
                 onClick={() => {
                   setView("mcp");
@@ -1672,8 +1683,8 @@ export function PluginsConfig({
                 }}
               >
                  {t("mcp.addButton")}
-            </ConfigListAction>
-            <ConfigListAction
+            </ConfigListAction>}
+            {mcpOnly && <ConfigListAction
                 onClick={() => {
                   setView("mcp");
                   setMcpAddMode(false);
@@ -1683,7 +1694,7 @@ export function PluginsConfig({
                 }}
               >
                  {t("mcp.importButton")}
-            </ConfigListAction>
+            </ConfigListAction>}
           </ConfigSidebar>
 
           <ConfigDetail>

@@ -4,7 +4,8 @@ export const SETTINGS_SECTION_VALUES = [
   "skills",
   "agents",
   "plugins",
-  // fork:cron / fork:memory — global sections added by this fork (no project needed).
+  // fork:cron / fork:memory / fork:mcp-section — global sections added by this fork.
+  "mcp",
   "cron",
   "memory",
 ] as const;

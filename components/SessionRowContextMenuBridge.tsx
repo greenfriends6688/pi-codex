@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { useContextMenu } from "./ContextMenu";
 import { useI18n } from "@/hooks/useI18n";
 import { SESSION_ROW_CONTEXT_MENU_EVENT, type SessionRowContextMenuDetail } from "@/lib/session-row-context-menu";
-import { getSessionFlags, toggleArchived, togglePinned } from "@/lib/session-flags";
+import { SESSION_TAGS, getSessionFlags, setSessionTag, toggleArchived, togglePinned, type SessionTag } from "@/lib/session-flags";
 
 /**
  * Bridges the session sidebar's legacy window event onto the generic
@@ -58,6 +58,29 @@ export function SessionRowContextMenuBridge({
             toggleArchived(detail.id);
             detail.refresh();
           },
+        },
+        {
+          // fork:ui-10 — manual status. The submenu keeps the row menu short.
+          label: t("session.tag"),
+          checked: Boolean(flags.tags[detail.id]),
+          submenu: [
+            ...SESSION_TAGS.map((tag: SessionTag) => ({
+              label: t(`session.tag.${tag}`),
+              checked: flags.tags[detail.id] === tag,
+              onSelect: () => {
+                setSessionTag(detail.id, tag);
+                detail.refresh();
+              },
+            })),
+            {
+              label: t("session.tag.clear"),
+              disabled: !flags.tags[detail.id],
+              onSelect: () => {
+                setSessionTag(detail.id, null);
+                detail.refresh();
+              },
+            },
+          ],
         },
         { type: "separator" },
         {

@@ -29,7 +29,8 @@ import {
 } from "@/lib/thinking-expansion-preference";
 import { ModelsConfig } from "./ModelsConfig";
 import { CronConfig } from "./fork/CronConfig";
-import { MemoryConfig } from "./fork/MemoryConfig";
+import { McpConfig } from "./fork/McpConfig";
+import { PiMemoryConfig } from "./fork/PiMemoryConfig";
 import { setupPushSubscription } from "@/lib/push-client";
 import { SkillsConfig } from "./SkillsConfig";
 import { AgentsConfig } from "./AgentsConfig";
@@ -77,6 +78,8 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
   if (section === "general") return <svg {...common}><path d="M20 7h-9M14 17H5" /><circle cx="7" cy="7" r="3" /><circle cx="17" cy="17" r="3" /></svg>;
   if (section === "models") return <svg {...common}><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3" /></svg>;
   if (section === "skills") return <svg {...common}><path d="m12 2-10 5 10 5 10-5-10-5Z" /><path d="m2 12 10 5 10-5M2 17l10 5 10-5" /></svg>;
+  // MCP gets its own glyph: a plug, distinct from the plugins puzzle piece.
+  if (section === "mcp") return <svg {...common} className="settings-section-icon"><path d="M9 4v5M15 4v5" /><path d="M6 9h12v3a6 6 0 0 1-6 6 6 6 0 0 1-6-6Z" /><path d="M12 18v3" /></svg>;
   if (section === "cron") return <svg {...common} className="settings-section-icon"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 2" /><path d="M9 2h6" /></svg>;
   if (section === "memory") return <svg {...common} className="settings-section-icon"><path d="M12 3a5 5 0 0 1 5 5c0 1.5-.6 2.5-1.5 3.4-.8.8-1.5 1.7-1.5 3.1V16h-4v-1.5c0-1.4-.7-2.3-1.5-3.1C7.6 10.5 7 9.5 7 8a5 5 0 0 1 5-5Z" /><path d="M10 20h4" /></svg>;
   if (section === "agents") return <svg {...common} className="settings-section-icon is-agent"><rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" /></svg>;
@@ -491,8 +494,9 @@ const SECTION_SEARCH_TERMS: Record<SettingsSection, string[]> = {
   skills: ["skills", "skill", "skills.sh", "install", "技能", "安装", "搜尋"],
   agents: ["agents", "sub-agent", "subagent", "concurrency", "profile", "prompt", "智能体", "子代理", "并发", "提示词", "代理"],
   plugins: ["plugins", "extension", "mcp", "npm", "server", "插件", "扩展", "服务"],
+  mcp: ["mcp", "model context protocol", "server", "stdio", "sse", "服务器", "服务"],
   cron: ["cron", "schedule", "scheduled", "task", "timer", "nightly", "定时", "排程", "计划", "任务", "时间"],
-  memory: ["memory", "remember", "recall", "notes", "记忆", "记住", "笔记", "備忘"],
+  memory: ["memory", "remember", "recall", "qmd", "scratchpad", "daily log", "记忆", "长期记忆", "记住", "笔记", "備忘", "語意搜尋"],
 };
 
 function sectionSearchTerms(id: SettingsSection): string[] {
@@ -517,6 +521,7 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
     { id: "skills", label: t("common.skills"), requiresProject: true },
     { id: "agents", label: t("common.agents"), requiresProject: true },
     { id: "plugins", label: t("common.plugins"), requiresProject: true },
+    { id: "mcp", label: t("mcp.sectionTitle"), requiresProject: false },
     { id: "cron", label: t("cron.title"), requiresProject: false },
     { id: "memory", label: t("memory.title"), requiresProject: false },
   ];
@@ -653,9 +658,10 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
             {cwd && sectionHost("skills", <SkillsConfig embedded key={cwd} cwd={cwd} onClose={onClose} />)}
             {cwd && sectionHost("agents", <AgentsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
             {cwd && sectionHost("plugins", <PluginsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
-            {/* fork:cron / fork:memory — global pages, they do not depend on a project. */}
+            {/* fork:cron / fork:memory / fork:mcp-section — global pages, no project needed. */}
+            {sectionHost("mcp", <McpConfig cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
             {sectionHost("cron", <CronConfig cwd={cwd} onOpenSession={onOpenSession} />)}
-            {sectionHost("memory", <MemoryConfig cwd={cwd} />)}
+            {sectionHost("memory", <PiMemoryConfig cwd={cwd} />)}
           </main>
         </div>
       </div>

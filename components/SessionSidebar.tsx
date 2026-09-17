@@ -7,7 +7,7 @@ import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import { chatProjectOf, getProjectActivity, getRecentProjects, sessionsForProject, withoutChatProject } from "@/lib/project-groups";
 import type { RecentProject } from "@/lib/project-groups";
-import { applySessionFlags, archivedSessions, useSessionFlags } from "@/lib/session-flags";
+import { SESSION_TAG_TONES, applySessionFlags, archivedSessions, useSessionFlags, type SessionTag } from "@/lib/session-flags";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import { getFileName } from "@/lib/file-paths";
@@ -507,6 +507,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [chatPathError, setChatPathError] = useState<string | null>(null);
   // ponytail: 每個項目獨立展開，避免只能看選中項的傻折疊
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+  // fork:ui-10 — list order + the "expand/collapse all" switch.
+  const [sessionSort, setSessionSort] = useState<"updated" | "created">("updated");
   // 归档区默认折叠；每个项目独立记忆展开状态（取消归档的右键菜单入口）。
   const [expandedArchivedProjects, setExpandedArchivedProjects] = useState<Set<string>>(new Set());
   const toggleArchivedSection = useCallback((projectKey: string) => {
@@ -1184,6 +1186,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, [resolveDefaultCwd, startSessionIn]);
 
   // Sessions of every worktree in the selected project are shown together
+  /**
+   * fork:ui-10 — one place that turns "all sessions" into "this project's rows in the
+   * requested order", so the five list call sites cannot drift apart.
+   */
+  const orderedProjectSessions = useCallback((projectKey: string) => {
+    const rows = sessionsForProject(allSessions, projectKey);
+    const sorted = [...rows].sort((a, b) => (
+      sessionSort === "created" ? b.created.localeCompare(a.created) : b.modified.localeCompare(a.modified)
+    ));
+    return applySessionFlags(sorted, sessionFlags);
+  }, [allSessions, sessionFlags, sessionSort]);
+
   const selectedProject = projectFor(selectedCwd);
   const projectChoices = useMemo(() => {
     const recent = getRecentProjects(allSessions);
@@ -1757,7 +1771,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           {chatProject && (() => {
             const isSelectedChat = chatProject.key === selectedProject?.key;
             const isChatExpanded = expandedProjects.has(chatProject.key);
-            const chatFamilies = listSessionFamilies(applySessionFlags(sessionsForProject(allSessions, chatProject.key), sessionFlags));
+            const chatFamilies = listSessionFamilies(orderedProjectSessions(chatProject.key));
             const chatArchivedFamilies = listSessionFamilies(archivedSessions(sessionsForProject(allSessions, chatProject.key), sessionFlags));
             const chatArchivedSection = (
               <ArchivedSessionsSection
@@ -1767,6 +1781,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 selectedSessionId={selectedSessionId}
                 runningSessionIds={runningSessionIds}
                 unreadSessionIds={unreadSessionIds}
+                sessionFlags={sessionFlags}
                 onSelectSession={handleSelectSessionFromList}
                 onRenamed={loadSessions}
                 onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
@@ -1817,7 +1832,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         return (
                           <div key={family.root.id} data-session-id={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                              <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
                             </div>
                           </div>
                         );
@@ -1833,7 +1848,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                       return (
                         <div key={family.root.id}>
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                            <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
                           </div>
                         </div>
                       );
@@ -1862,6 +1877,59 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {t("sidebar.projects")}
             </span>
             <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+              {/* fork:ui-10 — order of the session lists (updated vs created). */}
+              <button
+                type="button"
+                onClick={() => setSessionSort((current) => (current === "updated" ? "created" : "updated"))}
+                title={`${t("sidebar.sortBy")}: ${t(sessionSort === "updated" ? "sidebar.sortUpdated" : "sidebar.sortCreated")}`}
+                aria-label={t("sidebar.sortBy")}
+                style={{
+                  height: 28,
+                  padding: "0 7px",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: "var(--radius-md)",
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  fontSize: 11,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 7h10M4 12h7M4 17h4" /><path d="m17 9 3 3-3 3" />
+                </svg>
+                {t(sessionSort === "updated" ? "sidebar.sortUpdated" : "sidebar.sortCreated")}
+              </button>
+              {/* fork:ui-10 — expand / collapse every project at once. */}
+              <button
+                type="button"
+                onClick={() => {
+                  const keys = visibleProjects.map((project) => project.key);
+                  const allOpen = keys.length > 0 && keys.every((key) => expandedProjects.has(key));
+                  setExpandedProjects(allOpen ? new Set() : new Set(keys));
+                }}
+                title={t("sidebar.expandCollapseAll")}
+                aria-label={t("sidebar.expandCollapseAll")}
+                style={{
+                  width: 28,
+                  height: 28,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  padding: 0,
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: "var(--radius-md)",
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="m8 9 4-4 4 4M8 15l4 4 4-4" />
+                </svg>
+              </button>
               <button
                 type="button"
                 onClick={() => setProjectMenuOpen((open) => !open)}
@@ -2014,8 +2082,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 />
                 {isExpanded &&
                   (() => {
-                    const projectSessions = sessionsForProject(allSessions, project.key);
-                    const families = listSessionFamilies(applySessionFlags(projectSessions, sessionFlags));
+                    const projectSessions = orderedProjectSessions(project.key);
+                    const families = listSessionFamilies(projectSessions);
                     const archivedFamilies = listSessionFamilies(archivedSessions(projectSessions, sessionFlags));
                     const archivedSection = (
                       <ArchivedSessionsSection
@@ -2025,6 +2093,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         selectedSessionId={selectedSessionId}
                         runningSessionIds={runningSessionIds}
                         unreadSessionIds={unreadSessionIds}
+                        sessionFlags={sessionFlags}
                         onSelectSession={handleSelectSessionFromList}
                         onRenamed={loadSessions}
                         onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
@@ -2047,7 +2116,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                                 return (
                                   <div key={family.root.id} data-session-id={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
                                     <div style={{ flex: 1, minWidth: 0 }}>
-                                      <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                                      <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
                                     </div>
                                   </div>
                                 );
@@ -2066,7 +2135,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                           return (
                             <div key={family.root.id}>
                               <div style={{ flex: 1, minWidth: 0 }}>
-                                <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                                <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
                               </div>
                             </div>
                           );
@@ -2082,6 +2151,21 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       </SessionSearch>
 
     </div>
+  );
+}
+
+/** fork:ui-10 — the manual-status dot (tooltip carries the wording). */
+function SessionTagDot({ tag }: { tag: SessionTag }) {
+  const { t } = useI18n();
+  const label = t(`session.tag.${tag}`);
+  return (
+    <span
+      title={label}
+      aria-label={label}
+      style={{ width: 14, height: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: SESSION_TAG_TONES[tag] }} />
+    </span>
   );
 }
 
@@ -2208,6 +2292,7 @@ function ArchivedSessionsSection({
   selectedSessionId,
   runningSessionIds,
   unreadSessionIds,
+  sessionFlags,
   onSelectSession,
   onRenamed,
   onDeleted,
@@ -2218,6 +2303,7 @@ function ArchivedSessionsSection({
   selectedSessionId: string | null;
   runningSessionIds: Set<string>;
   unreadSessionIds: Set<string>;
+  sessionFlags: { tags: Record<string, SessionTag> };
   onSelectSession: (session: SessionInfo) => void;
   onRenamed: () => void;
   onDeleted: (id: string) => void;
@@ -2280,7 +2366,7 @@ function ArchivedSessionsSection({
             return (
               <div key={family.root.id}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => onSelectSession(family.root)} onRenamed={onRenamed} onDeleted={onDeleted} />
+                  <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => onSelectSession(family.root)} onRenamed={onRenamed} onDeleted={onDeleted} />
                 </div>
               </div>
             );
@@ -2296,6 +2382,7 @@ function SessionItem({
   isSelected,
   isRunning,
   isUnread,
+  tag,
   onClick,
   onRenamed,
   onDeleted,
@@ -2308,6 +2395,8 @@ function SessionItem({
   isSelected: boolean;
   isRunning?: boolean;
   isUnread?: boolean;
+  /** fork:ui-10 — manual status tag; drives the coloured dot. */
+  tag?: SessionTag;
   onClick: () => void;
   onRenamed?: () => void;
   onDeleted?: (id: string) => void;
@@ -2520,7 +2609,11 @@ function SessionItem({
               <path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
             </svg>
           )}
-          {isRunning ? <RunningSessionIndicator /> : isUnread ? <UnreadSessionIndicator /> : null}
+          {isRunning
+            ? <RunningSessionIndicator />
+            : tag
+              ? <SessionTagDot tag={tag} />
+              : isUnread ? <UnreadSessionIndicator /> : null}
           <span
             title={`${title} · ${formatRelativeTime(session.modified, locale)}`}
             style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13.5, fontWeight: isSelected ? 500 : 400, lineHeight: 1.3, color: "var(--text)" }}

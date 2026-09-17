@@ -1156,3 +1156,50 @@ live API：默认 `{enabled:false,autoLearn:false}` → 打开后持久化；`sc
 UI（隔离 agent 目录 + 真 Chrome）：记忆页 4 个开关与状态行正确，定时任务页切到「Cron 表达式」后 5 条示例、2 个闲时窗口输入框都在位，**console 0 error**（截图 `test-results/tier34/6-memory-v2.png`、`7-cron-v2.png`）。
 
 **仍未对齐参考实现的部分（有意）**：记忆后端选择（关闭 / 本地 / Mnemopi SQLite / Hindsight 远程）——我们只有「本地」一档，另两档是它自己的引擎包；记忆文件列表（learned.md 等 4 个 .md）——我们用 JSON + 面板，条目级改删更可靠；定时任务的日历视图与运行历史浏览器；月/年计划类型（cron 表达式已能表达）。
+
+### 27. MCP 独立菜单 + 记忆改用户点名读 pi-memory + MU-10（2026-09-17）
+
+#### MCP 从插件页拎出来（fork:mcp-section）
+
+用户要求 MCP 有独立菜单。做法是**一个实现两个入口**而不是搬 500 行代码：`PluginsConfig` 新增
+`only="mcp"` 模式（该模式下强制 MCP 视图、隐藏插件侧栏/详情/按钮；默认模式反过来隐藏 MCP），
+新组件 `components/fork/McpConfig.tsx` 只做一层包装，设置里多了独立分区「MCP 服务器」
+（枚举 + 导航 + 插头图标 + 搜索词）。实测：分区列表 `["常规","模型","技能","子代理","插件","MCP 服务器","定时任务","记忆"]`，
+MCP 页有「添加 MCP / 从其他工具导入」且**没有**插件页的按钮；插件页不再出现 MCP。
+
+#### 记忆：改用 npm 官方包 pi-memory（用户点名）
+
+`pi-memory` 确实存在（npm 0.4.2，作者 jayzeng，官方 pi 包目录收录，2431 行）：7 个工具
+（`memory_write/read/forget/restore`、`scratchpad`、`memory_search`、`memory_status`）、
+markdown 落盘 `~/.pi/agent/memory/`、`before_agent_start` 选择性注入、可选 qmd 语义搜索。
+它比本 fork 自研的 JSON 记忆强一个量级，所以：
+
+- 通过 pi-web 既有的插件 API 安装（`POST /api/plugins {action:"install", source:"npm:pi-memory"}`，
+  与 `pi install npm:pi-memory` 同一条 `DefaultPackageManager.installAndPersist` 路径）；
+- **退役自研实现**：删掉 `lib/memory-store.ts`、`lib/memory-extension.ts`、`components/fork/MemoryConfig.tsx`、
+  `app/api/memory/route.ts` 与它们的测试，以及 `rpc-manager` 里的扩展注册 —— 两套记忆会重复注入、
+  工具重名，必须只留一套；
+- 新面板 `components/fork/PiMemoryConfig.tsx` + `app/api/memory/files/route.ts`（只读、限定在记忆目录内）：
+  显示安装/启用状态、一键安装/启用/禁用、工具清单、记忆文件列表与内容预览。
+
+实测：安装后活会话 `get_tools` 返回 22 个工具，其中 7 个 `memory_*`；`~/.pi/agent/memory/{daily,recovery}` 自动创建；
+设置面板显示 `pi-memory · 0.4.2 · 已安装并启用` + 目录 + 「还没有文件」（确实还没写过）✓。
+
+#### MU-10：会话状态标记 + 排序 + 全部展开
+
+| 改了什么 | 说明 |
+| --- | --- |
+| 状态标记（tag） | `lib/session-flags.ts` 增加 `tags: Record<id, tag>`，5 档（complete/interrupted/error/aborted/pending）+ 各自的 token 色彩；仍是 localStorage、仍是展示层，不写会话文件 |
+| 行内圆点 | 指示位优先级 running > tag > unread；右键菜单新增「状态标记」子菜单（子菜单类型不支持分隔符，所以「清除标记」自己占一行） |
+| 排序 | 项目头部工具条新增排序切换（按更新 / 按创建）；`orderedProjectSessions()` 成为唯一的「项目→有序行」入口，5 处列表调用点统一走它，避免各写一份排序 |
+| 全部展开/收起 | 同一条工具条；对当前可见项目集合生效 |
+
+**验证**：`tsc` 0 错 ｜ `lint` 0 错 ｜ `npm test` **1336/1336**（新增 9 例：flags 旧载荷兼容/未知 tag 丢弃/token 色彩齐全 + 排序与标记的既有断言更新）｜ 真 Chrome：排序按钮 `按更新时间`→`按创建时间`、全部展开可用、MCP 分区与 pi-memory 面板如上（截图 `test-results/tier34/11-mu10-sidebar.png`、`12-mcp-section.png`、`13-pi-memory.png`）。
+
+#### MU-31 的核实结论：不做（等引擎）
+
+SDK 里唯一的 `--approve/--no-approve` 是**项目信任**（是否加载项目内的 settings/extensions），
+没有 per-tool 审批协议；pi-web 现在渲染的 `ExtensionDialog`（`select/confirm/input/editor`）已经是
+扩展发起审批/问答的唯一通路，且带键盘导航、倒计时、Esc。MusePi 的「审批卡 + 允许一次/总是允许/拒绝 + 托盘热键」
+建立在它自己 daemon 的 `approval-bridge` + `tools.approvalMode` 上，本仓库的引擎没有对应能力，
+硬做只能造一个没有数据源的空壳。**保持现状**，等上游 pi 暴露审批协议再补。

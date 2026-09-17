@@ -33,7 +33,6 @@ import {
   preferPiWebSubagentExtension,
 } from "./subagent-extension";
 import { createTodoExtension } from "./todo-extension";
-import { createMemoryExtension } from "./memory-extension";
 import {
   listSubagentProfiles,
   readSubagentRun,
@@ -2059,8 +2058,6 @@ export async function startRpcSession(
               ),
               // fork:ui-todo — the session's task list (see lib/todo-extension.ts).
               createTodoExtension(),
-              // fork:memory — remember / recall + per-turn context injection.
-              createMemoryExtension(),
             ],
             extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
           },
