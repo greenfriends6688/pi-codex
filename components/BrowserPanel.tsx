@@ -22,6 +22,10 @@ export function BrowserPanel({ tab, onChangeUrl }: Props) {
   const [history, setHistory] = useState<string[]>(() => (tab.url ? [tab.url] : []));
   const [historyIndex, setHistoryIndex] = useState(() => (tab.url ? 0 : -1));
   const [reloadKey, setReloadKey] = useState(0);
+  // fork:ui-30 — viewport preset. `null` keeps the iframe filling the panel; a
+  // number pins it to a device width and centres it, which is the only way to
+  // check a responsive layout without a second device.
+  const [viewport, setViewport] = useState<number | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // A tab restored from sessionStorage carries a url the component never saw.
@@ -150,9 +154,41 @@ export function BrowserPanel({ tab, onChangeUrl }: Props) {
             <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
           </svg>
         </a>
+        {/* fork:ui-30 — device widths for checking a responsive layout in place. */}
+        <select
+          value={viewport === null ? "fill" : String(viewport)}
+          onChange={(event) => setViewport(event.target.value === "fill" ? null : Number(event.target.value))}
+          title={t("browser.viewport")}
+          aria-label={t("browser.viewport")}
+          style={{
+            height: 28,
+            padding: "0 4px",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-md)",
+            background: "var(--bg)",
+            color: "var(--text-muted)",
+            fontSize: 11,
+            flexShrink: 0,
+          }}
+        >
+          <option value="fill">{t("browser.viewportFill")}</option>
+          <option value="390">{t("browser.viewportPhone")}</option>
+          <option value="768">{t("browser.viewportTablet")}</option>
+          <option value="1024">{t("browser.viewportLaptop")}</option>
+          <option value="1280">{t("browser.viewportDesktop")}</option>
+        </select>
       </div>
 
       {currentUrl ? (
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            justifyContent: "center",
+            background: viewport === null ? "var(--bg)" : "var(--bg-panel)",
+          }}
+        >
         <iframe
           ref={iframeRef}
           key={`${currentUrl}#${reloadKey}`}
@@ -160,8 +196,17 @@ export function BrowserPanel({ tab, onChangeUrl }: Props) {
           title={tab.url}
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
           referrerPolicy="no-referrer"
-          style={{ flex: 1, minHeight: 0, width: "100%", border: "none", background: "var(--bg)" }}
+          style={{
+            flex: viewport === null ? 1 : "0 0 auto",
+            minHeight: 0,
+            width: viewport === null ? "100%" : viewport,
+            maxWidth: "100%",
+            border: "none",
+            background: "var(--bg)",
+            ...(viewport === null ? {} : { boxShadow: "var(--shadow-sm)", borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)" }),
+          }}
         />
+        </div>
       ) : (
         <div
           style={{

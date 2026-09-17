@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { McpResponse, McpScope, McpServerInfo, PluginPackageInfo, PluginStandaloneExtensionInfo, PluginUpdateResult, PluginsResponse } from "@/lib/api-types";
 import { useI18n } from "@/hooks/useI18n";
+import type { McpDiscoveredServer as DiscoveredMcpServer } from "@/lib/mcp-discovery";
 import {
   getLastSettingsSelection,
   setLastSettingsSelection,
@@ -1054,6 +1055,11 @@ export function PluginsConfig({
   const [mcpLoading, setMcpLoading] = useState(true);
   const [mcpSelected, setMcpSelected] = useState<string | null>(null);
   const [mcpAddMode, setMcpAddMode] = useState(false);
+  // fork:mcp-import — servers found in other agents' config files.
+  const [mcpImportOpen, setMcpImportOpen] = useState(false);
+  const [mcpDiscovered, setMcpDiscovered] = useState<DiscoveredMcpServer[]>([]);
+  const [mcpDiscovering, setMcpDiscovering] = useState(false);
+  const [mcpImporting, setMcpImporting] = useState<string | null>(null);
   const [mcpScope, setMcpScope] = useState<McpScope>("global");
   const [mcpEditTarget, setMcpEditTarget] = useState<McpServerInfo | null>(null);
   const [mcpActionError, setMcpActionError] = useState<string | null>(null);
@@ -1114,6 +1120,26 @@ export function PluginsConfig({
     void loadPlugins();
   }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadDiscovered = useCallback(async () => {
+    if (!cwd) return;
+    setMcpDiscovering(true);
+    try {
+      const res = await fetch(`/api/mcp/discover?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" });
+      const data = await res.json() as { servers?: DiscoveredMcpServer[]; error?: string };
+      if (!res.ok) {
+        setMcpActionError(data.error ?? `HTTP ${res.status}`);
+        setMcpDiscovered([]);
+        return;
+      }
+      setMcpDiscovered(data.servers ?? []);
+    } catch (e) {
+      setMcpActionError(e instanceof Error ? e.message : String(e));
+      setMcpDiscovered([]);
+    } finally {
+      setMcpDiscovering(false);
+    }
+  }, [cwd]);
+
   const loadMcp = useCallback(async () => {
     setMcpLoading(true);
     setMcpActionError(null);
@@ -1133,6 +1159,32 @@ export function PluginsConfig({
       setMcpLoading(false);
     }
   }, [cwd]);
+
+  const importDiscovered = useCallback(async (server: DiscoveredMcpServer) => {
+    if (!cwd) return;
+    setMcpImporting(server.name);
+    setMcpActionError(null);
+    try {
+      // Import into the scope the entry came from: a project server belongs to the
+      // project, a user one to the user config — reusing the existing write path,
+      // including its project-trust check.
+      const res = await fetch("/api/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "add", cwd, scope: server.scope, name: server.name, def: server.def }),
+      });
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) {
+        setMcpActionError(data.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      setMcpActionMessage(t("mcp.importDone", { name: server.name }));
+      await loadMcp();
+    } finally {
+      setMcpImporting(null);
+    }
+  }, [cwd, loadMcp, t]);
+
 
   useEffect(() => {
     void loadMcp();
@@ -1621,11 +1673,69 @@ export function PluginsConfig({
               >
                  {t("mcp.addButton")}
             </ConfigListAction>
+            <ConfigListAction
+                onClick={() => {
+                  setView("mcp");
+                  setMcpAddMode(false);
+                  setMcpImportOpen(true);
+                  setMcpActionError(null);
+                  void loadDiscovered();
+                }}
+              >
+                 {t("mcp.importButton")}
+            </ConfigListAction>
           </ConfigSidebar>
 
           <ConfigDetail>
             <ConfigDetailStack className="is-fill">
-              {view === "mcp" ? (
+              {view === "mcp" && mcpImportOpen ? (
+                <div style={{ display: "grid", gap: 10, alignContent: "start", padding: "4px 2px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <strong style={{ fontSize: 13 }}>{t("mcp.importTitle")}</strong>
+                    <ConfigButton variant="ghost" size="small" onClick={() => setMcpImportOpen(false)}>{t("mcp.cancel")}</ConfigButton>
+                  </div>
+                  <p className="settings-chat-range-hint" style={{ margin: 0 }}>{t("mcp.importHint")}</p>
+                  {mcpDiscovering && <p className="settings-chat-range-hint">{t("i18n.loading")}</p>}
+                  {!mcpDiscovering && mcpDiscovered.length === 0 && (
+                    <p className="settings-chat-range-hint">{t("mcp.importEmpty")}</p>
+                  )}
+                  <div style={{ display: "grid", gap: 6 }}>
+                    {mcpDiscovered.map((server) => (
+                      <div
+                        key={`${server.path}:${server.name}`}
+                        style={{
+                          display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center",
+                          padding: "7px 9px", border: "1px solid var(--border-faint)", borderRadius: "var(--radius-md)",
+                          background: "var(--bg-panel)", opacity: server.shadowed || server.disabled ? 0.6 : 1,
+                        }}
+                      >
+                        <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
+                          <span style={{ fontSize: 13, color: "var(--text)" }}>
+                            {server.name}
+                            <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-dim)" }}>
+                              {server.tool} · {server.scope === "project" ? t("mcp.scopeProject") : t("mcp.scopeGlobal")}
+                              {server.disabled ? ` · ${t("mcp.itemDisabled")}` : ""}
+                              {server.shadowed ? ` · ${t("mcp.importShadowed")}` : ""}
+                            </span>
+                          </span>
+                          <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={server.path}>
+                            {server.def.command ? `${server.def.command} ${(server.def.args as string[] | undefined)?.join(" ") ?? ""}`.trim() : String(server.def.url ?? server.def.socket ?? "")}
+                          </span>
+                        </div>
+                        <ConfigButton
+                          variant="secondary"
+                          size="small"
+                          disabled={mcpImporting === server.name || server.shadowed}
+                          title={server.shadowed ? t("mcp.importShadowedTitle") : undefined}
+                          onClick={() => void importDiscovered(server)}
+                        >
+                          {mcpImporting === server.name ? t("mcp.saving") : t("mcp.importOne")}
+                        </ConfigButton>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : view === "mcp" ? (
                 mcpAddMode ? (
                   <AddMcpServer
                     cwd={cwd}

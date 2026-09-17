@@ -11,6 +11,10 @@ export async function register(): Promise<void> {
   // so a Servy stop left the process draining forever: not listening (502)
   // but never exiting, and every restart leaked one orphan. Closing the
   // streams here lets Next's drain finish and the process exit cleanly.
+  // fork:cron — scheduled tasks run in this process (lib/cron-runner.ts).
+  const { startCronScheduler } = await import("@/lib/cron-runner");
+  startCronScheduler();
+
   const { closeAllAgentEventStreams } = await import("@/lib/agent-event-stream");
   const shutdownStreams = () => closeAllAgentEventStreams();
   process.on("SIGINT", shutdownStreams);

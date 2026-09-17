@@ -4,6 +4,9 @@ export const SETTINGS_SECTION_VALUES = [
   "skills",
   "agents",
   "plugins",
+  // fork:cron / fork:memory — global sections added by this fork (no project needed).
+  "cron",
+  "memory",
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTION_VALUES)[number];

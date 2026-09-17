@@ -99,3 +99,209 @@ html.keyboard-open .extension-status-shelf {
     animation: none;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-projectchip — the shared ContextMenu gets a height ceiling.
+ *
+ * Upstream `.context-menu` (globals.css:2841) has `max-width: 300px` but no
+ * `max-height`, so a long list (the new-session workspace selector, or a
+ * right-click menu on a machine with many projects) can grow past the viewport
+ * and get its top clamped off-screen by ContextMenu's own edge clamping — the
+ * first rows become unreachable. Scroll instead of clipping, and keep the
+ * wheel gesture from chaining to the transcript underneath.
+ * ------------------------------------------------------------------------- */
+.context-menu {
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-02 (续) — motion tokens for float layers, chips and glosses.
+ *
+ * Upstream ships three coarse durations (`--motion-fast/base/slow`) and one
+ * cross-fade transition, which is not enough vocabulary for anything that moves
+ * with intent. MusePi keeps a named token per primitive plus three damped-spring
+ * `linear()` curves (docs/gui-design.md §3, gui-base.css:13-71); we adopt the
+ * same shape so new motion reads as one system instead of ad-hoc beziers.
+ *
+ * Rule (same as the reference): new animations read these tokens — keyframes may
+ * be redefined, but durations/easings must not be hardcoded, otherwise a future
+ * motion pack cannot restyle the app. `prefers-reduced-motion` still collapses
+ * everything globally (globals.css:1853).
+ *
+ * Springs are the reference's measured point lists (keep them verbatim — a
+ * hand-written bezier overshoots differently and reads as a different product).
+ * ------------------------------------------------------------------------- */
+:root {
+  --fork-spring: linear(
+    0.0000, 0.0126 3.23%, 0.0458 6.45%, 0.0935 9.68%, 0.1511 12.90%,
+    0.2147 16.13%, 0.2812 19.35%, 0.3483 22.58%, 0.4143 25.81%, 0.4778 29.03%,
+    0.5379 32.26%, 0.5941 35.48%, 0.6460 38.71%, 0.6933 41.94%, 0.7362 45.16%,
+    0.7747 48.39%, 0.8089 51.61%, 0.8392 54.84%, 0.8657 58.06%, 0.8888 61.29%,
+    0.9088 64.52%, 0.9260 67.74%, 0.9407 70.97%, 0.9531 74.19%, 0.9635 77.42%,
+    0.9722 80.65%, 0.9794 83.87%, 0.9853 87.10%, 0.9900 90.32%, 0.9938 93.55%,
+    0.9968 96.77%, 1
+  );
+  --fork-spring-snappy: linear(
+    0.0000, 0.0120 2.56%, 0.0432 5.13%, 0.0880 7.69%, 0.1410 10.26%,
+    0.1972 12.82%, 0.2524 15.38%, 0.3026 17.95%, 0.3449 20.51%, 0.3770 23.08%,
+    0.3975 25.64%, 0.4067 28.21%, 0.4061 30.77%, 0.3978 33.33%, 0.3846 35.90%,
+    0.3693 38.46%, 0.3548 41.03%, 0.3440 43.59%, 0.3394 46.15%, 0.3431 48.72%,
+    0.3570 51.28%, 0.3824 53.85%, 0.4198 56.41%, 0.4690 58.97%, 0.5291 61.54%,
+    0.5986 64.10%, 0.6754 66.67%, 0.7569 69.23%, 0.8404 71.79%, 0.9227 74.36%,
+    0.9640 76.92%, 0.9865 79.49%, 0.9971 82.05%, 1.0000 84.62%, 0.9974 87.18%,
+    0.9928 89.74%, 0.9895 92.31%, 0.9900 94.87%, 0.9958 97.44%, 1
+  );
+  --fork-motion-menu: 130ms;
+  --fork-motion-chip: 180ms;
+  --fork-motion-fade: 160ms;
+  --fork-motion-height: 240ms;
+  --fork-travel-menu: 4px;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-01 — shared floating layer enters in two phases.
+ *
+ * Upstream `.context-menu` (globals.css:2841) only defines an exit transition:
+ * the menu mounts in its final state, so `ctx-menu` never animates *in* — it
+ * pops. ContextMenu now appends `context-menu--entered` one double-rAF after
+ * mount (hooks/useTwoPhaseEnter.ts), and this block supplies the "before" state
+ * and the transition it is allowed to play.
+ *
+ * Keep the base rule and the modifier in sync: the base class carries the
+ * initial `opacity: 0`, the modifier is the only thing that lights it up. A
+ * layer that misses the modifier stays invisible (that failure has its own
+ * regression history in the reference implementation, hence the unit test on
+ * `enteredClass`).
+ * ------------------------------------------------------------------------- */
+.context-menu {
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--fork-travel-menu))) scale(0.98);
+  transition:
+    opacity var(--fork-motion-menu) var(--ease-out),
+    transform var(--fork-motion-menu) var(--fork-spring);
+}
+.context-menu--entered {
+  opacity: 1;
+  transform: none;
+}
+/* Exit keeps upstream's shorter travel and its own timing. */
+.context-menu.is-closing {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  transition:
+    opacity 90ms ease,
+    transform 90ms ease;
+}
+/* Submenus mount per hover; they ride the same two-phase contract. */
+.context-menu-submenu {
+  transition-duration: 110ms;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-21 — copy button glyph cross-fades instead of swapping.
+ *
+ * Markup is components/fork/CopyStateIcon.tsx: both glyphs are stacked and the
+ * wrapper drives them through `data-copied`. Scale + opacity only (no layout
+ * property), so the action row never reflows.
+ * ------------------------------------------------------------------------- */
+.fork-copy-glyph {
+  position: relative;
+  display: inline-flex;
+  width: 11px;
+  height: 11px;
+}
+.fork-copy-glyph > span {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    opacity var(--fork-motion-chip) var(--ease-out),
+    transform var(--fork-motion-chip) var(--fork-spring-snappy);
+}
+.fork-copy-glyph__idle {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+.fork-copy-glyph__done {
+  opacity: 0;
+  transform: scale(0.5) rotate(-25deg);
+}
+.fork-copy-glyph[data-copied="true"] .fork-copy-glyph__idle {
+  opacity: 0;
+  transform: scale(0.5) rotate(25deg);
+}
+.fork-copy-glyph[data-copied="true"] .fork-copy-glyph__done {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-28 — number alignment and CJK line breaking.
+ *
+ * 1. `tabular-nums` wherever counters tick (token counts, context usage, cost,
+ *    timestamps): proportional digits make the stats capsule and the usage rows
+ *    jitter on every streamed update. Reference: transcript.css:1106.
+ * 2. `word-break: keep-all` on prose so Chinese breaks between words instead of
+ *    mid-word, with `overflow-wrap: anywhere` kept as the safety valve for long
+ *    identifiers/paths. Reference: transcript.css:747-816.
+ *
+ * Deliberately NOT taken from the reference: `content-visibility: auto` on
+ * message rows. It would skip layout for off-screen rows, but the minimap and
+ * the scroll-restore path measure real message offsets (ChatMinimap consumes
+ * `messageRefs`), and `contain-intrinsic-size` would feed them placeholders
+ * instead. Revisit only together with a minimap that derives positions from
+ * the session index rather than from measured DOM.
+ * ------------------------------------------------------------------------- */
+.chat-stats-center,
+.session-info-popover,
+.mobile-session-stat-io,
+.mobile-session-stat-cost {
+  font-variant-numeric: tabular-nums;
+}
+.markdown-body p,
+.markdown-body li,
+.markdown-body td,
+.markdown-body th,
+.markdown-body blockquote {
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-33 — rotating tip line fades as it rotates.
+ *
+ * ComposerTipLine remounts the span per tip (key change), so an animation — not
+ * a transition — is what replays. Opacity/2px travel only; the reduced-motion
+ * block above already collapses it to an instant swap.
+ * ------------------------------------------------------------------------- */
+.fork-tipline {
+  animation: fork-tipline-in var(--fork-motion-fade) var(--ease-out);
+}
+@keyframes fork-tipline-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-22 — interface density.
+ *
+ * `--fork-density` is written by hooks/useUiDensity.ts (0.85 / 1 / 1.15) and only
+ * touches vertical rhythm that CSS owns. Session rows are deliberately excluded:
+ * the sidebar list is virtualized on `SESSION_LIST_ITEM_HEIGHT`, so scaling row
+ * heights there would desync the virtualizer from the DOM.
+ * ------------------------------------------------------------------------- */
+:root {
+  --fork-density: 1;
+}
+/* The message rhythm already reads this variable (globals.css:2356 applies it as
+   a margin), so scaling the variable scales the whole conversation. */
+:root {
+  --conversation-item-gap: calc(16px * var(--fork-density));
+}
+.settings-general-section {
+  margin-bottom: calc(20px * var(--fork-density));
+}

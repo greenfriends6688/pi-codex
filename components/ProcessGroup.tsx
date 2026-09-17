@@ -15,8 +15,14 @@ import {
   classifyShellCommand,
   classifyToolTone,
   extractToolTarget,
+  isFindToolName,
+  isListToolName,
+  isReadToolName,
+  isSearchToolName,
   type StepTone,
 } from "@/lib/step-categorizer";
+import { isApplyPatchToolName, isEditToolName, isWriteToolName } from "@/lib/tool-names";
+import { extractApplyPatchPaths, getApplyPatchInputText } from "@/lib/apply-patch";
 
 /**
  * Grouped "process" renderer.
@@ -334,24 +340,79 @@ export function buildProcessSteps(blocks: ProcessContentBlock[], t: (key: string
 }
 
 /** `Used 22 tools (1 failed) · 26 thoughts` */
+/**
+ * fork:ui-19 — one-line summary of a turn (MusePi rounds show "N files changed ·
+ * N commands · N tools" above the fold, transcript-content.tsx:573-594).
+ *
+ * Before this only tool/failed/thinking counts existed, so "what did this round
+ * actually do" needed a click. Files are counted **distinctly** (one file edited
+ * three times is one file), commands are shell-ish tools, reads aggregate the
+ * explore tools — the same categories the timeline rows already use.
+ */
 export function summarizeSteps(steps: Step[], t: (key: string, params?: Record<string, string | number>) => string): string {
   let tools = 0;
   let failed = 0;
   let thoughts = 0;
+  let commands = 0;
+  let reads = 0;
+  const changedFiles = new Set<string>();
   for (const step of steps) {
     if (step.thinking) {
       thoughts += step.blocks.length;
       continue;
     }
-    if (step.blocks.length > 0 && step.blocks[0].type === "toolCall") {
-      tools += step.count ?? step.blocks.length;
-      if (step.failed) failed += step.blocks.length;
+    const toolBlocks = step.blocks.filter((block) => block.type === "toolCall");
+    if (toolBlocks.length === 0) continue;
+    tools += step.count ?? toolBlocks.length;
+    if (step.failed) failed += toolBlocks.length;
+    for (const block of toolBlocks) {
+      if (block.type !== "toolCall") continue;
+      const name = block.toolName;
+      if (isShellToolName(name)) {
+        commands += 1;
+        continue;
+      }
+      // Reads must be classified *before* writes: a read tool carries a path too,
+      // and the document-change classifier alone would happily count it as an edit.
+      if (isReadToolName(name) || isSearchToolName(name) || isListToolName(name) || isFindToolName(name)) {
+        reads += 1;
+        continue;
+      }
+      if (isWriteToolName(name) || isEditToolName(name)) {
+        const target = readWrittenPath(block.input);
+        if (target) changedFiles.add(target);
+        continue;
+      }
+      if (isApplyPatchToolName(name)) {
+        // One patch can touch several files, and its targets only exist in the
+        // patch text — reuse the parser the turn's file chips already use.
+        const paths = extractApplyPatchPaths(getApplyPatchInputText(block.input));
+        if (paths.length === 0) changedFiles.add(`patch:${block.id}`);
+        else for (const path of paths) changedFiles.add(path);
+      }
     }
   }
-  const parts = [t("process.summaryTools", { count: tools })];
+  const parts: string[] = [];
+  if (changedFiles.size > 0) parts.push(t("process.summaryFiles", { count: changedFiles.size }));
+  if (commands > 0) parts.push(t("process.summaryCommands", { count: commands }));
+  if (parts.length === 0 && reads > 0) parts.push(t("process.summaryReads", { count: reads }));
+  parts.push(t("process.summaryTools", { count: tools }));
   if (failed > 0) parts.push(t("process.summaryFailed", { count: failed }));
   if (thoughts > 0) parts.push(t("process.summaryThoughts", { count: thoughts }));
   return parts.join(" · ");
+}
+
+/** The two argument spellings write/edit tools use (see lib/turn-written-files.ts). */
+function readWrittenPath(input: Record<string, unknown> | undefined): string | null {
+  if (!input) return null;
+  const value = input.file_path ?? input.path;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/** Shell-family tools. `powershell` is the Windows preset's shell. */
+function isShellToolName(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === "bash" || lower === "powershell" || lower === "shell" || lower === "exec" || lower === "run";
 }
 
 /**

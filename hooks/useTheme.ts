@@ -4,6 +4,7 @@ import { useCallback, useSyncExternalStore } from "react";
 import { isDarkTheme, isThemePreference, type ThemePreference, type ResolvedTheme } from "@/lib/theme";
 import { refreshPiThemeForMode } from "@/hooks/usePiTheme";
 import { applyStoredBorderDepth, clearDepthOverrides, resetBorderDepthSnapshot } from "@/hooks/useBorderDepth";
+import { applyStoredUiDensity } from "@/hooks/useUiDensity";
 
 export type { ThemePreference, ResolvedTheme } from "@/lib/theme";
 
@@ -55,6 +56,7 @@ function applyDomTheme(theme: ResolvedTheme): void {
   clearDepthOverrides();
   resetBorderDepthSnapshot();
   applyStoredBorderDepth();
+  applyStoredUiDensity();
   void refreshPiThemeForMode(isDarkTheme(theme));
 }
 

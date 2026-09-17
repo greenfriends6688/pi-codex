@@ -82,7 +82,9 @@ test("groups chat display controls together without row backgrounds", () => {
 
   assert.doesNotMatch(appearanceSection, /settings-chat-content/);
   assert.match(chatSection, /className="settings-chat-options"/);
-  assert.equal((chatSection.match(/className="settings-chat-option(?: |")/g) ?? []).length, 6);
+  // 7 since fork:ui-22 added the interface-density select next to the other
+  // display controls (it belongs to the same group).
+  assert.equal((chatSection.match(/className="settings-chat-option(?: |")/g) ?? []).length, 7);
   assert.equal((chatSection.match(/<ConfigSwitch/g) ?? []).length, 2);
   for (const key of ["thinkingExpandedDefault", "chatContentWidth", "chatContentFontSize", "extensionWidgetFontSize", "quoteSelection", "processDisplay"]) {
     assert.match(chatSection, new RegExp(`t\\("settings\\.${key}"\\)`));
@@ -91,6 +93,15 @@ test("groups chat display controls together without row backgrounds", () => {
   const chatOptionStyles = cssSource.match(/\.settings-chat-option \{[\s\S]*?\}/)?.[0] ?? "";
   assert.match(chatOptionStyles, /font-size: var\(--text-sm\)/);
   assert.doesNotMatch(chatOptionStyles, /background/);
+});
+
+test("settings search filters sections and highlights rows", () => {
+  assert.match(panelSource, /className="settings-search-input"/);
+  assert.match(panelSource, /sectionSearchTerms\(item\.id\)/);
+  assert.match(panelSource, /settings-search-match/);
+  assert.match(panelSource, /scrollIntoView\(\{ block: "center" \}\)/);
+  assert.match(cssSource, /\.settings-search-match \{[\s\S]*?background:/);
+  assert.match(cssSource, /\.settings-search-input \{/);
 });
 
 test("keeps General free of divider rows", () => {
@@ -104,7 +115,8 @@ test("keeps General free of divider rows", () => {
 test("uses a left section column on desktop and one compact picker on mobile", () => {
   assert.match(panelSource, /className="settings-mobile-section-picker"/);
   assert.match(panelSource, /className="settings-section-tabs"/);
-  assert.match(panelSource, /className="settings-section-tab"/);
+  // fork:ui-14 — the class is composed with the search-hit modifier now.
+  assert.match(panelSource, /className=\{`settings-section-tab\$\{jumpHit \? " settings-section-tab--hit" : ""\}`\}/);
   // fork:ui-08 — a vertical column (upstream 0.14.6 layout) instead of a row of
   // fixed 96px cells.
   assert.match(panelSource, /className="settings-dialog-body"/);
@@ -123,7 +135,8 @@ test("uses a left section column on desktop and one compact picker on mobile", (
   assert.match(cssSource, /@media \(max-width: 640px\)[\s\S]*?\.settings-section-tabs \{[\s\S]*?display: none/);
   assert.match(cssSource, /@media \(max-width: 640px\)[\s\S]*?\.settings-mobile-section-picker \{[\s\S]*?display: block/);
   assert.doesNotMatch(panelSource, /width: isMobile \? "100%" : 188/);
-  assert.match(panelSource, /<main className="settings-dialog-main">/);
+  // fork:ui-14 — the content column carries the search-highlight ref now.
+  assert.match(panelSource, /<main className="settings-dialog-main" ref=\{mainRef\}>/);
   assert.doesNotMatch(panelSource, /<style>/);
   assert.doesNotMatch(panelSource, /style=\{\{/);
 });

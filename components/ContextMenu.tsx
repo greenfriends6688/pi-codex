@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { enteredClass, useTwoPhaseEnter } from "@/hooks/useTwoPhaseEnter";
 
 /**
  * Generic right-click / dropdown menu.
@@ -95,6 +96,10 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const [closing, setClosing] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
+  // fork:ui-01 — two-phase enter: the menu mounts invisible and picks up
+  // `context-menu--entered` one frame later, which is what lets the CSS
+  // transition (fork-ui.css) actually play instead of the menu popping in.
+  const entered = useTwoPhaseEnter(Boolean(menu));
   const [feedbackIndex, setFeedbackIndex] = useState(-1);
   const [submenuIndex, setSubmenuIndex] = useState<number | null>(null);
   const [submenuPos, setSubmenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -146,13 +151,18 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
 
   // Measure the rendered menu and flip it at the viewport edges, so a right-click
   // near the bottom-right corner does not open a menu that runs off-screen.
+  // layout size (offsetWidth/Height), NOT getBoundingClientRect: the enter
+  // transition scales the layer to 0.98, and a rect measured mid-transition is
+  // ~2% short, which lands the clamped position a couple of pixels over the
+  // edge once the scale finishes (measured on a 390x844 viewport).
   useLayoutEffect(() => {
     if (!menu || !menuRef.current) return;
-    const rect = menuRef.current.getBoundingClientRect();
+    const menuWidth = menuRef.current.offsetWidth;
+    const menuHeight = menuRef.current.offsetHeight;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const x = Math.max(MENU_MARGIN, Math.min(menu.x, vw - rect.width - MENU_MARGIN));
-    const y = Math.max(MENU_MARGIN, Math.min(menu.y, vh - rect.height - MENU_MARGIN));
+    const x = Math.max(MENU_MARGIN, Math.min(menu.x, vw - menuWidth - MENU_MARGIN));
+    const y = Math.max(MENU_MARGIN, Math.min(menu.y, vh - menuHeight - MENU_MARGIN));
     setPos((current) => (current && current.x === x && current.y === y ? current : { x, y }));
   }, [menu]);
 
@@ -284,7 +294,7 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
           role="menu"
           tabIndex={-1}
           aria-label="Context menu"
-          className={`context-menu${closing ? " is-closing" : ""}`}
+          className={`${enteredClass("context-menu", entered)}${closing ? " is-closing" : ""}`}
           style={{ top: pos.y, left: pos.x, minWidth: MIN_WIDTH }}
           onContextMenu={(event) => event.preventDefault()}
           onKeyDown={onMenuKeyDown}

@@ -12,6 +12,7 @@ import { openFileTab, saveFileViewerState } from "./file-tab-state";
 import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
 import { ExplorerPanel } from "./ExplorerPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
+import { DirectoryPicker } from "./DirectoryPicker";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
@@ -38,6 +39,7 @@ import {
 } from "@/lib/browser-notifications";
 import { setupPushSubscription } from "@/lib/push-client";
 import { getInitialNavigation } from "@/lib/initial-navigation";
+import { getRecentProjects, withoutChatProject } from "@/lib/project-groups";
 import { rekeyDraft } from "@/lib/draft-store";
 import {
   createSelectionContextId,
@@ -46,6 +48,7 @@ import {
 } from "@/lib/composer-context";
 import type { SessionRowContextMenuDetail } from "@/lib/session-row-context-menu";
 import { ContextMenuProvider } from "./ContextMenu";
+import type { NewSessionProject, NewSessionTargets } from "./fork/ProjectChip";
 import { SessionRowContextMenuBridge } from "./SessionRowContextMenuBridge";
 import { WallpaperLayer } from "./WallpaperLayer";
 import { initWallpaper } from "@/hooks/useWallpaper";
@@ -163,6 +166,12 @@ export function AppShell() {
   }, []);
   // The temporary id distinguishes consecutive fresh composers in one cwd.
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
+  // fork:ui-projectchip — targets shown by the new-session page's workspace selector.
+  // The chat workspace identity comes from the server (stable projectKey), exactly like
+  // the sidebar's own copy, so the selector never compares paths itself.
+  const [chatWorkspaceTarget, setChatWorkspaceTarget] = useState<{ cwd: string; key: string } | null>(null);
+  const [homeFolderPickerOpen, setHomeFolderPickerOpen] = useState(false);
+  const [homeTargetError, setHomeTargetError] = useState<string | null>(null);
   const [newSessionDraftId, setNewSessionDraftId] = useState("initial");
   const activeNewSessionDraftKeyRef = useRef<string | null>(null);
   const [initialCwdStatus, setInitialCwdStatus] = useState<"idle" | "validating" | "ready" | "error">(
@@ -1231,6 +1240,119 @@ export function AppShell() {
     activeNewSessionDraftKeyRef.current = newSessionDraftKey;
   }, [newSessionDraftKey]);
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
+  // fork:ui-projectchip — the new-session page's workspace selector. Mirrors what the
+  // sidebar's NewTaskPicker already offers, minus the two actions it lacks:
+  // "open folder" (validate a folder, then start there) and "new blank project".
+  const refreshChatWorkspaceTarget = useCallback(async () => {
+    try {
+      const res = await fetch("/api/chat-workspace", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json() as { cwd?: string; projectKey?: string };
+      if (data.cwd && data.projectKey) setChatWorkspaceTarget({ cwd: data.cwd, key: data.projectKey });
+    } catch {
+      // Offline or route missing: the selector still lists projects and disables
+      // "not in a project" instead of silently pointing at a stale directory.
+    }
+  }, []);
+  useEffect(() => {
+    void refreshChatWorkspaceTarget();
+  }, [refreshChatWorkspaceTarget]);
+
+  // Move the workspace, then open a fresh composer there. Same two steps the sidebar
+  // performs for 新建任务 (setSelectedCwd + onNewSession); handleCwdChange keeps the
+  // project identity, file tabs and per-workspace memory in step.
+  const startSessionIn = useCallback((cwd: string, projectRoot?: string | null, projectKey?: string | null) => {
+    handleCwdChange(cwd, projectRoot ?? null, projectKey ?? null);
+    const tempId = typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    handleNewSession(tempId, cwd);
+  }, [handleCwdChange, handleNewSession]);
+
+  // Resolve server-side identity (and add the root to the files allow-list) before a
+  // picked path becomes active — the contract /api/cwd/validate provides the sidebar.
+  // Returns an error message, or null on success.
+  const startSessionAtPath = useCallback(async (path: string): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/cwd/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: path }),
+      });
+      const data = await res.json().catch(() => ({})) as {
+        cwd?: string;
+        projectRoot?: string;
+        projectKey?: string;
+        error?: string;
+      };
+      if (!res.ok || !data.cwd || !data.projectRoot || !data.projectKey) {
+        return data.error ?? `HTTP ${res.status}`;
+      }
+      startSessionIn(data.cwd, data.projectRoot, data.projectKey);
+      return null;
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }, [startSessionIn]);
+
+  const createBlankProjectForNewSession = useCallback(async () => {
+    try {
+      const res = await fetch("/api/default-cwd", { method: "POST" });
+      const data = await res.json().catch(() => ({})) as { cwd?: string; error?: string };
+      if (!res.ok || !data.cwd) {
+        setHomeTargetError(data.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      const failure = await startSessionAtPath(data.cwd);
+      setHomeTargetError(failure);
+    } catch (error) {
+      setHomeTargetError(error instanceof Error ? error.message : String(error));
+    }
+  }, [startSessionAtPath]);
+
+  const newSessionTargets = useMemo<NewSessionTargets | null>(() => {
+    if (selectedSession !== null) return null;
+    const projects: NewSessionProject[] = withoutChatProject(
+      getRecentProjects(sessionCatalog),
+      chatWorkspaceTarget?.key ?? null,
+    ).map((project) => ({
+      key: project.key,
+      root: project.root,
+      name: getFileName(project.root) || project.root,
+    }));
+    return {
+      projects,
+      chatPath: chatWorkspaceTarget?.cwd ?? null,
+      activeCwd: effectiveNewSessionCwd,
+      error: homeTargetError,
+      onRefresh: () => { void refreshChatWorkspaceTarget(); },
+      onPickProject: (project) => {
+        setHomeTargetError(null);
+        startSessionIn(project.root, project.root, project.key);
+      },
+      onPickChat: () => {
+        setHomeTargetError(null);
+        if (chatWorkspaceTarget) startSessionIn(chatWorkspaceTarget.cwd, chatWorkspaceTarget.cwd, chatWorkspaceTarget.key);
+      },
+      onOpenFolder: () => {
+        setHomeTargetError(null);
+        setHomeFolderPickerOpen(true);
+      },
+      onNewBlank: () => {
+        setHomeTargetError(null);
+        void createBlankProjectForNewSession();
+      },
+    };
+  }, [
+    chatWorkspaceTarget,
+    createBlankProjectForNewSession,
+    effectiveNewSessionCwd,
+    homeTargetError,
+    refreshChatWorkspaceTarget,
+    selectedSession,
+    sessionCatalog,
+    startSessionIn,
+  ]);
   const projectTrustCwd = selectedSession?.cwd ?? effectiveNewSessionCwd;
   // While restoring initial session from URL, don't show the placeholder
   const showPlaceholder = initialSessionRestored && !showChat;
@@ -2099,6 +2221,7 @@ export function AppShell() {
   );
 
   return (
+    <ContextMenuProvider>
     <>
     <style>{`
       @keyframes session-info-pop {
@@ -2755,6 +2878,7 @@ export function AppShell() {
                   ? pendingNewSessionPrompt.text
                   : undefined}
               onInitialPromptConsumed={() => { setPendingQuotePrompt(null); setPendingNewSessionPrompt(null); }}
+              newSessionTargets={newSessionTargets}
               soundEnabled={soundEnabled}
               onSoundToggle={onSoundToggle}
               playDoneSound={playDoneSound}
@@ -2943,11 +3067,10 @@ export function AppShell() {
       </div>
       </div>
     </div>
-    <ContextMenuProvider>
-      <SessionRowContextMenuBridge onCopyReference={copySessionReference} />
-    </ContextMenuProvider>
+    <SessionRowContextMenuBridge onCopyReference={copySessionReference} />
     {settingsSection && (
       <SettingsPanel
+        onOpenSession={handleOpenSession}
         sessionId={selectedSession?.id ?? null}
         initialSection={settingsSection}
         quoteSelectionEnabled={quoteSelectionEnabled}
@@ -2971,6 +3094,20 @@ export function AppShell() {
         onConfirm={() => void handleTrustProject()}
       />
     )}
+    {/* fork:ui-projectchip — "open folder" for the new-session workspace selector. */}
+    {homeFolderPickerOpen && (
+      <DirectoryPicker
+        initialPath={newSessionCwd ?? activeCwd ?? undefined}
+        onCancel={() => setHomeFolderPickerOpen(false)}
+        onSelect={(path) => {
+          void startSessionAtPath(path).then((failure) => {
+            setHomeTargetError(failure);
+            setHomeFolderPickerOpen(failure !== null);
+          });
+        }}
+      />
+    )}
     </>
+    </ContextMenuProvider>
   );
 }

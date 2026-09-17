@@ -1010,3 +1010,149 @@ Windows bash 环境隔离、PTY 运行时、1 条既有 ChatInput 用例）｜ `
 `npm test` 1264/1264 ｜ `npm run prod` 后在真实 Chrome（Playwright + 系统 Chrome）实测：
 空态首页 1440/390 两档（4 卡、手机两列、点击只填输入框）、用户气泡右对齐且右边缘与列对齐（`gap=0`，
 宽 602 上限生效）、设置 tab 宽度 69–81px 变宽自适应、`--radius-composer` 仍为 22px。
+
+### 21. 新会话首页的工作区选择器（2026-09-17 第三轮，MU-32）
+
+MusePi 的首页在输入框上方有一行「这条会话在哪跑」的选择器（`WelcomeComposer.tsx:1202-1300`）。
+本 fork 的能力其实早就有了 —— 侧栏「新建任务」右边那个 26px chevron 里就是同一个 `NewTaskPicker` ——
+但首页看不到、也改不了。这一轮只是把它搬到看得见的地方，并补齐它缺的两个动作。
+
+| 编号 | 改了什么 | 接触面 | 回滚 |
+| --- | --- | --- | --- |
+| fork:ui-projectchip | 新组件 `components/fork/ProjectChip.tsx`：输入框上方左对齐的胶囊（folder 图标 + 目标名 + chevron），点开走**共享 `ContextMenu`**（不手写浮层）：当前目标（✓，仅一行不再重复成动作）→ 其他项目 → 分隔线 → `打开文件夹` / `新建空白项目` / `不在项目中（聊天）`。移除项目仍然只在侧栏右键，与参考实现一致 | T0 新文件 + T1 接线 | 删组件与 `newSessionTargets` prop |
+| — | 「打开文件夹」复用 `DirectoryPicker`，选中后先过 `/api/cwd/validate`（顺带把新根加进 `/api/files` 白名单），再 `handleCwdChange(cwd, projectRoot, projectKey)` + `handleNewSession(tempId, cwd)` —— 与侧栏 `startSessionIn` 完全同一条路径。「新建空白项目」复用现有 `/api/default-cwd`（`~/pi-cwd-<日期>`），不做命名弹框 | T1（AppShell handler） | 去掉两个 action 的 handler 与 `DirectoryPicker` 挂载 |
+| — | `ContextMenuProvider` 从「只包 `SessionRowContextMenuBridge`」提升到包住整棵 AppShell 树：它此前是主界面的**兄弟**节点，所以主界面里的组件拿不到 `useContextMenu`（首页胶囊一挂上去就抛 `must be used inside a ContextMenuProvider`）。这是这次唯一的结构性改动，也让以后任何面板都能直接用同一个浮层入口 | T1（AppShell 首尾各一行） | 把 provider 挪回 bridge 外层 |
+| fork:ui-projectchip（CSS） | `app/fork-ui.css` 给 `.context-menu` 补 `max-height: calc(100dvh - 16px)` + `overflow-y: auto` + `overscroll-behavior: contain`：上游只有 `max-width`，项目多时菜单会长过视口，被自身的贴边 clamp 顶掉首行导致点不到 | T0（fork 自有 CSS） | 删该块 |
+
+**时机安全**：`ensureNewSession()` 是懒创建（`hooks/useAgentSession.ts:638-690`），首条消息之前换 cwd 只改 prop、不落任何文件；
+`handleNewSession` 内的 `invalidateWorkspaceRestore()` 会作废 `handleCwdChange` 刚发起的「恢复上次会话」请求，
+所以换完项目不会被旧会话顶掉（token 校验，`AppShell.tsx:682-700`）。
+
+**验证**：`tsc --noEmit` 0 错 ｜ `npm run lint` 0 错（8 条 warning 均为既有）｜ `npm test` 1272/1272（新增 `components/fork/ProjectChip.test.mjs` 7 例：选中行只出现一次、项目行带全路径 title、三个动作齐全、聊天项在当前时不再重复、chatPath 缺失时 disabled、SSR 渲染标签与 aria）｜
+`npm run prod` 后真实 Chrome（Playwright + 系统 Chrome，1440×900）实测：胶囊显示 `pi-web-0.9.0` →
+菜单 12 个项目 + 分隔线 + 三个动作 → 切到「不在项目中（聊天）」后胶囊跟随、再开菜单聊天项只剩 ✓ 那一行 →
+切回项目正常 → Esc 关闭 → **console 0 error**。
+
+### 22. 第一批「借鉴清单」落地（2026-09-17，MU-01/02/21/28/33 + MU-15 台账）
+
+按 `docs/musepi-borrowing-plan-2026-09-17.md` §6 的顺序做掉第一梯队里互不依赖的几项。
+共同点：都**不改行为**，只补纪律与反馈。
+
+| 编号 | 改了什么 | 接触面 | 回滚 |
+| --- | --- | --- | --- |
+| MU-02 | `app/fork-ui.css` `:root` 补动效词汇表：三条阻尼弹簧 `--fork-spring / -snappy`（逐点抄参考实现的 `linear()` 点列，手写贝塞尔过冲感不一样）+ `--fork-motion-menu/chip/fade/height` + `--fork-travel-menu`。约定：新动效读 token，关键帧可覆写、时长/缓动不得硬编码 | T0 | 删该块（现有动画不受影响） |
+| MU-01 | 浮层**两段式入场**：新 `hooks/useTwoPhaseEnter.ts`（`enteredClass()` 组合类名 + 双 rAF 置位），`ContextMenu` 接上 `context-menu--entered`，CSS 在 `fork-ui.css`。此前 `.context-menu` 只有退场过渡 —— 菜单是从**终态挂载**的，所以入场动画根本不会播（真机实测：改前 opacity 直接是 1，改后 0 → 1 走完 130ms） | T0 新 hook + T1（ContextMenu 两行） | 去掉 hook 调用与那段 CSS，菜单回到瞬时出现 |
+| MU-21 | 复制按钮的二态图标：新 `components/fork/CopyStateIcon.tsx`（两个 glyph 常驻 + `data-copied` 驱动），`fork-ui.css` 里 opacity/scale/rotate 交叉淡入；替换 `MessageView` 两处 `{copied ? <Check/> : <Copy/>}`。按钮宽度不再因换图标跳动 | T0 新组件 + T1（MessageView 两处） | 恢复原来的条件渲染 |
+| MU-28（部分） | 数字对齐与 CJK 折行：`tabular-nums` 给 `.chat-stats-center / .session-info-popover / .mobile-session-stat-*`；`word-break: keep-all` + `overflow-wrap: anywhere` 给 `.markdown-body` 的 p/li/td/th/blockquote。**没做** `content-visibility: auto`：minimap 与滚动恢复依赖真实行高（`ChatMinimap` 吃 `messageRefs` 的测量值），`contain-intrinsic-size` 会喂给它们占位高度 —— 要做必须先把 minimap 改成从会话索引推导位置 | T0（fork 自有 CSS） | 删该块 |
+| MU-33 | 输入框旁的**轮播提示行**：新 `components/fork/ComposerTipLine.tsx`（12 条提示 × 3 语种，20s 轮换、随机且不重复上一条）+ `fork-tipline` 淡入动画，接在首页「工作区胶囊」右边，出现错误时让位给错误文案。12 条全部描述**当前已存在**的能力（没把未实现的 ⌘K 写进去） | T0 新组件 + T1（ChatWindow 一行 + 三份 i18n 各 12 行） | 删组件与三处 i18n 键 |
+| MU-15 | 台账两条铁律（下次做高度动画时照做）：① 高度过渡期间**必须 `overflow: hidden`**，否则新内容瞬间填满、只看到盒子边缘在动＝没有动画；② 高度差 <1px 时**跳过钉高**只播淡入，否则滚动条会消失 300ms | T0（文档） | — |
+
+**顺带修掉一个真 bug（MU-01 的连带）**：入场 `scale(0.98)` 让 `ContextMenu` 的贴边 clamp 量到偏小的矩形（过渡首帧的 `getBoundingClientRect` 已带缩放），390×844 上菜单会**溢出视口 2px**。改用不受 transform 影响的 `offsetWidth/offsetHeight` 做 clamp（`entered` 重测无效 —— 那是过渡第一帧，量的还是缩放值，已实测排除）。
+
+**验证**：`tsc --noEmit` 0 错 ｜ `npm run lint` 0 错（8 条 warning 均为既有）｜ `npm test` **1280/1280**（新增 10 例：`enteredClass` 类名拼接的两种失败模式、提示行三语完整性/轮换不重复/单条退化/SSR 渲染、复制图标两态常驻）｜
+`audit-tokens.mjs` 29 个刻度 token 齐全且五套调色板 OK ｜ `verify-themes.mjs` 五套全 OK ｜
+prod 构建后真实 Chrome 实测：提示行 `fork-tipline-in 0.16s` 且显示中文提示；菜单类名 `context-menu context-menu--entered`、transition 0.13s、opacity **0 → 1**；
+注入实测计算样式 `word-break: keep-all` / `overflow-wrap: anywhere` / `font-variant-numeric: tabular-nums`、复制图标 idle{1,0} → copied{0,1}；390×844 菜单 y=427 高 411 全在视口内（修前 435/溢出 2px）；**console 0 error**。
+
+### 23. 第三梯队的可落地部分（2026-09-17，MU-14/19/20/22/30 + MU-09 结论）
+
+第三梯队里 5 项落地、1 项经核实**没有增量**、3 项留到下一轮。
+
+| 编号 | 改了什么 | 接触面 | 回滚 |
+| --- | --- | --- | --- |
+| MU-14 | **设置搜索**：左列导航上方加输入框；关键词表（中英双语）命中分区时给导航项加 `--hit` 高亮；同时扫描当前分区里的行（`.settings-general-section > *`）加 `.settings-search-match` 并 `scrollIntoView({block:"center"})`；无命中显示一行提示。**已知上限**：Models/Skills/Agents/Plugins 的内容在自己组件里，没有稳定行元素，只由关键词表覆盖（跳分区仍有效） | T1（SettingsPanel 结构）+ fork 自有 `settings.css` | 删输入框、`sectionSearchTerms`、高亮 effect 与两段 CSS |
+| MU-19 | **轮次摘要升级**：`summarizeSteps` 除工具/失败/思考外，新增「N 个文件 / N 条命令」：写入类工具用 `lib/tool-names.ts` 判定 + `file_path ?? path` 取路径（**去重**，同一文件改三次算一个），`apply_patch` 走 `extractApplyPatchPaths` 精确取多目标，只读类工具单独计 reads。修正了一个真实误判：`classifyDocumentChangeKind` 对**任何**工具都返回非空，原顺序会把 read 算成改文件 | T0（ProcessGroup 内部函数）+ 3 个 i18n 键 | 恢复旧 `summarizeSteps` |
+| MU-20 | **PathActions + 后端**：新 `lib/path-actions.ts`（纯函数，argv 数组、不经 shell）、新路由 `app/api/files/reveal`（`POST {path, action}`，白名单校验同 `/api/files`，`spawn` + `detach`）、新 `components/fork/PathActions.tsx`（复制路径 / 文件管理器显示 / 默认应用打开），接在文件查看器工具栏。**reveal 目录时打开目录本身**（原设计会打开父目录，测试抓到了） | T0 新文件 + T1（FileViewer 一行） | 删组件/路由/lib 与那一行 |
+| MU-22 | **界面密度**：`lib/ui-density.ts`（三档 + 因子）+ `hooks/useUiDensity.ts`（照 `useBorderDepth` 的模式，写 `--fork-density` 与 `data-density`）+ 设置里的下拉 + CSS 让 `--conversation-item-gap` 与聊天列 gutter 跟着缩放。**上限**：会话行不缩放 —— 侧栏列表按固定 `SESSION_LIST_ITEM_HEIGHT` 虚拟化，改行高会和虚拟器错位（提示文案里也写了） | T0 新 lib/hook + T1（设置 + ChatWindow 两处 padding） | 删两文件、设置项与 CSS 块 |
+| MU-30 | **浏览器视口预设**：面板工具栏加下拉（填满 / 390 / 768 / 1024 / 1280），非填满时 iframe 定宽居中 + 细边框。实测 390 生效，768 在 511px 宽的面板里被 `maxWidth:100%` 收住（预期行为） | T1（BrowserPanel 三处）+ 5 个 i18n 键 | 删下拉与 iframe 的宽度分支 |
+| MU-09 | **核实结论：不做**。① 队列本来就已经是常显列表（`Queued · N` 头部 + 卡片 + Recall），再加一个 chip 是重复；② todo 半边没有数据源 —— 仓库与 pi SDK 都没有 `todo` 工具（`lib/tool-presets.ts` 的工具集是 read/bash/edit/write/grep/find/ls），MusePi 的 todo chip 建立在它自己的 `todo` 工具上。等上游有该工具再接 | — | — |
+
+**验证**：`tsc --noEmit` 0 错 ｜ `npm run lint` 0 错（8 条 warning 均为既有）｜ `npm test` **1299/1299**（新增 21 例：路径命令三平台 + 恶意路径不拆参数 + reveal 目录语义、reveal 路由的 5 条边界、轮次摘要 4 例、密度 3 例、设置搜索与源码形状断言 3 例）｜
+prod 构建后真实 Chrome：搜索「密度」→ 命中行 accent 洗底 + 导航 `--hit`（截图 `test-results/tier34/1-settings-search.png`）；密度切紧凑 → `--fork-density: 0.85`、`--conversation-item-gap: calc(16px * 0.85)`、`data-density="compact"`；浏览器视口 填满 511 → 390 生效 → 回填满 511；路由守卫 `/etc/hosts` 403、非法 action 400；**console 只有我自己守卫测试产生的 403/400**。
+
+### 24. Todo 工具 + 任务面板（2026-09-17，MU-09 / MU-27 复活）
+
+**推翻一条早先的错误结论**：§23 写过「MU-09 todo 半边没有数据源，上游没有 todo 工具，不做」。
+那只查了 *内建工具*，没查 *扩展*。事实是：
+
+- SDK 的工具注册面是扩展（`docs/extensions.md`「Custom tools」），pi-web 自己就用它注册了 `Agent` / `get_subagent_result` / `steer_subagent`（`lib/subagent-extension.ts`）；
+- SDK 官方示例里**直接有一个 todo 扩展**：`node_modules/@earendil-works/pi-coding-agent/examples/extensions/todo.ts`（297 行）；
+- SDK 文档《State Management》给的范式就是「状态放 tool-result `details`，`session_start`/`session_tree` 从当前分支重建」——这个属性比外置文件更强：**分支回退时列表跟着回退**。
+
+据此实现（PR 形态）：
+
+| 编号 | 改了什么 | 接触面 | 回滚 |
+| --- | --- | --- | --- |
+| fork:ui-todo（核心） | `lib/todo-state.ts`：纯状态机（`list/set/add/toggle/remove/clear`、错误不改状态、`set` 保留同名条目的完成态、`nextId` 只增不复用）+ 从转写里回读（`extractTodoState`，last-wins、按 `kind` 与工具名双重校验、分支回退即回退） | T0 新文件 | 删文件与 3 处引用 |
+| fork:ui-todo（工具） | `lib/todo-extension.ts`：内联扩展，`defineTool` 注册 `todo` 工具（带 `promptSnippet`/`promptGuidelines`，让模型知道何时用），`session_start`/`session_tree` 重建；工具**无条件注册**（不像 subagent 那样跟设置走） | T0 新文件 + T1（`lib/rpc-manager.ts` 的 `extensionFactories` 一项） | 删文件与那一项 |
+| fork:ui-todo（UI） | `components/fork/TodoChip.tsx`：输入框上方的 `2/4` 胶囊 + 进度条，点开只读面板（勾选/划线 + 「复制清单」）；`ChatWindow` 用 `useMemo` 从消息派生（`extractTodoState(messages)`）后经 `ChatInput` 的新 prop 传入。**只读是刻意的**：在 UI 里改会去重写已落盘的 tool result，而会话格式不允许改写历史 | T0 新组件 + T1（ChatWindow / ChatInput 各一处）+ 6 个 i18n 键 | 删组件、prop 与 i18n 键 |
+
+**验证**（隔离 agent 目录，不动用户真实会话）：
+`tsc --noEmit` 0 错 ｜ `npm run lint` 0 错（8 条 warning 均为既有）｜ `npm test` **1308/1308**（新增 9 例：`set/toggle` 语义、`set` 保留完成态、id 不复用、6 类错误调用不改状态、list 渲染、转写回读 last-wins、分支回退、外来/畸形 details 被忽略、类型守卫）｜
+工厂直测：注册 `todo`、订阅 `session_start`/`session_tree`、`execute` 返回正确 details ｜
+活会话实测：`POST /api/agent/<id> {type:"get_tools"}` 返回 13 个工具，**含 `todo`**（与 `Agent`、`get_subagent_result`、`steer_subagent` 并列）｜
+端到端（临时 `PI_CODING_AGENT_DIR` + 造一条含 todo tool result 的会话 + 侧栏点开）：胶囊显示 `2/4`、面板 4 条状态与勾选正确、「复制清单」在位、**console 0 error**（截图 `test-results/tier34/4-todo-chip.png`）。
+
+**顺带发现（未修，非本次改动引入）**：URL 里的 `?session=<id>` 不会打开会话 —— 真实会话的 4 个 id 与隔离环境造的新会话都复现；点侧栏进入正常。下次单独排查（`AppShell` 的 `initialSessionId` → 侧栏恢复链路）。
+
+### 25. 定时任务 + 记忆（2026-09-17，两个新功能）
+
+用户点名要的两项。先查了能力面：**SDK 两者都没有** —— 没有 `cron/schedule` API，也没有 `memory_*` 工具（`docs/*.md` 里 memory 只出现在 "in-memory" 之类的无关句子）。所以都在 pi-web 侧实现，且都**复用已有设施**（进程内 SDK、agent 目录配置、内联扩展），没有新依赖。
+
+#### 定时任务（fork:cron）
+
+| 文件 | 作用 |
+| --- | --- |
+| `lib/cron-schedule.ts`（纯） | 时间解析与下次运行计算：`daily` / `weekly` / `once` + 多个 `HH:MM`（本机时区）。**刻意不做 cron 表达式**：没有依赖、也不需要教用户五段语法。另有 `cronDueState()` —— 到点判定 + **错过窗口**（5 分钟）：服务停机期间错过的运行跳过而不是补跑 |
+| `lib/cron-store.ts` | `<agentDir>/pi-web-cron.json`（`{version, tasks}`），与 `pi-web-chat.json` 同一套约定；损坏文件降级为空而不是让调度器挂掉；`normalizeTask()` 只接受能跑的字段 |
+| `lib/cron-runner.ts` | 30s tick；到点用**进程内** `startRpcSession()` + `session.send({type:"prompt"})` 打开一条**普通会话**（所以定时跑出来的会话在侧栏能打开/分支/归档）；每任务 running 守卫；成功/失败写回 `lastStatus` / `lastRunAt` / `lastSessionId` / `runCount` |
+| `instrumentation.ts` | 服务启动时 `startCronScheduler()`（`NEXT_RUNTIME === "nodejs"` 分支内，timer 已 `unref`） |
+| `app/api/cron/route.ts` | GET / POST / PATCH（含 `action:"run"` 立即运行）/ DELETE，全部走 `isApiRequestAllowed` + JSON 校验 |
+| `components/fork/CronConfig.tsx` | 设置里新分区「定时任务」：新建（名称/提示词/工作目录/重复/时间/日期/星期）+ 列表（启用开关、下次运行、上次状态、立即运行、删除） |
+
+#### 记忆（fork:memory）
+
+| 文件 | 作用 |
+| --- | --- |
+| `lib/memory-store.ts` | `<agentDir>/pi-web-memory.json`；条目 `{text, scope, source, createdAt}`，scope = `global` 或某个项目路径；**去重**（同文本同 scope 只存一份）、文本上限 500 字（防止一条记忆吞掉注入预算）、增删改查 + `recallMemory()`（令牌全覆盖 + 覆盖率排序，CJK 也按字串切）+ `renderMemoryBlock()`（分 Project / Global 两段，无可注入内容时返回空串） |
+| `lib/memory-extension.ts` | 内联扩展：`remember` / `recall` 两个工具（模型可自己写、自己查，scope 默认取会话 cwd）+ **`before_agent_start` 每轮注入**当前记忆（SDK 文档的 injection 通道，`display:false`）——所以会话中途记住的事，下一轮就生效；单测/无记忆时注入为空 |
+| `app/api/memory/route.ts` | GET / POST / PATCH / DELETE（用户侧管理，`source: "user"`） |
+| `components/fork/MemoryConfig.tsx` | 设置里新分区「记忆」：新增（内容 + 作用范围）、列表（编辑 / 删除 / 来源 / 日期） |
+
+**刻意没做**：embedding / SQLite / 语义检索（MusePi 有独立的 `packages/mnemopi`）。`ponytail:` 上限写在文件头 —— recall 是子串扫描，条目上量后再考虑索引；把记忆做成搜索产品不是这个仓库该干的事。
+
+**验证**（全部在**隔离 `PI_CODING_AGENT_DIR`** 里跑，不碰真实会话与配置）：
+`tsc --noEmit` 0 错 ｜ `npm run lint` 0 错（8 条 warning 均为既有）｜ `npm test` **1323/1323**（新增 15 例：时间解析/下次运行/due 与错过窗口/描述、记忆持久化/去重/上限/作用范围隔离/改删/recall 排序与 CJK/注入块为空）｜
+prod 构建后 API 实测：记忆 空表 → 新增（`source:user`）→ **重复新增仍是 1 条且 id 相同** → 编辑生效 → 落盘；`get_tools` 返回 **11 个工具含 `todo` / `remember` / `recall`**；定时任务 非法时间 400、缺提示词 400、创建（`nextRunAt` 正确算到当天 18:30）、列表、停用、**立即运行真的跑了 runner**（隔离目录没有 API key，于是 `lastStatus:"error"` + `lastError` 是真实的模型报错 + `runCount:1` + `lastSessionId` 已记录 —— 错误路径也是通的）、删除；UI 两个新分区都能打开并渲染（截图 `test-results/tier34/5-cron.png`、`5-memory.png`），**console 0 error**。
+
+### 26. 记忆加开关与自动学习、定时任务补 cron/闲时窗口/时区（2026-09-17，按用户对照补功能）
+
+用户拿参考实现的截图比对，指出两处缺东西：**记忆是静态的、没有开关**；**定时任务缺 cron 表达式 / 闲时窗口 / 时区 / 模型与思考级别**。以下按截图逐项补齐。
+
+#### 记忆：开关 + 自动学习
+
+| 改了什么 | 说明 |
+| --- | --- |
+| **两个开关，默认全关** | `MemorySettings { enabled, autoLearn }` 写进同一个 `pi-web-memory.json`（旧文件无 `settings` 字段 → 迁移为关闭，条目保留）。**关闭时不注入任何内容**，`remember` / `recall` 的 `execute` 直接返回 `memory is disabled` |
+| 开关**不做工厂期拦截** | 工具常驻注册、`execute` 里判开关 —— 与 subagent 开关（改了要手动 reload 会话）不同，这里用户在设置里一拨就立刻生效，不会出现「开了没反应」 |
+| **停止时自动捕获** | `agent_start` 武装 + `agent_settled` 触发一次 `pi.sendUserMessage(MEMORY_CAPTURE_PROMPT)`；捕获回合自身不再武装（`capturing` 标志），否则会自追自。提示词要求**最多两条**并允许明确回「nothing to remember」，避免没东西可记时编造条目。默认关（要花 token，截图里原文也这么提示） |
+| 面板 | 顶部开关区（启用 / 自动学习 / 一行状态「记忆已开启 · 自动学习开 · 已保存 · N」）+ 条目搜索框（>4 条时出现）+ 原有增删改 |
+
+#### 定时任务：表达式 / 闲时窗口 / 时区 / 模型与思考
+
+| 改了什么 | 说明 |
+| --- | --- |
+| `lib/cron-expression.ts`（新，纯） | 手写 5 字段解析器：`*`、`N`、`a-b`、`a,b`、`*/n`、`a-b/n`；日/星期同时限定时采用 Vixie 的「或」规则；星期接受 0 与 7 都算周日；解析失败返回**可读原因**（直接显示在表单里）。无依赖 |
+| `lib/cron-timezone.ts`（新，纯） | 用 `Intl` 做两个方向的换算（`zonedParts` / `zonedTimeToInstant`，后者用两遍偏移猜测处理 DST）。cron 字段匹配的是**目标时区的墙上时间** |
+| 闲时窗口 | `idleWindow {start,end}`，支持跨午夜；**窗口外触发顺延到窗口开始**而不是丢弃（截图原文语义），24 小时窗口会被归一化掉 |
+| 扫描策略 | 按天筛 + 只在命中的那天扫 1440 分钟，最多 366×2 天 —— 否则「2 月 29 日」这类表达式要按分钟走好几年 |
+| 任务级 `model` / `thinking` | 透传给 `startRpcSession` 的 `initialModel` / `thinkingLevel`；`cwd` 允许留空 → runner 回退到默认工作目录（聊天工作区），对应截图里的「留空用默认工作目录」 |
+| 表单 | 名称 / 模型（读 `/api/models?cwd=`）/ 思考级别 / 提示词 / 工作目录 / 计划类型（Cron 表达式 · 每天 · 每周 · 仅一次）/ 表达式 + 五字段说明 + **5 条可点示例**（与截图同串同文案）/ 星期 chips / 闲时窗口起止 + 清除 / 时区（主机 + `Intl.supportedValuesOf("timeZone")`）/ 启用开关；列表行显示表达式·时区·窗口·模型·思考 |
+
+**修掉的两个真问题**：① 示例按钮复用了 `.settings-chat-reset`（那是 28×28 图标按钮），把示例挤成了逐字竖排 —— 改为自撑开的一行；② `/api/models` 不带 `cwd` 会被 403（它按可浏览根校验），表单里现在带上面板的 cwd。
+
+**验证**：`tsc` 0 错 ｜ `lint` 0 错 ｜ `npm test` **1335/1335**（新增 12 例：表达式解析与错误文案/Vixie 或规则/5 条示例都能算出下次运行/不可能表达式不空转、闲时窗口跨午夜与顺延、时区换算与 DST、记忆开关三态与自动捕获不自追、跨项目作用域隔离）｜
+live API：默认 `{enabled:false,autoLearn:false}` → 打开后持久化；`schedule.expression/idleWindow/timezone/model/thinking` 全部落盘，`nextRunAt` 实测按 `America/New_York` 的 09:00 算出（=13:00Z）；4 字段表达式被 400 拒绝 ｜
+UI（隔离 agent 目录 + 真 Chrome）：记忆页 4 个开关与状态行正确，定时任务页切到「Cron 表达式」后 5 条示例、2 个闲时窗口输入框都在位，**console 0 error**（截图 `test-results/tier34/6-memory-v2.png`、`7-cron-v2.png`）。
+
+**仍未对齐参考实现的部分（有意）**：记忆后端选择（关闭 / 本地 / Mnemopi SQLite / Hindsight 远程）——我们只有「本地」一档，另两档是它自己的引擎包；记忆文件列表（learned.md 等 4 个 .md）——我们用 JSON + 面板，条目级改删更可靠；定时任务的日历视图与运行历史浏览器；月/年计划类型（cron 表达式已能表达）。

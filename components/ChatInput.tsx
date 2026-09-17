@@ -31,6 +31,8 @@ import { ThinkingIcon } from "./ThinkingIcon";
 import type { ToolPreset } from "@/lib/tool-presets";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
 import { ComposerContextStrip } from "./ComposerContextStrip";
+import { TodoChip } from "./fork/TodoChip";
+import type { TodoSummary } from "@/lib/todo-state";
 import {
   normalizeSelectionContext,
   normalizeSessionReference,
@@ -79,6 +81,8 @@ interface Props {
   thinkingLevelMap?: Record<string, string | null> | null;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   queuedMessages?: QueuedMessages | null;
+  /** fork:ui-todo — task list of this session, derived from the transcript. */
+  todoSummary?: TodoSummary | null;
   inputHistory?: string[];
   onRecallQueue?: () => void;
   slashCommands?: SlashCommandInfo[];
@@ -576,7 +580,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
-  retryInfo, queuedMessages, inputHistory = [], onRecallQueue,
+  retryInfo, queuedMessages, inputHistory = [], onRecallQueue, todoSummary,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
@@ -2060,6 +2064,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
             requestAnimationFrame(() => textareaRef.current?.focus());
           }}
         />
+        {todoSummary && todoSummary.total > 0 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+            <TodoChip summary={todoSummary} />
+          </div>
+        )}
         {/* Image previews */}
         {attachedImages.length > 0 && (
           <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>

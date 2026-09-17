@@ -24,6 +24,7 @@ import {
 import { encodeFilePathForApi, getFileName, getRelativeFilePath, sameFilePath } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { clearLocationTextHighlight, LOCATION_HIGHLIGHT_CLASS } from "@/lib/location-highlight";
+import { PathActions } from "./fork/PathActions";
 import { MarkdownFilePreview } from "./MarkdownFilePreview";
 import { MarkdownEditorBoundary } from "./MarkdownEditorBoundary";
 import type { MarkdownEditorLocationApi, MarkdownEditorSelection } from "./MarkdownFileEditor";
@@ -2432,6 +2433,8 @@ function TextFileViewer({
         )}
 
         <div className="file-viewer-controls">
+          {/* fork:ui-20 — copy path / reveal in the file manager / open with the default app. */}
+          <PathActions path={filePath} compact />
           {!isEditing && displayModes.length > 1 && (
             <div className="file-viewer-mode-switch" aria-label={t("i18n.fileViewMode")}>
               {displayModes.map((mode) => {

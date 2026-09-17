@@ -19,6 +19,9 @@ import type { FileLocationTarget } from "./FileViewer";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { NewSessionHome } from "./fork/NewSessionHome";
+import { ProjectChip, type NewSessionTargets } from "./fork/ProjectChip";
+import { ComposerTipLine } from "./fork/ComposerTipLine";
+import { extractTodoState } from "@/lib/todo-state";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
 import { ProcessGroup, summarizeProcessBlocks } from "./ProcessGroup";
@@ -68,6 +71,8 @@ interface Props {
   quoteSelectionEnabled?: boolean;
   initialPrompt?: string;
   onInitialPromptConsumed?: () => void;
+  /** fork:ui-projectchip — workspace selector shown on the new-session page. */
+  newSessionTargets?: NewSessionTargets | null;
   /** Completion sound state + controls, owned by AppShell so tasks finishing in
    *  a non-active workspace can still ring. */
   soundEnabled?: boolean;
@@ -139,6 +144,9 @@ function rangeFromTextOffsets(root: HTMLElement, startOffset: number, endOffset:
 
 const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 12;
+// fork:ui-22 — density scales the column gutter too; the value stays a CSS calc so
+// the density hook only has to write one variable.
+const CHAT_COLUMN_PADDING_CSS = `calc(${CHAT_COLUMN_PADDING}px * var(--fork-density, 1))`;
 // A dialog replacing another one within this window is a single interaction
 // (e.g. select followed by a free-text input) and must not re-ring.
 const EXTENSION_DIALOG_SOUND_MIN_GAP_MS = 2000;
@@ -300,7 +308,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, newSessionTargets = null, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { displayMode: processDisplayMode } = useProcessDisplayMode();
@@ -919,6 +927,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [messages.length]);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
+
+  // fork:ui-todo — the session's task list, read back from the transcript (the
+  // built-in `todo` tool stores each list in its tool result). Memoized: the scan
+  // walks the message list and the transcript re-renders on every streamed chunk.
+  const todoSummary = useMemo(() => extractTodoState(messages), [messages]);
   const hasChatMinimap = !isEmptyNew && !isMobile && !pendingScrollRestore;
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
@@ -1064,6 +1077,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       slashCommandsLoading={slashCommandsLoading}
       onLoadSlashCommands={loadSlashCommands}
       onBuiltinCommand={handleBuiltinSlashCommand}
+      todoSummary={todoSummary}
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
       onAudioUnlock={unlockAudio}
@@ -1166,7 +1180,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           display: "flex",
           // Toasts live in the top-right corner
           justifyContent: "flex-end",
-          padding: `0 ${CHAT_COLUMN_PADDING}px`,
+          padding: `0 ${CHAT_COLUMN_PADDING_CSS}`,
           pointerEvents: "none",
         }}
       >
@@ -1197,7 +1211,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]"
           style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
         >
-          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING}px` }}>
+          <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING_CSS}` }}>
             <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 800px)", margin: "0 auto" }}>
             {(() => {
               let lastUserIdx = -1;
@@ -1603,6 +1617,19 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         )}
         {isEmptyNew && (
           <div className="mx-auto w-full" style={{ maxWidth: "var(--composer-max-width, 892px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
+            {/* fork:ui-projectchip — "this chat runs in <workspace>" selector, sitting
+                between the hero and the composer the way MusePi's welcome page does. */}
+            {newSessionTargets && (
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, minWidth: 0, marginBottom: 8 }}>
+                <ProjectChip targets={newSessionTargets} />
+                {!newSessionTargets.error && <ComposerTipLine />}
+                {newSessionTargets.error && (
+                  <span role="alert" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, color: "var(--danger)" }}>
+                    {newSessionTargets.error}
+                  </span>
+                )}
+              </div>
+            )}
             <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
           </div>
         )}
