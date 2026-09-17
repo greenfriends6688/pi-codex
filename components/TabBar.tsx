@@ -27,6 +27,10 @@ interface Props {
 export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
   const { t } = useI18n();
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
+  // fork:ui-14 — the close control stays out of the way until the tab is
+  // active, hovered or keyboard-focused (reference implementations reveal it
+  // on hover; keeping it in the layout avoids jitter).
+  const [focusedClose, setFocusedClose] = useState<string | null>(null);
 
   const tabAccessibleName = (tab: Tab) => (
     tab.kind === "terminal"
@@ -47,7 +51,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
         background: "transparent",
         overflowX: "auto",
         flexShrink: 0,
-        height: 32,
+        height: 36,
       }}
     >
       {tabs.map((tab) => {
@@ -87,7 +91,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               display: "flex",
               alignItems: "center",
               gap: 6,
-              height: 26,
+              height: 28,
               paddingLeft: 10,
               paddingRight: 4,
               border: "none",
@@ -132,9 +136,11 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
               onMouseEnter={() => setHoveredClose(tab.id)}
               onMouseLeave={() => setHoveredClose(null)}
+              onFocus={() => setFocusedClose(tab.id)}
+              onBlur={() => setFocusedClose(null)}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
-                width: 24, height: 24,
+                width: 22, height: 22,
                 background: hoveredClose === tab.id ? "var(--bg-hover)" : "transparent",
                 border: "none",
                 borderRadius: "var(--radius-sm)",
@@ -142,7 +148,8 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
                 cursor: "pointer",
                 padding: 0,
                 flexShrink: 0,
-                transition: "background 0.1s, color 0.1s",
+                opacity: isActive || hoveredClose === tab.id || focusedClose === tab.id ? 1 : 0,
+                transition: "background 0.1s, color 0.1s, opacity 0.12s",
               }}
                title={t(tab.kind === "terminal" ? "terminal.close" : "i18n.close")}
                aria-label={`${t(tab.kind === "terminal" ? "terminal.close" : "i18n.close")} ${tab.label}`}

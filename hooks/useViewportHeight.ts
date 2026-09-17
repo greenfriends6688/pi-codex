@@ -55,6 +55,9 @@ export function useViewportHeight(): void {
       } else {
         root.style.removeProperty("--app-viewport-height");
       }
+      // fork:ui-13 — lets app/fork-ui.css drop chrome that would otherwise sit
+      // under the keyboard (upstream 0.14.6 does the same with `html.keyboard-open`).
+      root.classList.toggle("keyboard-open", keyboardOpen);
 
       const pageWasShifted = window.scrollX !== 0 || window.scrollY !== 0;
       const isUnscaled = Math.abs(viewport.scale - 1) < 0.01;
@@ -89,6 +92,7 @@ export function useViewportHeight(): void {
       window.removeEventListener("pageshow", scheduleUpdate);
       if (frameId !== null) window.cancelAnimationFrame(frameId);
       root.style.removeProperty("--app-viewport-height");
+      root.classList.remove("keyboard-open");
     };
   }, []);
 }

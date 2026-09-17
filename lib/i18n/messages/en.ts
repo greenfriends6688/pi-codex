@@ -418,6 +418,18 @@ export const enLocale: LocalePlugin = {
     "files.checking": "Checking files",
     "files.uploading": "Uploading, {progress}%",
     "chat.loadingSession": "Loading session...",
+    // fork:ui-newhome — empty-state hero (see components/fork/NewSessionHome.tsx).
+    // The title keys match upstream 0.14.6 so a future merge reuses them.
+    "chat.homeTitle": "What should we do in {cwd}?",
+    "chat.homeTitleGeneric": "What should we do?",
+    "chat.homeExplore": "Explore the project",
+    "chat.homeExplorePrompt": "Walk through this project and explain how it is organised, then point out the parts worth a closer look.",
+    "chat.homeReview": "Review current changes",
+    "chat.homeReviewPrompt": "Review the uncommitted changes in this working tree. Point out risks, gaps and worthwhile improvements.",
+    "chat.homeTest": "Add test coverage",
+    "chat.homeTestPrompt": "Find the critical logic that has no test coverage and add the smallest runnable test for it.",
+    "chat.homeExplain": "Explain the core flow",
+    "chat.homeExplainPrompt": "Explain the most important flow in this project, starting from its entry point and following the data.",
     "chat.runningTool": "Running tool...",
     "chat.generatingToolInput": "Generating parameters...",
     "chat.runningNamedTool": "Running {name}...",

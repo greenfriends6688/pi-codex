@@ -7,6 +7,8 @@ import "katex/dist/katex.min.css";
 import "./globals.css";
 import "./settings.css";
 import "./wallpaper.css";
+// fork:ui-css — must stay last: it overrides upstream styles on purpose.
+import "./fork-ui.css";
 
 // A previously installed production worker can cache Turbopack chunks under the
 // same local origin. Run this before Next's client code in development so a

@@ -825,13 +825,16 @@
 .settings-section-tab {
   position: relative;
   display: flex;
-  flex: 0 0 96px;
+  /* fork:ui-08 — size to the label instead of a fixed 96px cell: the section
+     names differ per locale ("智能体" vs "Agents") and the fixed cell both
+     truncated long ones and wasted space on short ones. */
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  width: 96px;
+  width: auto;
   height: 100%;
-  padding: 0 2px;
+  padding: 0 12px;
   border: 0;
   outline: none;
   background: transparent;

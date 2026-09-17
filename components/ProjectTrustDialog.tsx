@@ -20,6 +20,8 @@ export function ProjectTrustDialog({
   return (
     <div
       role="presentation"
+      // fork:ui-10 — hook for the phone bottom-sheet geometry in app/fork-ui.css
+      data-fork-dialog="trust"
       style={{
         position: "fixed",
         inset: 0,

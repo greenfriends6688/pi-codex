@@ -848,3 +848,52 @@ Windows bash 环境隔离、PTY 运行时、1 条既有 ChatInput 用例）｜ `
 （顺手补了 3 个历史遗留未定义 token，并把 `app/wallpaper.css` 纳入审计范围）｜
 `verify-themes` 5/5 ｜ `scripts/probe-theme-ui.mjs` 用 Playwright 实测描边 0/25/50/75/100 五档、
 `/api/themes`、内置壁纸路径均正常。
+
+---
+
+### 19. 按「布局/样式对比计划」落地的一批视觉调整（2026-09-17）
+
+依据 [`../ui-layout-pr-plan-2026-09-17.md`](../ui-layout-pr-plan-2026-09-17.md)（对比上游 0.14.6 与 Wegent）。
+**只改样式与排布，不改功能语义**；每条都标了接触面等级（T0 只新增 fork 文件 / T1 上游文件接线），
+合并上游时按下面的编号 grep 即可。
+
+**新增的 CSS 分层（本次最重要的结构性决定）**
+
+- 新增 `app/fork-ui.css`，在 `app/layout.tsx` 里**排在最后**导入（标记 `// fork:ui-css`）。
+  从此**不再往 `app/globals.css` 末尾追加覆盖**——那里已有 695 行 `!important` 覆盖层，
+  越长越难合并。新覆盖一律进 `fork-ui.css`，每条注明它覆盖的是哪个上游选择器、为什么。
+- `app/settings.css` / `app/wallpaper.css` 是 fork 自有文件，直接改，不走覆盖层。
+
+**改动清单**
+
+| 编号 | 改了什么 | 接触面 | 回滚方式 |
+| --- | --- | --- | --- |
+| ui-02 | `fork-ui.css` 补上游同名语义 token：`--text-ui/--text-chat/--text-title/--text-meta/--leading-*/--weight-*`，值仍映射本 fork 刻度；`--radius-composer` 由字面量 22px 改为 `calc(var(--radius-2xl) + 2px)`（像素值不变） | T0 | 删 `fork-ui.css` 对应段；`globals.css` 那行改回字面量 |
+| ui-03 | 侧栏默认宽 224→244（`lib/panel-layout.ts`）；侧栏页脚三个入口去文字改图标 + tooltip（`AppShell.tsx`） | T1（2 个文件各 1 处） | 改回常量与 `<span>{label}</span>` |
+| ui-04 | 用户消息改**右对齐 + `min(70%,620px)` 限宽**（`MessageView.tsx`），手机 92% 走 `--fork-user-bubble-max`；操作行同步右对齐。**两行操作区常显保持不变** | T1（1 处） | 恢复 `alignItems:flex-start` + `flex:1` |
+| ui-05 | 新会话空态首页 `components/fork/NewSessionHome.tsx`：π 徽标 + 标题（含 cwd 名）+ 一行 4 张起始卡，点击走 `insertIfEmpty` **只填输入框不发送**；Composer 由「垂直居中」改为「底部固定」（上游与 Wegent 同款）。i18n 三语 +10 键（键名与上游 `chat.homeTitle*` 对齐） | T0 + ChatWindow 两处接线（`// fork:ui-newhome`） | 删组件 + 两处 JSX + i18n 键，恢复尾部 `min-h-0 flex-1` 占位 |
+| ui-07 | 右栏默认宽 `getDefaultRightPanelWidth` 由固定 384 上限改为 `min(36vw,560)`、下限 380（`lib/panel-layout.ts`）。**上限刻意低于上游的 640**：1440 视口下 640 会把聊天压到 600 以下 | T1（1 处 + 测试期望） | 改回 `Math.min(viewportWidth * 0.42, 384)` |
+| ui-08 | 设置分区 tab 由定宽 96px 改为按内容宽度（`app/settings.css`），长标题不再截断 | fork 自有 CSS | 恢复 `flex: 0 0 96px; width: 96px` |
+| ui-10 | 手机端对话框变 bottom-sheet：`ProjectTrustDialog` 加 `data-fork-dialog="trust"`，`DirectoryPicker` 复用已有 class，几何写在 `fork-ui.css`（含 safe-area 与 reduced-motion 分支）。**上游 `DialogShell` 全量移植未做**（纯重构，无可视收益） | T1（1 行属性）+ T0 | 删 CSS 段与属性 |
+| ui-13 | `hooks/useViewportHeight.ts` 键盘弹起时给 `<html>` 加 `.keyboard-open`，`fork-ui.css` 隐藏扩展状态条 | T1（1 处）+ T0 | 删 class 切换与 CSS |
+| ui-14 | `TabBar` 高 32→36、tab 26→28、关闭键 24→22 且**仅在激活/hover/键盘聚焦时可见**（`TabBar.tsx`） | T1（1 个文件） | 恢复 32/26/24 与常显 |
+
+**本次核对后判定「计划里其实已经实现」的三项**（不要再做一遍）：
+
+- **ui-09 配置面板内联**：`SettingsPanel` 已经在设置壳内以 `embedded` 渲染 `ModelsConfig`/`SkillsConfig`，
+  没有第二层遮罩。此前对比文档基于静态清单误判为「嵌套模态」，已更正。
+- **ui-11 运行中的工具行默认展开**：`ProcessGroup` 的 `streamingOpen` 已让最新一步在流式期间保持展开。
+- **ui-12 主题切换圆形扩散**：`useTheme.setThemePreference` 已有 View Transition 实现（含 reduced-motion 分支）。
+
+**有意不做**（写明理由，避免下次又被当成待办）：
+
+- **ui-06 终端/浏览器下移到底部面板**：这是本次唯一真正需要动 AppShell 标签模型的结构改动
+  （`activeFileTabId` 目前由文件/终端/浏览器共用，`handleCloseFileTab` 里还有工作区翻转逻辑）。
+  计划里给的验收标准要求四档截图实测，盲改风险高于收益 —— 留作单独一项，需在 dev server 起着的状态下做。
+- **ui-10 全量 `DialogShell`**：见上表说明。
+- **ui-14 顶栏次级动作收进 `⋯`**：手机端已有溢出菜单；桌面端需要新增宽度侦测状态，收益仅「少几个图标」。
+
+**验证**（本次全部通过）：`tsc --noEmit` 0 错 ｜ `npm run lint` 0 错（8 条 warning 全是既有的）｜
+`npm test` 1264/1264 ｜ `npm run prod` 后在真实 Chrome（Playwright + 系统 Chrome）实测：
+空态首页 1440/390 两档（4 卡、手机两列、点击只填输入框）、用户气泡右对齐且右边缘与列对齐（`gap=0`，
+宽 602 上限生效）、设置 tab 宽度 69–81px 变宽自适应、`--radius-composer` 仍为 22px。

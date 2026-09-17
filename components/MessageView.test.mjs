@@ -270,14 +270,15 @@ test("renders a complete SDK skill expansion as a compact command", () => {
   assert.doesNotMatch(html, /Review the supplied files/);
 });
 
-test("renders user messages as left-aligned Codex prompt cards", () => {
+test("renders user messages as right-aligned Codex prompt cards", () => {
   const html = renderMessage({
     role: "user",
     content: "Make the conversation match the Codex layout.",
   });
 
-  assert.match(html, /align-items:flex-start/);
-  assert.match(html, /max-width:100%/);
+  assert.match(html, /align-items:flex-end/);
+  assert.match(html, /justify-content:flex-end/);
+  assert.match(html, /--fork-user-bubble-max, min\(70%, 620px\)/);
   assert.match(html, /border:1px solid var\(--border-faint\)/);
   assert.doesNotMatch(html, /max-width:88%/);
 });

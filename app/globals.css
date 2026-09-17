@@ -117,7 +117,8 @@
      at ~900px than at the 860px the chat column uses. */
   --readable-content-max-width: 900px;
   --composer-max-width: calc(var(--chat-content-max-width) + 32px);
-  --radius-composer: 22px;
+  /* 22px: the Codex composer pill, expressed on the radius scale. */
+  --radius-composer: calc(var(--radius-2xl) + 2px);
   --height-toolbar: 46px;
   --height-toolbar-pane: 40px;
   --spacing-token-button-composer: 28px;

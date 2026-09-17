@@ -1,0 +1,101 @@
+/*
+ * fork:ui-css — landing zone for every visual override this fork needs.
+ *
+ * Why a separate file: `app/globals.css` is an upstream file that this fork has
+ * already rewritten wholesale for the Codex skin. Appending further overrides
+ * there makes each upstream merge a manual hunk hunt. Everything that only
+ * changes *how* upstream renders belongs here instead, loaded last, so the
+ * upstream stylesheet can be replaced in one piece on the next merge.
+ *
+ * Rules (see docs/ui-layout-pr-plan-2026-09-17.md §5.2):
+ *   1. Every block names the upstream selector it overrides and why.
+ *   2. Prefer `:where()` / fork-owned class names; reach for `!important` only
+ *      to beat an inline style, and say so in the comment.
+ *   3. When upstream ships the same change, delete the block — do not keep a
+ *      redundant override alive.
+ */
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-02 — semantic aliases for upstream's typography tokens.
+ *
+ * Upstream pi-web 0.14.6 moved from numeric tokens (`--text-md`) to semantic
+ * ones (`--text-ui`, `--text-chat`, …). Defining the same names here means new
+ * upstream CSS that references them renders correctly without a rename pass —
+ * the values stay on this fork's scale (13px UI text, 13px chat, 1.62 prose).
+ * ------------------------------------------------------------------------- */
+:root {
+  --text-ui: var(--text-md);
+  --text-chat: var(--chat-content-font-size, 13px);
+  --text-title: var(--text-lg);
+  --text-meta: var(--text-sm);
+  --leading-prose: 1.62;
+  --leading-ui: 1.35;
+  --leading-title: 1.32;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-04 — phone width for the user prompt card.
+ * The 70%/620px cap is inline in components/MessageView.tsx; upstream widens it
+ * to 92% below 640px (upstream 0.14.6 globals.css:4795).
+ * ------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  :root {
+    --fork-user-bubble-max: 92%;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-13 — phone keyboard state.
+ *
+ * `hooks/useViewportHeight` already aligns the app height with the visual
+ * viewport while a field is focused; this flag lets the layout get out of the
+ * way as well. The extension shelf (upstream 0.14.6 hides it the same way) is
+ * the one that matters: it sits under the composer and would otherwise eat the
+ * little room the keyboard left.
+ * ------------------------------------------------------------------------- */
+html.keyboard-open .extension-status-shelf {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-10 — phone dialogs become bottom sheets.
+ *
+ * This is the visible half of upstream's `DialogShell` (upstream 0.14.6
+ * globals.css:186-219 turns confirm/request/editor dialogs into sheets below
+ * 640px). The full shell is a refactor with no extra pixels to show, so the
+ * geometry is borrowed here instead. Both panels carry inline widths and radii,
+ * hence the `!important`s; delete this section once DialogShell lands.
+ * ------------------------------------------------------------------------- */
+@keyframes fork-sheet-up {
+  from { transform: translateY(14px); opacity: 0.5; }
+  to { transform: none; opacity: 1; }
+}
+
+@media (max-width: 640px) {
+  .directory-picker-backdrop,
+  [data-fork-dialog="trust"] {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  .directory-picker-panel,
+  [data-fork-dialog="trust"] > [role="dialog"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: calc(100dvh - 32px) !important;
+    border-width: 1px 0 0 !important;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0 !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    animation: fork-sheet-up var(--motion-base) var(--ease-out);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .directory-picker-panel,
+  [data-fork-dialog="trust"] > [role="dialog"] {
+    animation: none;
+  }
+}

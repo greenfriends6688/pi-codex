@@ -18,6 +18,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import type { FileLocationTarget } from "./FileViewer";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
+import { NewSessionHome } from "./fork/NewSessionHome";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
 import { ProcessGroup, summarizeProcessBlocks } from "./ProcessGroup";
@@ -1182,6 +1183,14 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         {extensionCustomUi && (
           <ExtensionCustomPanel key={extensionCustomUi.id} request={extensionCustomUi} onInput={sendExtensionCustomInput} />
         )}
+        {/* fork:ui-newhome — hero + starter cards for a brand new session. */}
+        {isEmptyNew && (
+          <NewSessionHome
+            cwd={messageCwd ?? null}
+            isMobile={isMobile}
+            onInsertPrompt={(text) => chatInputRef?.current?.insertIfEmpty(text)}
+          />
+        )}
         {!isEmptyNew && <>
         <div
           ref={scrollContainerRef}
@@ -1612,7 +1621,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           onLoadEarlier={loadOlderPage}
         />
       )}
-      {isEmptyNew && <div className="min-h-0 flex-1" />}
+      {/* fork:ui-newhome — the composer used to be vertically centred by a
+          trailing flex spacer. Upstream and Wegent both put the hero above a
+          bottom-anchored composer, which is what the empty state now does. */}
     </div>
   );
 }

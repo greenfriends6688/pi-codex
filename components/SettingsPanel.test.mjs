@@ -105,7 +105,9 @@ test("uses top navigation on desktop and one compact section picker on mobile", 
   assert.match(panelSource, /className="settings-mobile-section-picker"/);
   assert.match(panelSource, /className="settings-section-tabs"/);
   assert.match(panelSource, /className="settings-section-tab"/);
-  assert.match(cssSource, /\.settings-section-tab \{[\s\S]*?width: 96px/);
+  // fork:ui-08 — tabs size to their label instead of a fixed 96px cell.
+  assert.match(cssSource, /\.settings-section-tab \{[\s\S]*?width: auto/);
+  assert.match(cssSource, /\.settings-section-tab \{[\s\S]*?flex: 0 0 auto/);
   assert.match(cssSource, /\.settings-section-icon \{[\s\S]*?flex-shrink: 0/);
   assert.match(cssSource, /\.settings-section-tab::after \{[\s\S]*?width: 24px/);
   assert.match(cssSource, /\.settings-section-tab\[aria-current="page"\]::after/);

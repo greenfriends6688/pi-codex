@@ -2,7 +2,9 @@ export const MOBILE_MAX_WIDTH = 640;
 export const SPLIT_PANEL_MIN_WIDTH = 960;
 
 // Codex sidebar sizing: compact by default, but still user-resizable.
-export const SIDEBAR_DEFAULT_WIDTH = 224;
+// 244 matches the reference implementations (upstream pi-web 260, Wegent 244);
+// at 224 the project rows truncated common folder names.
+export const SIDEBAR_DEFAULT_WIDTH = 244;
 export const SIDEBAR_MIN_WIDTH = 216;
 export const SIDEBAR_MAX_WIDTH = 520;
 
@@ -30,8 +32,11 @@ export function getSplitPanelWidth(viewportWidth: number): number {
 }
 
 export function getDefaultRightPanelWidth(viewportWidth: number): number {
-  // Codex keeps its side panel around 384px and only shrinks it on narrow viewports.
-  return clampPanelWidth(Math.min(viewportWidth * 0.42, 384), 320, 640);
+  // The side panel has to hold a document, a diff or a terminal without
+  // squeezing the transcript, so it scales with the viewport instead of
+  // sitting at a fixed 384. The 560 ceiling is deliberately below upstream's
+  // 640: at 1440 a 640 panel would leave the chat under 600px.
+  return clampPanelWidth(Math.min(viewportWidth * 0.36, 560), 380, 640);
 }
 
 export function getSidebarMaxWidth(options: {

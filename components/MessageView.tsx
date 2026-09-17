@@ -395,13 +395,16 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
-      style={{ marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "flex-start" }}
+      style={{ marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "flex-end" }}
     >
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, width: "100%", maxWidth: "100%" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "flex-end", gap: 6, width: "100%", maxWidth: "100%" }}>
         <div
           style={{
-            flex: 1,
             minWidth: 0,
+            // fork:ui-04 — right-aligned prompt card, capped like upstream
+            // (`max-width: min(70%, 620px)`) so long prompts stay readable.
+            // The phone value lives in app/fork-ui.css.
+            maxWidth: "var(--fork-user-bubble-max, min(70%, 620px))",
             background: "var(--bg-subtle)",
             border: "1px solid var(--border-faint)",
             borderRadius: "var(--radius-xl)",
@@ -489,7 +492,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
           row on hover, but copy / edit-from-here / new session should be
           reachable without first hunting for the message. */}
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: "flex-start",
+        display: "flex", alignItems: "center", justifyContent: "flex-end",
         gap: 6, marginTop: 4,
       }}>
         <div style={{

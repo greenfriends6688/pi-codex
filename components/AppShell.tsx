@@ -1317,6 +1317,8 @@ export function AppShell() {
               title={disabled ? translate("settings.projectRequired") : label}
               aria-label={label}
               style={{
+                // fork:ui-03 — icon-only footer row: the labels duplicated what
+                // the tooltip already says and ate the whole sidebar width.
                 flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: "none", border: "none",
                 borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
@@ -1326,8 +1328,7 @@ export function AppShell() {
               onMouseEnter={(event) => { if (!disabled) { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; } }}
               onMouseLeave={(event) => { event.currentTarget.style.background = "none"; event.currentTarget.style.color = "var(--text-muted)"; }}
             >
-              <SettingsSectionIcon section={section} size={14} strokeWidth={2} />
-              <span>{label}</span>
+              <SettingsSectionIcon section={section} size={15} strokeWidth={2} />
             </button>
           );
         })}
@@ -1345,8 +1346,7 @@ export function AppShell() {
           onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
           onMouseLeave={(event) => { event.currentTarget.style.background = "none"; event.currentTarget.style.color = "var(--text-muted)"; }}
         >
-          <SettingsSectionIcon section="general" size={14} strokeWidth={2} />
-          <span>{translate("common.settings")}</span>
+          <SettingsSectionIcon section="general" size={15} strokeWidth={2} />
         </button>
       </div>
     </>
