@@ -143,6 +143,12 @@ hooks/
   useDragDrop.ts      shared drag/drop state
   useIsMobile.ts      responsive breakpoint hook
   useTheme.ts         theme state
+
+fork 补丁台账（相对上游 pi-web 的功能改动，合并上游后照此重打）
+  docs/patches/README.md          约定 + 索引；每个补丁一份 .md 说明 + 一份 .patch
+  docs/patches/0001-chat-workspace.md  独立聊天工作区（不在项目中的对话）
+  lib/chat-workspace.ts / app/api/chat-workspace/route.ts  该补丁主体；
+  grep -rn "fork:chat-workspace" 可列出它在上游文件里的全部接线点
 ```
 
 ---

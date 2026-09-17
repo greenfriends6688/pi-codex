@@ -1,0 +1,1654 @@
+# NOTE: 本文件生成于 fork 已完成其余功能改动的树，上下文可能引用其他补丁引入的行，
+# 不保证 git apply -p1 落到干净上游；重打请以 `fork:chat-workspace` 标记为准。
+# 详见同目录 README.md 约定 4。
+diff --git a/components/SessionSidebar.tsx b/components/SessionSidebar.tsx
+--- a/components/SessionSidebar.tsx
++++ b/components/SessionSidebar.tsx
+@@ -5,13 +5,17 @@
+ import { listSessionFamilies } from "@/lib/session-family";
+ import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
+ import { skillExpansionToCommand } from "@/lib/slash-display";
+-import { getProjectActivity, getRecentProjects, sessionsForProject } from "@/lib/project-groups";
++import { chatProjectOf, getProjectActivity, getRecentProjects, sessionsForProject, withoutChatProject } from "@/lib/project-groups";
++import type { RecentProject } from "@/lib/project-groups";
+ import { applySessionFlags, useSessionFlags } from "@/lib/session-flags";
+ import { workspaceKeyOf } from "@/lib/workspace-memory";
+ import { formatRelativeTime } from "@/lib/i18n/format";
+ import { getFileName } from "@/lib/file-paths";
+ import { useI18n } from "@/hooks/useI18n";
+ import { DirectoryPicker } from "./DirectoryPicker";
++// fork:chat-workspace — standalone chat section (docs/patches/0001-chat-workspace.md)
++import { ChatWorkspaceRow } from "./ChatWorkspaceRow";
++import { NewTaskPicker } from "./NewTaskPicker";
+ import { SessionSearch } from "./SessionSearch";
+ import { useIsMobile } from "@/hooks/useIsMobile";
+ 
+@@ -496,6 +500,11 @@
+   const isMobile = useIsMobile();
+   const [validatedProject, setValidatedProject] = useState<ValidatedProject | null>(null);
+   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
++  // fork:chat-workspace — standalone chat workspace, identified by the server key.
++  const [chatWorkspace, setChatWorkspace] = useState<{ cwd: string; key: string } | null>(null);
++  const [chatWorkspaceBusy, setChatWorkspaceBusy] = useState(false);
++  const [chatPathOpen, setChatPathOpen] = useState(false);
++  const [chatPathError, setChatPathError] = useState<string | null>(null);
+   // ponytail: 每個項目獨立展開，避免只能看選中項的傻折疊
+   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
+   const projectMenuRef = useRef<HTMLDivElement>(null);
+@@ -743,6 +752,24 @@
+     }).catch(() => {});
+   }, []);
+ 
++  // fork:chat-workspace — read (and create) the standalone chat workspace once per
++  // mount. It lives in state instead of being derived from sessions so the section
++  // stays available with zero chats.
++  useEffect(() => {
++    let cancelled = false;
++    fetch("/api/chat-workspace", { cache: "no-store" })
++      .then((r) => (r.ok ? r.json() : null))
++      .then((d: { cwd?: string; projectKey?: string } | null) => {
++        if (cancelled || !d?.cwd || !d.projectKey) return;
++        setChatWorkspace({ cwd: d.cwd, key: d.projectKey });
++        // Seed the validated identity so projectFor() resolves the server key
++        // before the first standalone chat session exists.
++        setValidatedProject((prev) => prev ?? { cwd: d.cwd!, root: d.cwd!, key: d.projectKey! });
++      })
++      .catch(() => {});
++    return () => { cancelled = true; };
++  }, []);
++
+   const restoredRef = useRef(false);
+ 
+   const projectSelection = useCallback((root: string, key: string): ProjectSelection => ({
+@@ -842,7 +869,9 @@
+ 
+   // Auto-select cwd and restore session from URL on first load
+   useEffect(() => {
+-    if (allSessions.length === 0 || skipInitialProjectSelection) return;
++    // fork:chat-workspace — with zero sessions the chat workspace is still a valid
++    // landing spot, so only the URL-restore skip short-circuits here.
++    if (skipInitialProjectSelection || (allSessions.length === 0 && !chatWorkspace)) return;
+ 
+     if (selectedCwd === null) {
+       // If restoring a session, set cwd to match that session
+@@ -858,9 +887,12 @@
+         onInitialRestoreDone?.();
+       }
+       const projects = getRecentProjects(allSessions);
+-      if (projects.length > 0) setSelectedCwd(projects[0].root);
++      // fork:chat-workspace — projects win; with none, land on the chat workspace so
++      // the composer is the first screen instead of the "getting started" panel.
++      const fallback = projects[0]?.root ?? chatWorkspace?.cwd ?? null;
++      if (fallback) setSelectedCwd(fallback);
+     }
+-  }, [allSessions, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
++  }, [allSessions, chatWorkspace, selectedCwd, initialSessionId, skipInitialProjectSelection, onSelectSession, onInitialRestoreDone]);
+ 
+   // Prefer an exact UI selection while a refetch is in flight. Once the
+   // response catches up, the server-resolved path handles Windows case and
+@@ -1072,15 +1104,75 @@
+     onSelectSession(s, false, entryId, blockIndex);
+   }, [onSelectSession]);
+ 
+-  const handleNewSession = useCallback(() => {
+-    // ponytail: 允许不在项目中工作 — 没有选目录时用 homeDir 兜底
+-    const effectiveCwd = selectedCwd || homeDir || "/";
++  // fork:chat-workspace — persist a different chat directory, and follow it when it
++  // was the active workspace.
++  const commitChatWorkspace = useCallback(async (path: string) => {
++    if (chatWorkspaceBusy) return;
++    setChatWorkspaceBusy(true);
++    setChatPathError(null);
++    try {
++      const res = await fetch("/api/chat-workspace", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ cwd: path }),
++      });
++      const data = await res.json().catch(() => ({})) as { cwd?: string; projectKey?: string; error?: string };
++      if (!res.ok || !data.cwd || !data.projectKey) {
++        setChatPathError(data.error ?? `HTTP ${res.status}`);
++        return;
++      }
++      const identity = { cwd: data.cwd, root: data.cwd, key: data.projectKey };
++      setChatWorkspace({ cwd: identity.cwd, key: identity.key });
++      setValidatedProject(identity);
++      if (chatWorkspace && selectedCwd === chatWorkspace.cwd) setSelectedCwd(identity.cwd);
++      setChatPathOpen(false);
++    } catch (e) {
++      setChatPathError(e instanceof Error ? e.message : String(e));
++    } finally {
++      setChatWorkspaceBusy(false);
++    }
++  }, [chatWorkspace, chatWorkspaceBusy, selectedCwd]);
++
++  // fork:chat-workspace — start a session in an explicit workspace (chat or project):
++  // move the workspace first so the explorer, file tabs and per-workspace session
++  // memory follow it.
++  const startSessionIn = useCallback((cwd: string) => {
+     const tempId = typeof crypto.randomUUID === "function"
+       ? crypto.randomUUID()
+       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+-    onNewSession?.(tempId, effectiveCwd);
+-  }, [selectedCwd, homeDir, onNewSession]);
++    setSelectedCwd(cwd);
++    setCustomPathError(null);
++    setProjectMenuOpen(false);
++    onNewSession?.(tempId, cwd);
++  }, [onNewSession]);
+ 
++  // fork:chat-workspace — resolve the default workspace when a task is started.
++  // Reading it from render state handed `""`/`"/"` to the API whenever the async
++  // /api/home or /api/chat-workspace response had not landed yet, which created a
++  // session whose cwd was the filesystem root.
++  const resolveDefaultCwd = useCallback(async (): Promise<string | null> => {
++    if (selectedCwd) return selectedCwd;
++    if (chatWorkspace?.cwd) return chatWorkspace.cwd;
++    try {
++      const res = await fetch("/api/chat-workspace", { cache: "no-store" });
++      const data = await res.json() as { cwd?: string; projectKey?: string };
++      if (data.cwd && data.projectKey) {
++        setChatWorkspace({ cwd: data.cwd, key: data.projectKey });
++        setValidatedProject((prev) => prev ?? { cwd: data.cwd!, root: data.cwd!, key: data.projectKey! });
++        return data.cwd;
++      }
++    } catch {
++      // fall back to the home directory below
++    }
++    return homeDir || null;
++  }, [chatWorkspace, homeDir, selectedCwd]);
++
++  const handleNewSession = useCallback(() => {
++    void resolveDefaultCwd().then((cwd) => {
++      if (cwd) startSessionIn(cwd);
++    });
++  }, [resolveDefaultCwd, startSessionIn]);
++
+   // Sessions of every worktree in the selected project are shown together
+   const selectedProject = projectFor(selectedCwd);
+   const projectChoices = useMemo(() => {
+@@ -1088,8 +1180,14 @@
+     if (!selectedProject || recent.some((project) => project.key === selectedProject.key)) return recent;
+     return [{ key: selectedProject.key, root: selectedProject.root }, ...recent];
+   }, [allSessions, selectedProject]);
++  // fork:chat-workspace — 聊天 与 项目 平级：聊天工作区永远在最上面，且从项目列表
++  // （和工作区下拉）里剔除；两者靠各自的标题行区分，标题下各自渲染自己的会话。
++  const chatProjectKey = chatWorkspace?.key ?? null;
+   // 项目全部展示，靠外层滚动查看，不再截断
+-  const visibleProjects = projectChoices;
++  const visibleProjects = withoutChatProject(projectChoices, chatProjectKey);
++  const chatProject: RecentProject | null = chatWorkspace
++    ? chatProjectOf(projectChoices, chatProjectKey) ?? { key: chatWorkspace.key, root: chatWorkspace.cwd }
++    : null;
+ 
+   // Per-project activity counts (running / unread) for the workspace selector.
+   // Uses the same stable server key as the project list and filtering.
+@@ -1162,7 +1260,7 @@
+     observer.observe(list);
+     observer.observe(section);
+     return () => observer.disconnect();
+-  }, [selectedProject?.key, sessionFamilies.length, visibleProjects.length]);
++  }, [expandedProjects, selectedProject?.key, sessionFamilies.length, visibleProjects.length]);
+ 
+   const virtualIndices = getSessionListIndices(
+     sessionFamilies.length,
+@@ -1185,6 +1283,20 @@
+           onSelect={(path) => void commitCustomPath(path)}
+         />
+       )}
++      {/* fork:chat-workspace — the chat directory picker is separate from the project one
++          so the validated-project flow above stays untouched. */}
++      {chatPathOpen && (
++        <DirectoryPicker
++          initialPath={chatWorkspace?.cwd ?? homeDir}
++          busy={chatWorkspaceBusy}
++          error={chatPathError}
++          onCancel={() => {
++            setChatPathOpen(false);
++            setChatPathError(null);
++          }}
++          onSelect={(path) => void commitChatWorkspace(path)}
++        />
++      )}
+       {/* Header */}
+       <div
+         style={{
+@@ -1214,141 +1326,26 @@
+         </div>
+ 
+         <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+-          <SidebarNavButton
+-            label={t("sidebar.newTask")}
+-            onClick={handleNewSession}
+-            active={!selectedSessionId}
+-            disabled={false}
+-            title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.newTask")}
+-          />
+-        </div>
+-
+-        <div
+-          style={{
+-            marginTop: 18,
+-            marginBottom: 6,
+-            display: "flex",
+-            alignItems: "center",
+-            justifyContent: "space-between",
+-            minHeight: 28,
+-            paddingLeft: 10,
+-            position: "relative",
+-          }}
+-          ref={projectMenuRef}
+-        >
+-          <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-dim)" }}>
+-            {t("sidebar.projects")}
+-          </span>
+-          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+-            <button
+-              type="button"
+-              onClick={() => setProjectMenuOpen((open) => !open)}
+-              title={t("sidebar.projectActions")}
+-              aria-label={t("sidebar.projectActions")}
+-              aria-expanded={projectMenuOpen}
+-              style={{
+-                width: 28,
+-                height: 28,
+-                display: "flex",
+-                alignItems: "center",
+-                justifyContent: "center",
+-                padding: 0,
+-                background: projectMenuOpen ? "var(--bg-selected)" : "transparent",
+-                border: "none",
+-                borderRadius: "var(--radius-md)",
+-                color: projectMenuOpen ? "var(--text)" : "var(--text-dim)",
+-                cursor: "pointer",
+-              }}
+-            >
+-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+-                <circle cx="5" cy="12" r="1.5" />
+-                <circle cx="12" cy="12" r="1.5" />
+-                <circle cx="19" cy="12" r="1.5" />
+-              </svg>
+-            </button>
+-            <button
+-              type="button"
+-              onClick={handleAddProjectClick}
+-              disabled={nativePicking || customPathValidating}
+-              title={nativePicking ? t("sidebar.checking") : t("sidebar.addProject")}
+-              aria-label={t("sidebar.addProject")}
+-              aria-busy={nativePicking}
+-              style={{
+-                width: 28,
+-                height: 28,
+-                display: "flex",
+-                alignItems: "center",
+-                justifyContent: "center",
+-                padding: 0,
+-                background: "transparent",
+-                border: "none",
+-                borderRadius: "var(--radius-md)",
+-                color: "var(--text-dim)",
+-                cursor: nativePicking ? "wait" : "pointer",
+-                opacity: nativePicking ? 0.6 : 1,
+-              }}
+-            >
+-              {nativePicking ? (
+-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 0.8s linear infinite" }}>
+-                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+-                </svg>
+-              ) : (
+-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+-                  <path d="M12 5v14M5 12h14" />
+-                </svg>
+-              )}
+-            </button>
+-          </div>
+-          <AnimatedDropdown
+-            open={projectMenuOpen}
+-            style={{
+-              position: "absolute",
+-              top: "calc(100% + 2px)",
+-              left: 0,
+-              right: 0,
+-              zIndex: 100,
+-              background: "var(--bg-elev)",
+-              border: "1px solid var(--border)",
+-              borderRadius: "var(--radius-lg)",
+-              boxShadow: "var(--shadow-lg)",
+-              overflow: "hidden",
+-              padding: "6px 0",
+-            }}
+-          >
+-            {selectedProject && (
+-              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", color: "var(--text)", fontWeight: 600, fontSize: 13 }}>
+-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)" }} aria-hidden="true">
+-                  <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+-                </svg>
+-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(selectedProject.root) || selectedProject.root}</span>
+-                <span style={{ color: "var(--success)", flexShrink: 0 }}>✓</span>
++          {/* fork:chat-workspace — the primary action stays upstream's SidebarNavButton;
++              the picker beside it chooses a project or "not in a project". */}
++          <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
++            <div style={{ flex: 1, minWidth: 0 }}>
++              <SidebarNavButton
++                label={t("sidebar.newTask")}
++                onClick={handleNewSession}
++                active={!selectedSessionId}
++                disabled={false}
++                title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.newTask")}
++              />
+             </div>
+-          )}
+-            <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>已添加的工作区</div>
+-            {projectChoices.slice(0, 8).map((project) => (
+-              <button
+-                key={project.key}
+-                type="button"
+-                onClick={() => {
+-                  setSelectedCwd(project.root);
+-                  setCustomPathError(null);
+-                  setProjectMenuOpen(false);
+-                }}
+-                title={project.root}
+-                style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: project.key === selectedProject?.key ? "var(--bg-selected)" : "transparent", border: "none", color: project.key === selectedProject?.key ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}
+-              >
+-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+-                  <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+-                </svg>
+-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(project.root) || project.root}</span>
+-              </button>
+-            ))}
+-            <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+-            <button type="button" onClick={() => void handleDefaultCwd()} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}>
+-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+-              {t("sidebar.useDefaultDirectory")}
+-            </button>
+-          </AnimatedDropdown>
++            <NewTaskPicker
++              projects={visibleProjects.map((project) => ({ key: project.key, root: project.root, name: getFileName(project.root) || project.root }))}
++              activeKey={selectedProject?.key ?? null}
++              chatPath={chatProject?.root ?? null}
++              onNewIn={startSessionIn}
++              onAddProject={() => void handleAddProjectClick()}
++            />
++          </div>
+         </div>
+ 
+         {sessionSearchOpen && (
+@@ -1740,11 +1737,216 @@
+               {error}
+             </div>
+           )}
+-          {!loading && !error && visibleProjects.length === 0 && (
++          {!loading && !error && visibleProjects.length === 0 && !chatProject && (
+             <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
+               {t("sidebar.noSessions")}
+             </div>
+           )}
++          {/* fork:chat-workspace — 聊天分区：固定在最上面，自带标题行（新建 / 设置目录 /
++              折叠），会话列表沿用项目那套高亮与虚拟窗口逻辑。 */}
++          {chatProject && (() => {
++            const isSelectedChat = chatProject.key === selectedProject?.key;
++            const isChatExpanded = expandedProjects.has(chatProject.key);
++            const chatFamilies = listSessionFamilies(applySessionFlags(sessionsForProject(allSessions, chatProject.key), sessionFlags));
++            const toggleChatExpanded = () => {
++              setExpandedProjects((prev) => {
++                const next = new Set(prev);
++                if (next.has(chatProject.key)) next.delete(chatProject.key);
++                else next.add(chatProject.key);
++                return next;
++              });
++            };
++            return (
++              <div>
++                <ChatWorkspaceRow
++                  label={t("sidebar.chatWorkspace")}
++                  title={chatProject.root}
++                  selected={isSelectedChat}
++                  expanded={isChatExpanded}
++                  busy={chatWorkspaceBusy}
++                  activity={projectActivity.get(chatProject.key)}
++                  onToggle={toggleChatExpanded}
++                  onConfigure={() => {
++                    setChatPathError(null);
++                    setChatPathOpen(true);
++                  }}
++                  onNewChat={() => startSessionIn(chatProject.root)}
++                  onSelect={() => {
++                    if (isSelectedChat) {
++                      toggleChatExpanded();
++                      return;
++                    }
++                    setSelectedCwd(chatProject.root);
++                    setCustomPathError(null);
++                    setProjectMenuOpen(false);
++                  }}
++                />
++                {isChatExpanded && (chatFamilies.length === 0 ? (
++                  <div style={{ padding: "6px 0 6px 24px", color: "var(--text-dim)", fontSize: 12 }}>{t("sidebar.noTasks")}</div>
++                ) : isSelectedChat ? (
++                  <div ref={sessionListRef} style={{ minHeight: chatFamilies.length * SESSION_LIST_ITEM_HEIGHT }}>
++                    <div style={{ position: "relative", height: chatFamilies.length * SESSION_LIST_ITEM_HEIGHT }}>
++                      {virtualIndices.map((index) => {
++                        const family = chatFamilies[index];
++                        const familySessions = [family.root, ...family.subagents];
++                        const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
++                        return (
++                          <div key={family.root.id} data-session-id={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
++                            <div style={{ flex: 1, minWidth: 0 }}>
++                              <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
++                            </div>
++                          </div>
++                        );
++                      })}
++                    </div>
++                  </div>
++                ) : (
++                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
++                    {chatFamilies.map((family) => {
++                      const familySessions = [family.root, ...family.subagents];
++                      const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
++                      return (
++                        <div key={family.root.id}>
++                          <div style={{ flex: 1, minWidth: 0 }}>
++                            <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
++                          </div>
++                        </div>
++                      );
++                    })}
++                  </div>
++                ))}
++              </div>
++            );
++          })()}
++
++          <div
++            style={{
++              marginTop: 18,
++              marginBottom: 6,
++              display: "flex",
++              alignItems: "center",
++              justifyContent: "space-between",
++              minHeight: 28,
++              paddingLeft: 10,
++              position: "relative",
++            }}
++            ref={projectMenuRef}
++          >
++            <span style={{ fontSize: 12.5, fontWeight: 500, color: "var(--text-dim)" }}>
++              {t("sidebar.projects")}
++            </span>
++            <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
++              <button
++                type="button"
++                onClick={() => setProjectMenuOpen((open) => !open)}
++                title={t("sidebar.projectActions")}
++                aria-label={t("sidebar.projectActions")}
++                aria-expanded={projectMenuOpen}
++                style={{
++                  width: 28,
++                  height: 28,
++                  display: "flex",
++                  alignItems: "center",
++                  justifyContent: "center",
++                  padding: 0,
++                  background: projectMenuOpen ? "var(--bg-selected)" : "transparent",
++                  border: "none",
++                  borderRadius: "var(--radius-md)",
++                  color: projectMenuOpen ? "var(--text)" : "var(--text-dim)",
++                  cursor: "pointer",
++                }}
++              >
++                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
++                  <circle cx="5" cy="12" r="1.5" />
++                  <circle cx="12" cy="12" r="1.5" />
++                  <circle cx="19" cy="12" r="1.5" />
++                </svg>
++              </button>
++              <button
++                type="button"
++                onClick={handleAddProjectClick}
++                disabled={nativePicking || customPathValidating}
++                title={nativePicking ? t("sidebar.checking") : t("sidebar.addProject")}
++                aria-label={t("sidebar.addProject")}
++                aria-busy={nativePicking}
++                style={{
++                  width: 28,
++                  height: 28,
++                  display: "flex",
++                  alignItems: "center",
++                  justifyContent: "center",
++                  padding: 0,
++                  background: "transparent",
++                  border: "none",
++                  borderRadius: "var(--radius-md)",
++                  color: "var(--text-dim)",
++                  cursor: nativePicking ? "wait" : "pointer",
++                  opacity: nativePicking ? 0.6 : 1,
++                }}
++              >
++                {nativePicking ? (
++                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 0.8s linear infinite" }}>
++                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
++                  </svg>
++                ) : (
++                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
++                    <path d="M12 5v14M5 12h14" />
++                  </svg>
++                )}
++              </button>
++            </div>
++            <AnimatedDropdown
++              open={projectMenuOpen}
++              style={{
++                position: "absolute",
++                top: "calc(100% + 2px)",
++                left: 0,
++                right: 0,
++                zIndex: 100,
++                background: "var(--bg-elev)",
++                border: "1px solid var(--border)",
++                borderRadius: "var(--radius-lg)",
++                boxShadow: "var(--shadow-lg)",
++                overflow: "hidden",
++                padding: "6px 0",
++              }}
++            >
++              {selectedProject && (
++                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", color: "var(--text)", fontWeight: 600, fontSize: 13 }}>
++                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)" }} aria-hidden="true">
++                    <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
++                  </svg>
++                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(selectedProject.root) || selectedProject.root}</span>
++                  <span style={{ color: "var(--success)", flexShrink: 0 }}>✓</span>
++              </div>
++            )}
++              <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>已添加的工作区</div>
++              {visibleProjects.slice(0, 8).map((project) => (
++                <button
++                  key={project.key}
++                  type="button"
++                  onClick={() => {
++                    setSelectedCwd(project.root);
++                    setCustomPathError(null);
++                    setProjectMenuOpen(false);
++                  }}
++                  title={project.root}
++                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: project.key === selectedProject?.key ? "var(--bg-selected)" : "transparent", border: "none", color: project.key === selectedProject?.key ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}
++                >
++                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
++                    <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
++                  </svg>
++                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(project.root) || project.root}</span>
++                </button>
++              ))}
++              <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
++              <button type="button" onClick={() => void handleDefaultCwd()} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: 12.5 }}>
++                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
++                {t("sidebar.useDefaultDirectory")}
++              </button>
++            </AnimatedDropdown>
++          </div>
++
+           {visibleProjects.map((project) => {
+             const isSelectedProject = project.key === selectedProject?.key;
+             const count = sessionsForProject(allSessions, project.key).length;
+diff --git a/components/SessionSidebar.test.mjs b/components/SessionSidebar.test.mjs
+--- a/components/SessionSidebar.test.mjs
++++ b/components/SessionSidebar.test.mjs
+@@ -150,3 +150,25 @@
+   assert.doesNotMatch(source, /showFewerProjects/);
+   assert.doesNotMatch(source, /PROJECTS_COLLAPSED_LIMIT/);
+ });
++
++// fork:chat-workspace
++test("keeps a standalone chat section above the projects", () => {
++  assert.match(source, /<ChatWorkspaceRow/);
++  assert.match(source, /<NewTaskPicker/);
++  assert.match(source, /const visibleProjects = withoutChatProject\(projectChoices, chatProjectKey\)/);
++  assert.match(source, /fetch\("\/api\/chat-workspace"/);
++  // 聊天 与 项目 平级：聊天分区排在项目标题行与项目行之前，各自渲染自己的会话。
++  assert.ok(
++    source.indexOf("<ChatWorkspaceRow") < source.indexOf('{t("sidebar.projects")}'),
++    "the chat section renders above the projects caption",
++  );
++  assert.ok(
++    source.indexOf("{chatProject && (() => {") < source.indexOf("{visibleProjects.map((project) => {"),
++    "the chat section renders above the project rows",
++  );
++  // The default workspace is resolved at click time — never the "" / "/" render value.
++  assert.match(source, /const resolveDefaultCwd = useCallback\(async \(\): Promise<string \| null> => \{/);
++  assert.match(source, /if \(selectedCwd\) return selectedCwd;/);
++  assert.doesNotMatch(source, /selectedCwd \|\| homeDir \|\| "\/"/);
++  assert.doesNotMatch(source, /chatWorkspace\?\.cwd \|\| homeDir \|\| "\/"/);
++});
+diff --git a/lib/file-access.ts b/lib/file-access.ts
+--- a/lib/file-access.ts
++++ b/lib/file-access.ts
+@@ -4,6 +4,8 @@
+ import { getAdditionalAllowedRoots, normalizeSlashes } from "./allowed-roots";
+ import { isExistingPathWithinRoots, isPathWithinRoots } from "./path-security";
+ import { listAllSessions } from "./session-reader";
++// fork:chat-workspace — standalone chat workspace root (see docs/patches/0001-chat-workspace.md)
++import { getChatWorkspacePath } from "./chat-workspace";
+ export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
+ export { isWindowsAbsolutePath } from "./paths";
+ 
+@@ -42,6 +44,10 @@
+     // ignore if home is unreadable
+   }
+ 
++  // fork:chat-workspace — browsable before its first session exists, so the file
++  // explorer works while composing the very first standalone chat.
++  roots.add(normalizeSlashes(getChatWorkspacePath()));
++
+   for (const root of getAdditionalAllowedRoots()) roots.add(root);
+ 
+   globalThis.__piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
+diff --git a/lib/project-groups.ts b/lib/project-groups.ts
+--- a/lib/project-groups.ts
++++ b/lib/project-groups.ts
+@@ -51,3 +51,25 @@
+ ): SessionInfo[] {
+   return sessions.filter((session) => workspaceKeyOf(session) === projectKey);
+ }
++
++// fork:chat-workspace — the standalone chat workspace is rendered as its own
++// section, so it must never appear again in the project list. Identification is
++// by the server-computed project key: the browser never compares paths.
++
++/** The chat workspace entry when the recent-project list contains it. */
++export function chatProjectOf(
++  projects: readonly RecentProject[],
++  chatProjectKey: string | null | undefined,
++): RecentProject | null {
++  if (!chatProjectKey) return null;
++  return projects.find((project) => project.key === chatProjectKey) ?? null;
++}
++
++/** Recent projects without the chat workspace, order preserved. */
++export function withoutChatProject(
++  projects: readonly RecentProject[],
++  chatProjectKey: string | null | undefined,
++): RecentProject[] {
++  if (!chatProjectKey) return [...projects];
++  return projects.filter((project) => project.key !== chatProjectKey);
++}
+diff --git a/lib/project-groups.test.mjs b/lib/project-groups.test.mjs
+--- a/lib/project-groups.test.mjs
++++ b/lib/project-groups.test.mjs
+@@ -5,9 +5,11 @@
+ const jiti = createJiti(import.meta.url);
+ const { projectIdentityKey } = await jiti.import("./project-identity.ts");
+ const {
++  chatProjectOf,
+   getProjectActivity,
+   getRecentProjects,
+   sessionsForProject,
++  withoutChatProject,
+ } = await jiti.import("./project-groups.ts");
+ 
+ function session(id, projectRoot, modified) {
+@@ -58,3 +60,25 @@
+   assert.deepEqual(activity.get(first.projectKey), { running: 2, unread: 1 });
+   assert.equal(activity.size, 1);
+ });
++
++// fork:chat-workspace — the chat workspace is split out of the project list by key.
++test("chat workspace is lifted out of the recent projects by its stable key", () => {
++  const chat = session("chat", "C:\\Users\\Alex\\pi-web-chat", "2026-08-14T00:00:00.000Z");
++  const project = session("project", "C:\\Users\\Alex\\Project", "2026-08-13T00:00:00.000Z");
++  const recent = getRecentProjects([chat, project]);
++
++  assert.deepEqual(chatProjectOf(recent, chat.projectKey), { key: chat.projectKey, root: chat.projectRoot });
++  assert.deepEqual(
++    withoutChatProject(recent, chat.projectKey),
++    [{ key: project.projectKey, root: project.projectRoot }],
++  );
++});
++
++test("unknown or empty chat key leaves the project list untouched", () => {
++  const project = session("project", "C:\\Users\\Alex\\Project", "2026-08-13T00:00:00.000Z");
++  const recent = getRecentProjects([project]);
++
++  assert.equal(chatProjectOf(recent, undefined), null);
++  assert.equal(chatProjectOf(recent, "C:\\elsewhere"), null);
++  assert.deepEqual(withoutChatProject(recent, null), recent);
++});
+diff --git a/lib/i18n/messages/en.ts b/lib/i18n/messages/en.ts
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -281,6 +281,12 @@
+     "layout.resizeHint": "Drag to resize. Double-click or press Enter to reset.",
+     "sidebar.new": "New",
+     "sidebar.newTask": "New task",
++    // fork:chat-workspace
++    "sidebar.chatWorkspace": "Chat",
++    "sidebar.newChat": "New chat",
++    "sidebar.setChatWorkspace": "Set chat folder…",
++    "sidebar.newTaskChooseProject": "Choose a project",
++    "sidebar.newTaskNoProject": "Not in a project (chat)",
+     "sidebar.projects": "Projects",
+     "sidebar.addProject": "Add project",
+     "sidebar.projectActions": "Project actions",
+diff --git a/lib/i18n/messages/zh-CN.ts b/lib/i18n/messages/zh-CN.ts
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -281,6 +281,12 @@
+     "layout.resizeHint": "拖动调整宽度。双击或按 Enter 恢复默认值。",
+     "sidebar.new": "新建",
+     "sidebar.newTask": "新建任务",
++    // fork:chat-workspace
++    "sidebar.chatWorkspace": "聊天",
++    "sidebar.newChat": "新建聊天",
++    "sidebar.setChatWorkspace": "设置聊天目录…",
++    "sidebar.newTaskChooseProject": "选择项目",
++    "sidebar.newTaskNoProject": "不在项目中（聊天）",
+     "sidebar.projects": "项目",
+     "sidebar.addProject": "添加项目",
+     "sidebar.projectActions": "项目选项",
+diff --git a/lib/i18n/messages/zh-TW.ts b/lib/i18n/messages/zh-TW.ts
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -281,6 +281,12 @@
+     "layout.resizeHint": "拖曳以調整寬度。按兩下或按 Enter 鍵即可重設。",
+     "sidebar.new": "新增",
+     "sidebar.newTask": "新增任務",
++    // fork:chat-workspace
++    "sidebar.chatWorkspace": "聊天",
++    "sidebar.newChat": "新增聊天",
++    "sidebar.setChatWorkspace": "設定聊天資料夾…",
++    "sidebar.newTaskChooseProject": "選擇專案",
++    "sidebar.newTaskNoProject": "不在專案中（聊天）",
+     "sidebar.projects": "專案",
+     "sidebar.addProject": "新增專案",
+     "sidebar.projectActions": "專案選項",
+diff --git a/AGENTS.md b/AGENTS.md
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -143,6 +143,12 @@
+   useDragDrop.ts      shared drag/drop state
+   useIsMobile.ts      responsive breakpoint hook
+   useTheme.ts         theme state
++
++fork 补丁台账（相对上游 pi-web 的功能改动，合并上游后照此重打）
++  docs/patches/README.md          约定 + 索引；每个补丁一份 .md 说明 + 一份 .patch
++  docs/patches/0001-chat-workspace.md  独立聊天工作区（不在项目中的对话）
++  lib/chat-workspace.ts / app/api/chat-workspace/route.ts  该补丁主体；
++  grep -rn "fork:chat-workspace" 可列出它在上游文件里的全部接线点
+ ```
+ 
+ ---
+diff --git a/lib/chat-workspace.ts b/lib/chat-workspace.ts
+new file mode 100644
+--- /dev/null
++++ b/lib/chat-workspace.ts
+@@ -0,0 +1,146 @@
++import { existsSync, mkdirSync, readFileSync } from "node:fs";
++import { homedir } from "node:os";
++import { dirname, isAbsolute, join, resolve } from "node:path";
++import { getAgentDir } from "@earendil-works/pi-coding-agent";
++import { writePrivateFileAtomicSync } from "./atomic-file";
++import { samePath, toNativePath } from "./paths";
++
++/**
++ * Standalone chat workspace (fork feature: `docs/patches/0001-chat-workspace.md`).
++ *
++ * Pi Web derives its "projects" from session cwds, so a conversation outside any
++ * project still needs a cwd. This module owns one dedicated directory for those
++ * conversations, plus the user's override for it.
++ *
++ * The override lives in `<agentDir>/pi-web-chat.json` (`{ version, path }`), kept
++ * beside the rest of pi's config so a reinstall of pi-web does not lose it. The
++ * directory itself is never created implicitly by a read — only `ensureChatWorkspace()`
++ * and `writeChatWorkspacePath()` touch the filesystem.
++ */
++
++export const CHAT_WORKSPACE_DIR_NAME = "pi-web-chat";
++
++/** Config file name inside pi's agent directory. */
++export const CHAT_WORKSPACE_CONFIG_FILE = "pi-web-chat.json";
++
++const CONFIG_VERSION = 1;
++const CONFIG_CACHE_TTL_MS = 5_000;
++
++declare global {
++  // globalThis survives Next.js hot-reload; a module-level Map does not.
++  var __piChatWorkspaceConfigCache: Map<string, { path: string; expiresAt: number }> | undefined;
++}
++
++interface StoredChatWorkspaceConfig extends Record<string, unknown> {
++  version?: unknown;
++  path?: unknown;
++}
++
++export function getChatWorkspaceConfigPath(agentDir = getAgentDir()): string {
++  return join(agentDir, CHAT_WORKSPACE_CONFIG_FILE);
++}
++
++/** Default chat workspace: `~/pi-web-chat`, next to (not inside) the user's projects. */
++export function defaultChatWorkspacePath(home = homedir()): string {
++  return join(home, CHAT_WORKSPACE_DIR_NAME);
++}
++
++function configCache(): Map<string, { path: string; expiresAt: number }> {
++  if (!globalThis.__piChatWorkspaceConfigCache) {
++    globalThis.__piChatWorkspaceConfigCache = new Map();
++  }
++  return globalThis.__piChatWorkspaceConfigCache;
++}
++
++function readStoredConfig(configPath: string): StoredChatWorkspaceConfig {
++  if (!existsSync(configPath)) return {};
++  const parsed: unknown = JSON.parse(readFileSync(configPath, "utf8"));
++  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
++    throw new Error("Invalid chat workspace config: expected an object");
++  }
++  return parsed as StoredChatWorkspaceConfig;
++}
++
++/**
++ * Expand `~` and return a native absolute path. Relative input is rejected
++ * because the UI picks absolute directories and the server's own cwd is not a
++ * meaningful base for the user.
++ */
++export function normalizeChatWorkspaceInput(value: string): string {
++  const trimmed = value.trim();
++  if (!trimmed) return "";
++  const expanded = trimmed === "~"
++    ? homedir()
++    : trimmed.startsWith("~/") || trimmed.startsWith("~\\")
++      ? join(homedir(), trimmed.slice(2))
++      : trimmed;
++  if (!isAbsolute(expanded)) return "";
++  return toNativePath(resolve(expanded));
++}
++
++/** Configured chat workspace, falling back to the default when unset or malformed. */
++export function getChatWorkspacePath(configPath = getChatWorkspaceConfigPath()): string {
++  const cache = configCache();
++  const cached = cache.get(configPath);
++  if (cached && cached.expiresAt > Date.now()) return cached.path;
++
++  let path = defaultChatWorkspacePath();
++  try {
++    const stored = readStoredConfig(configPath);
++    if (typeof stored.path === "string") {
++      path = normalizeChatWorkspaceInput(stored.path) || path;
++    }
++  } catch {
++    // A malformed config never blocks the chat workspace; the default is used.
++  }
++  cache.set(configPath, { path, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
++  return path;
++}
++
++/** Whether a path is the chat workspace. Compare paths with this, never with `===`. */
++export function isChatWorkspacePath(candidate: string, configPath = getChatWorkspaceConfigPath()): boolean {
++  if (!candidate) return false;
++  return samePath(candidate, getChatWorkspacePath(configPath));
++}
++
++/** Create the chat workspace directory if needed and return its path. */
++export function ensureChatWorkspace(configPath = getChatWorkspaceConfigPath()): string {
++  const path = getChatWorkspacePath(configPath);
++  mkdirSync(path, { recursive: true });
++  return path;
++}
++
++/**
++ * Persist a new chat workspace directory (creating it) and return the normalized
++ * path. Unknown keys in the config file are preserved so other tooling that
++ * shares the file keeps working.
++ */
++export function writeChatWorkspacePath(
++  value: string,
++  configPath = getChatWorkspaceConfigPath(),
++): string {
++  const path = normalizeChatWorkspaceInput(value);
++  if (!path) throw new Error("CHAT_WORKSPACE_PATH_INVALID");
++
++  mkdirSync(path, { recursive: true });
++  let stored: StoredChatWorkspaceConfig = {};
++  try {
++    stored = readStoredConfig(configPath);
++  } catch {
++    // Overwrite a malformed config instead of refusing the user's choice.
++  }
++  mkdirSync(dirname(configPath), { recursive: true });
++  writePrivateFileAtomicSync(
++    configPath,
++    JSON.stringify({ ...stored, version: CONFIG_VERSION, path }, null, 2),
++  );
++  configCache().set(configPath, { path, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
++  return path;
++}
++
++/** Test/DI helper: drop the cached config so a rewritten file is re-read. */
++export function invalidateChatWorkspaceCache(configPath?: string): void {
++  const cache = configCache();
++  if (configPath) cache.delete(configPath);
++  else cache.clear();
++}
+diff --git a/lib/chat-workspace.test.mjs b/lib/chat-workspace.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/lib/chat-workspace.test.mjs
+@@ -0,0 +1,113 @@
++import assert from "node:assert/strict";
++import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
++import { homedir, tmpdir } from "node:os";
++import { isAbsolute, join } from "node:path";
++import test from "node:test";
++import { createJiti } from "jiti";
++
++const jiti = createJiti(import.meta.url);
++const {
++  defaultChatWorkspacePath,
++  ensureChatWorkspace,
++  getChatWorkspacePath,
++  invalidateChatWorkspaceCache,
++  isChatWorkspacePath,
++  normalizeChatWorkspaceInput,
++  writeChatWorkspacePath,
++} = await jiti.import("./chat-workspace.ts");
++
++function tempDir() {
++  return mkdtempSync(join(tmpdir(), "pi-web-chat-workspace-"));
++}
++
++test("falls back to the default chat workspace when no config exists", () => {
++  const dir = tempDir();
++  try {
++    const configPath = join(dir, "pi-web-chat.json");
++    assert.equal(getChatWorkspacePath(configPath), defaultChatWorkspacePath());
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++});
++
++test("a malformed config never blocks the chat workspace", () => {
++  const dir = tempDir();
++  try {
++    const configPath = join(dir, "pi-web-chat.json");
++    writeFileSync(configPath, JSON.stringify(["not", "an", "object"]), "utf8");
++    assert.equal(getChatWorkspacePath(configPath), defaultChatWorkspacePath());
++
++    writeFileSync(configPath, "{not json", "utf8");
++    invalidateChatWorkspaceCache(configPath);
++    assert.equal(getChatWorkspacePath(configPath), defaultChatWorkspacePath());
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++});
++
++test("persists a chosen directory, creates it, and preserves unknown config keys", () => {
++  const dir = tempDir();
++  try {
++    const configPath = join(dir, "pi-web-chat.json");
++    const chosen = join(dir, "custom-chat");
++    writeFileSync(configPath, JSON.stringify({ version: 1, future: { keep: true } }), "utf8");
++
++    assert.equal(writeChatWorkspacePath(chosen, configPath), chosen);
++    assert.equal(getChatWorkspacePath(configPath), chosen);
++    assert.ok(isChatWorkspacePath(chosen, configPath));
++    assert.ok(!isChatWorkspacePath(join(dir, "elsewhere"), configPath));
++
++    const stored = JSON.parse(readFileSync(configPath, "utf8"));
++    assert.equal(stored.path, chosen);
++    assert.equal(stored.version, 1);
++    assert.deepEqual(stored.future, { keep: true });
++
++    // ensureChatWorkspace() never rewrites the config, only the directory.
++    const ensured = ensureChatWorkspace(configPath);
++    assert.equal(ensured, chosen);
++    assert.equal(JSON.parse(readFileSync(configPath, "utf8")).path, chosen);
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++});
++
++test("an existing config is re-read after the cache is dropped", () => {
++  const dir = tempDir();
++  try {
++    const configPath = join(dir, "pi-web-chat.json");
++    writeFileSync(configPath, JSON.stringify({ version: 1, path: join(dir, "first") }), "utf8");
++    assert.equal(getChatWorkspacePath(configPath), join(dir, "first"));
++
++    writeFileSync(configPath, JSON.stringify({ version: 1, path: join(dir, "second") }), "utf8");
++    invalidateChatWorkspaceCache(configPath);
++    assert.equal(getChatWorkspacePath(configPath), join(dir, "second"));
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++});
++
++test("normalizes tilde and rejects empty or relative input", () => {
++  const expanded = normalizeChatWorkspaceInput("~/chats");
++  assert.ok(isAbsolute(expanded));
++  assert.match(expanded.replace(/\\/g, "/"), /\/chats$/);
++  assert.equal(normalizeChatWorkspaceInput("~"), normalizeChatWorkspaceInput(homedir()));
++
++  assert.equal(normalizeChatWorkspaceInput("   "), "");
++  assert.equal(normalizeChatWorkspaceInput("relative/path"), "");
++  assert.equal(normalizeChatWorkspaceInput(""), "");
++});
++
++test("windows path variants of the chat workspace stay equivalent", () => {
++  const dir = tempDir();
++  try {
++    const configPath = join(dir, "pi-web-chat.json");
++    const chosen = join(dir, "chats");
++    mkdirSync(chosen, { recursive: true });
++    writeChatWorkspacePath(chosen, configPath);
++
++    const variant = process.platform === "win32" ? chosen.toUpperCase() : `${chosen}/`;
++    assert.ok(isChatWorkspacePath(variant, configPath));
++  } finally {
++    rmSync(dir, { recursive: true, force: true });
++  }
++});
+diff --git a/app/api/chat-workspace/route.ts b/app/api/chat-workspace/route.ts
+new file mode 100644
+--- /dev/null
++++ b/app/api/chat-workspace/route.ts
+@@ -0,0 +1,81 @@
++import { NextResponse } from "next/server";
++import { statSync } from "node:fs";
++import { allowFileRoot } from "@/lib/file-access";
++import { projectIdentityKey } from "@/lib/project-identity";
++import {
++  ensureChatWorkspace,
++  normalizeChatWorkspaceInput,
++  writeChatWorkspacePath,
++} from "@/lib/chat-workspace";
++import { resolveProject } from "@/lib/worktree";
++import { samePath } from "@/lib/paths";
++
++export const dynamic = "force-dynamic";
++
++// Standalone chat workspace (fork feature: `docs/patches/0001-chat-workspace.md`).
++//
++// GET  /api/chat-workspace           -> { cwd, projectKey } for the chat workspace
++// POST /api/chat-workspace { cwd }   -> persist a different directory, then the same payload
++//
++// The returned projectKey is the same stable identity `/api/sessions` attaches to
++// sessions, so the client groups and selects the chat workspace without ever
++// comparing paths in the browser.
++
++function chatPayload(cwd: string) {
++  // Keep the files route allowed-roots cache in sync: without this the chat
++  // workspace is unreadable in the file explorer until a session exists there.
++  allowFileRoot(cwd);
++  return { cwd, projectKey: projectIdentityKey(cwd) };
++}
++
++export async function GET() {
++  try {
++    return NextResponse.json(chatPayload(ensureChatWorkspace()), {
++      headers: { "Cache-Control": "no-store" },
++    });
++  } catch (error) {
++    return NextResponse.json({ error: String(error) }, { status: 500 });
++  }
++}
++
++export async function POST(req: Request) {
++  try {
++    const body = await req.json().catch(() => ({})) as { cwd?: unknown };
++    const requested = typeof body.cwd === "string" ? body.cwd : "";
++    const cwd = normalizeChatWorkspaceInput(requested);
++    if (!cwd) {
++      return NextResponse.json(
++        { error: requested.trim() ? `Path must be absolute: ${requested}` : "Path is required" },
++        { status: 400 },
++      );
++    }
++
++    let stat;
++    try {
++      stat = statSync(cwd);
++    } catch {
++      return NextResponse.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
++    }
++    if (!stat.isDirectory()) {
++      return NextResponse.json({ error: `Path is not a directory: ${cwd}` }, { status: 400 });
++    }
++
++    // A chat workspace inside a git repository would be folded into that project
++    // by resolveProject(), so chat sessions would silently group under it instead
++    // of staying standalone.
++    const project = await resolveProject(cwd);
++    if (!samePath(project.projectRoot, cwd)) {
++      return NextResponse.json({
++        error: `${cwd} belongs to the project ${project.projectRoot}. Pick a directory outside any project.`,
++        code: "chat_workspace_inside_project",
++        projectRoot: project.projectRoot,
++      }, { status: 409 });
++    }
++
++    return NextResponse.json(chatPayload(writeChatWorkspacePath(cwd)), {
++      headers: { "Cache-Control": "no-store" },
++    });
++  } catch (error) {
++    return NextResponse.json({ error: String(error) }, { status: 500 });
++  }
++}
+diff --git a/components/ChatWorkspaceRow.tsx b/components/ChatWorkspaceRow.tsx
+new file mode 100644
+--- /dev/null
++++ b/components/ChatWorkspaceRow.tsx
+@@ -0,0 +1,155 @@
++"use client";
++
++import { useState } from "react";
++import { useI18n } from "@/hooks/useI18n";
++
++/**
++ * 聊天 分区标题行（fork feature: `docs/patches/0001-chat-workspace.md`）。
++ *
++ * 与「项目」标题行同款排版（12.5px / 500 / text-dim + 右侧 28×28 图标按钮），
++ * 让 聊天 与 项目 在侧栏里读起来是两个平级分区，而不是「项目」下面的一行。
++ *
++ * 交互分工：
++ * - 点标题      -> 切到聊天工作区（文件树、标签、每工作区会话记忆一起跟着走）
++ * - `+`         -> 在聊天工作区直接开新对话
++ * - 齿轮        -> 换聊天目录
++ * - 折叠箭头    -> 展开/收起它下面的会话列表
++ */
++export function ChatWorkspaceRow({
++  label,
++  title,
++  selected,
++  expanded,
++  activity,
++  onSelect,
++  onToggle,
++  onNewChat,
++  onConfigure,
++  busy = false,
++}: {
++  label: string;
++  title: string;
++  selected: boolean;
++  expanded: boolean;
++  activity?: { running: number; unread: number };
++  onSelect: () => void;
++  onToggle: () => void;
++  onNewChat: () => void;
++  onConfigure: () => void;
++  busy?: boolean;
++}) {
++  const { t } = useI18n();
++  const [hovered, setHovered] = useState(false);
++
++  const iconButtonStyle = {
++    width: 28,
++    height: 28,
++    display: "flex",
++    alignItems: "center",
++    justifyContent: "center",
++    padding: 0,
++    background: "transparent",
++    border: "none",
++    borderRadius: "var(--radius-md)",
++    color: "var(--text-dim)",
++    cursor: busy ? "progress" : "pointer",
++  } as const;
++
++  return (
++    <div
++      onMouseEnter={() => setHovered(true)}
++      onMouseLeave={() => setHovered(false)}
++      style={{
++        marginTop: 2,
++        marginBottom: 6,
++        display: "flex",
++        alignItems: "center",
++        justifyContent: "space-between",
++        minHeight: 28,
++        paddingLeft: 10,
++        paddingRight: 4,
++      }}
++    >
++      <button
++        type="button"
++        onClick={onSelect}
++        title={title}
++        aria-current={selected ? "page" : undefined}
++        style={{
++          flex: 1,
++          minWidth: 0,
++          display: "flex",
++          alignItems: "center",
++          gap: 6,
++          padding: 0,
++          background: "transparent",
++          border: "none",
++          cursor: "pointer",
++          textAlign: "left",
++        }}
++      >
++        <span
++          style={{
++            minWidth: 0,
++            overflow: "hidden",
++            textOverflow: "ellipsis",
++            whiteSpace: "nowrap",
++            fontSize: 12.5,
++            fontWeight: 500,
++            color: selected || hovered ? "var(--text)" : "var(--text-dim)",
++            transition: "color 0.12s",
++          }}
++        >
++          {label}
++        </span>
++        {activity && (activity.running > 0 || activity.unread > 0) && (
++          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0, color: "var(--accent)", fontSize: 10, fontFamily: "var(--font-mono)" }}>
++            {activity.running > 0 && <span title={t("sidebar.agentRunning")}>{activity.running}</span>}
++            {activity.unread > 0 && <span title={t("sidebar.newSessionActivity")}>{activity.unread}</span>}
++          </span>
++        )}
++      </button>
++
++      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
++        <button
++          type="button"
++          onClick={onNewChat}
++          disabled={busy}
++          title={t("sidebar.newChat")}
++          aria-label={t("sidebar.newChat")}
++          style={iconButtonStyle}
++        >
++          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
++            <path d="M12 5v14M5 12h14" />
++          </svg>
++        </button>
++
++        <button
++          type="button"
++          onClick={onConfigure}
++          disabled={busy}
++          title={t("sidebar.setChatWorkspace")}
++          aria-label={t("sidebar.setChatWorkspace")}
++          style={iconButtonStyle}
++        >
++          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
++            <circle cx="12" cy="12" r="3" />
++            <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1Z" />
++          </svg>
++        </button>
++
++        <button
++          type="button"
++          onClick={onToggle}
++          aria-expanded={expanded}
++          aria-label={expanded ? t("sidebar.collapseSubagents") : t("sidebar.expandSubagents")}
++          style={iconButtonStyle}
++        >
++          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ transform: expanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }}>
++            <polyline points="6 9 12 15 18 9" />
++          </svg>
++        </button>
++      </div>
++    </div>
++  );
++}
+diff --git a/components/NewTaskPicker.tsx b/components/NewTaskPicker.tsx
+new file mode 100644
+--- /dev/null
++++ b/components/NewTaskPicker.tsx
+@@ -0,0 +1,168 @@
++"use client";
++
++import { useEffect, useRef, useState } from "react";
++import { useI18n } from "@/hooks/useI18n";
++
++/**
++ * Workspace picker for the 新建任务 row (fork feature:
++ * `docs/patches/0001-chat-workspace.md`).
++ *
++ * Rendered beside the primary 新建任务 button: the button keeps its upstream
++ * behaviour, this chevron only chooses *where* the new task goes — any known
++ * project, or the standalone chat workspace ("不在项目中"). Picking an entry moves
++ * the workspace and opens a fresh composer there (same result as selecting the
++ * project first and then clicking 新建任务).
++ *
++ * Kept in its own file so the sidebar diff stays a wiring change.
++ */
++export function NewTaskPicker({
++  projects,
++  activeKey,
++  chatPath,
++  onNewIn,
++  onAddProject,
++}: {
++  projects: { key: string; root: string; name: string }[];
++  activeKey: string | null;
++  chatPath: string | null;
++  onNewIn: (cwd: string) => void;
++  onAddProject: () => void;
++}) {
++  const { t } = useI18n();
++  const [open, setOpen] = useState(false);
++  const rootRef = useRef<HTMLDivElement>(null);
++
++  useEffect(() => {
++    if (!open) return;
++    const onPointerDown = (event: MouseEvent) => {
++      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
++    };
++    const onKeyDown = (event: KeyboardEvent) => {
++      if (event.key === "Escape") setOpen(false);
++    };
++    document.addEventListener("mousedown", onPointerDown);
++    document.addEventListener("keydown", onKeyDown);
++    return () => {
++      document.removeEventListener("mousedown", onPointerDown);
++      document.removeEventListener("keydown", onKeyDown);
++    };
++  }, [open]);
++
++  const itemClass = "flex w-full items-center gap-2 border-none bg-transparent px-3 py-[7px] text-left text-[12.5px] text-text-muted hover:bg-bg-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent";
++
++  const choose = (cwd: string) => {
++    setOpen(false);
++    onNewIn(cwd);
++  };
++
++  return (
++    <div ref={rootRef} style={{ flexShrink: 0 }}>
++      <button
++        type="button"
++        onClick={() => setOpen((value) => !value)}
++        title={t("sidebar.newTaskChooseProject")}
++        aria-label={t("sidebar.newTaskChooseProject")}
++        aria-expanded={open}
++        aria-haspopup="menu"
++        style={{
++          width: 26,
++          height: 36,
++          display: "flex",
++          alignItems: "center",
++          justifyContent: "center",
++          padding: 0,
++          background: open ? "var(--bg-selected)" : "transparent",
++          border: "none",
++          borderRadius: "var(--radius-md)",
++          color: open ? "var(--text)" : "var(--text-dim)",
++          cursor: "pointer",
++        }}
++      >
++        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
++          <polyline points="6 9 12 15 18 9" />
++        </svg>
++      </button>
++
++      {open && (
++        <div
++          role="menu"
++          style={{
++            // Anchored to the whole 新建任务 row: this element's positioning ancestor
++            // is the wrapper in SessionSidebar, not this narrow chevron.
++            position: "absolute",
++            top: "calc(100% + 2px)",
++            left: 0,
++            right: 0,
++            zIndex: 100,
++            background: "var(--bg-elev)",
++            border: "1px solid var(--border)",
++            borderRadius: "var(--radius-lg)",
++            boxShadow: "var(--shadow-lg)",
++            padding: "6px 0",
++            maxHeight: "min(60vh, 420px)",
++            overflowY: "auto",
++          }}
++        >
++          {projects.length > 0 && (
++            <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
++              {t("sidebar.newTaskChooseProject")}
++            </div>
++          )}
++          {projects.map((project) => (
++            <button
++              key={project.key}
++              type="button"
++              role="menuitem"
++              className={itemClass}
++              title={project.root}
++              onClick={() => choose(project.root)}
++            >
++              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
++                <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
++              </svg>
++              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: project.key === activeKey ? "var(--text)" : undefined }}>
++                {project.name}
++              </span>
++              {project.key === activeKey && <span style={{ color: "var(--success)", flexShrink: 0 }}>✓</span>}
++            </button>
++          ))}
++
++          <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
++
++          <button
++            type="button"
++            role="menuitem"
++            className={itemClass}
++            disabled={!chatPath}
++            title={chatPath ?? undefined}
++            onClick={() => { if (chatPath) choose(chatPath); }}
++          >
++            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
++              <path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.4-4.6A8 8 0 1 1 21 12Z" />
++            </svg>
++            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
++              {t("sidebar.newTaskNoProject")}
++            </span>
++          </button>
++
++          <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
++
++          <button
++            type="button"
++            role="menuitem"
++            className={itemClass}
++            onClick={() => {
++              setOpen(false);
++              onAddProject();
++            }}
++          >
++            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
++              <path d="M12 5v14M5 12h14" />
++            </svg>
++            <span style={{ flex: 1, minWidth: 0 }}>{t("sidebar.addProject")}</span>
++          </button>
++        </div>
++      )}
++    </div>
++  );
++}
+diff --git a/docs/patches/README.md b/docs/patches/README.md
+new file mode 100644
+--- /dev/null
++++ b/docs/patches/README.md
+@@ -0,0 +1,27 @@
++# 功能补丁台账（fork patches）
++
++本目录记录本 fork 相对上游 `@agegr/pi-web` 的**功能类**改动。
++
++与皮肤台账 [`../codex-skin/delta.md`](../codex-skin/delta.md) 的分工：
++
++| 台账 | 管什么 | 冲突策略 |
++| --- | --- | --- |
++| `docs/codex-skin/delta.md` | 皮肤 / 布局 / CSS token | 皮肤冲突按台账重打 |
++| `docs/patches/*.md`（本目录） | **功能**改动（新增能力、行为变化） | 逻辑冲突一律取上游，再按本文档重接 |
++
++## 约定
++
++1. **一个补丁 = 一个意图**，可独立 revert，自带测试。
++2. **优先新增文件**：新能力放进新的 `lib/*.ts`、`app/api/*/route.ts`、`components/*.tsx`，
++   上游文件只留「接线」级别的改动。
++3. **上游文件的每处改动都带 `fork:<补丁名>` 标记**，例如 `// fork:chat-workspace`。
++   合并上游后 `grep -rn "fork:chat-workspace" <file>` 即可拿到完整改动清单。
++4. 每个补丁产出一份 `NNNN-<name>.patch`（unified diff，`git apply -p1` 可用）+ 一份说明 `.md`。
++5. 合并上游后按本目录的说明逐条重打，然后跑完整 DoD：
++   `tsc --noEmit` → `npm run lint` → `npm test`。
++
++## 补丁索引
++
++| 编号 | 名称 | 状态 | 上游文件接触面 |
++| --- | --- | --- | --- |
++| 0001 | [独立聊天工作区（不在项目中的对话）](./0001-chat-workspace.md) | 已实现（待运行时验收） | 8 个文件，均为接线级改动 |
+diff --git a/docs/patches/0001-chat-workspace.md b/docs/patches/0001-chat-workspace.md
+new file mode 100644
+--- /dev/null
++++ b/docs/patches/0001-chat-workspace.md
+@@ -0,0 +1,99 @@
++# 0001 · 独立聊天工作区（不在项目中的对话）
++
++| 项 | 值 |
++| --- | --- |
++| 意图 | 让「不在任何项目里」的对话有一个稳定归属，而不是 fallback 到 home / `/` |
++| 参照实现 | `参考项目/PiDeck-main` 的内置 Chat 项目（`ProjectStore.ts` 的 `builtin-chat` + `chat-workspace`） |
++| 补丁文件 | [`0001-chat-workspace.patch`](./0001-chat-workspace.patch) |
++| fork 标记 | `fork:chat-workspace` |
++| 新增文件 | 6 个 + 本目录 2 份文档 |
++| 上游文件接触面 | 8 个，均为接线级 |
++
++## 为什么要做
++
++pi-web 的「项目」不是注册表，而是**会话 cwd 的分组**（`lib/session-reader.ts` 的
++`attachSessionProjectInfo()` → `lib/project-identity.ts` 的稳定 key）。因此"不在项目中"
++的对话仍然需要一个 cwd。改造前的两个出口都有问题：
++
++1. `handleNewSession` 用 `selectedCwd || homeDir || "/"` 兜底 —— `homeDir` 是异步取的，
++   点得快就会拿到 `""` → 落到 `/`（实测已产生一条 cwd 为 `/` 的会话）；
++2. cwd = home 会让**整个家目录**进入文件浏览允许根（`lib/file-access.ts` +
++   `lib/path-security.ts` 是严格包含判定），`~/.pi/agent/auth.json`、`~/.ssh` 全部可读。
++
++## 方案
++
++给"不属项目"的对话一个**专用、稳定、可配置**的目录，并在侧栏把它做成常驻分区：
++
++```
++GET  /api/chat-workspace          -> { cwd, projectKey }        # 读取（不存在则创建）
++POST /api/chat-workspace { cwd }  -> { cwd, projectKey }        # 改目录（必须是已存在目录）
++```
++
++- 默认目录 `~/pi-web-chat`；用户覆盖持久化在 `<pi agent dir>/pi-web-chat.json`（`{ version, path }`，
++  保留未知字段、原子写、malformed 时回退默认，不阻塞启动）。
++- 拒绝把聊天目录设进 git 仓库（`resolveProject()` 会把仓库根折叠成项目 → 聊天会话会被
++  错误归到该项目下）。
++- 返回的 `projectKey` 与 `/api/sessions` 用的是同一个 `projectIdentityKey()`，
++  所以浏览器端**从不比较路径**，只比较 key（Windows 大小写/分隔符问题天然消失）。
++- 侧栏：`聊天` 分区与 `项目` **平级** —— 聊天标题行（12.5px/500，与「项目」同款排版）固定在列表最上面，
++  下面跟着它自己的会话；`项目` 标题行连同工作区列表整体下移到聊天分区之后，两区各自渲染自己的会话。
++  聊天行内 `+` 新建聊天、齿轮改目录、箭头折叠；`新建任务` 行右侧新增 workspace 选择器
++  （选择项目 / 不在项目中）。
++- 没有任何会话时也会选中聊天工作区 → 首屏直接是输入框，不再出现「开始使用」引导页
++  （该引导页只在 `/api/chat-workspace` 不可用时才可能兜底出现）。
++
++## 改动清单
++
++### 新增（无冲突面）
++
++| 文件 | 作用 |
++| --- | --- |
++| `lib/chat-workspace.ts` | 目录解析/持久化/比较（`getChatWorkspacePath`、`isChatWorkspacePath`、`ensureChatWorkspace`、`writeChatWorkspacePath`） |
++| `lib/chat-workspace.test.mjs` | 默认值、malformed 回退、原子写保留未知字段、~ 展开、Windows 大小写等价 |
++| `app/api/chat-workspace/route.ts` | GET/POST + `allowFileRoot()` + 仓库内目录拒绝 |
++| `components/ChatWorkspaceRow.tsx` | 侧栏聊天分区行（选中/新建/改目录/折叠） |
++| `components/NewTaskPicker.tsx` | `新建任务` 旁的工作区选择器（项目列表 / 不在项目中 / 添加项目） |
++| `components/ChatWorkspace.ui.test.mjs` | 上面两个组件的契约断言（按钮不嵌套、Escape/外点关闭、面板锚点） |
++
++### 上游文件的接线改动（每处都有 `fork:chat-workspace` 标记）
++
++| 文件 | 位置 | 改动 |
++| --- | --- | --- |
++| `lib/file-access.ts` | `getAllowedFileRoots()` | 聊天目录作为固定允许根，未创建会话时文件树也可用 |
++| `lib/project-groups.ts` | 末尾 | 新增 `chatProjectOf()` / `withoutChatProject()` 两个纯函数 |
++| `lib/project-groups.test.mjs` | 末尾 | 对应测试 2 例 |
++| `components/SessionSidebar.tsx` | 12 处 | 状态 + 拉取、`resolveDefaultCwd()`、`startSessionIn()`、聊天分区（标题行 + 会话列表，含选中时的虚拟窗口）、项目标题行下移到列表、目录选择器、`新建任务` 行 |
++| `components/SessionSidebar.test.mjs` | 2 处 | 列表 map 断言跟随新结构 + 新增聊天分区断言 |
++| `lib/i18n/messages/{en,zh-CN,zh-TW}.ts` | `sidebar.newTask` 附近 | 新增 5 个 key（3 语言必须同时加，否则 i18n parity 测试挂） |
++
++## 验收
++
++- `GET /api/chat-workspace` 返回 `{ cwd, projectKey }`，目录自动创建。
++- 侧栏出现 `聊天` 分区（即使 0 会话），位置在 `项目` 之上、与 `项目` 平级；点标题 → 切到聊天目录；
++  `+` → 直接开新对话；折叠箭头只影响聊天自己的会话列表。
++- `新建任务` 右侧箭头 → 「不在项目中（聊天）」/ 项目列表 / 「添加项目…」。
++- 未选中任何项目时首屏是输入框（不是「开始使用」）。
++- 聊天会话在侧栏只出现在聊天分区，不会同时出现在项目区。
++- 文件浏览器可浏览聊天目录；家目录不会被顺带放开。
++
++## 已知取舍
++
++- 聊天目录**换掉后老会话不会迁移**（pi 会话按 cwd 编码分目录），所以定好后尽量别再改；
++  改目录只影响之后新建的会话。
++- PiDeck 还有一个"匿名会话"（不落盘），本补丁不做：pi 的会话模型始终写 `.jsonl`。
++- 测试基线（合并上游后重跑）：`tsc --noEmit`、`npm run lint`、`npm test`。
++  本机已知环境性失败与本补丁无关：缺 `git`（worktree/subagent-isolation）、缺 `bash`
++  （project-command-env）、`node-pty` 未构建（terminal-manager），以及
++  `components/ChatInput.test.mjs` 的图片告警用例。
++
++## 合并上游后怎么重打
++
++```bash
++# 1. 看这次上游是否碰到本补丁的文件
++grep -n "fork:chat-workspace" components/SessionSidebar.tsx lib/file-access.ts lib/project-groups.ts
++
++# 2. 逻辑冲突一律取上游，再按「改动清单」逐条重接；新增文件整份保留
++
++# 3. 校验
++node_modules/.bin/tsc --noEmit && npm run lint && npm test
++```
+diff --git a/components/ChatWorkspace.ui.test.mjs b/components/ChatWorkspace.ui.test.mjs
+new file mode 100644
+--- /dev/null
++++ b/components/ChatWorkspace.ui.test.mjs
+@@ -0,0 +1,45 @@
++import assert from "node:assert/strict";
++import { readFile } from "node:fs/promises";
++import test from "node:test";
++
++// fork:chat-workspace — contracts of the two UI pieces that make up the
++// standalone chat workspace (source-level, matching the repo's other UI tests).
++const row = await readFile(new URL("./ChatWorkspaceRow.tsx", import.meta.url), "utf8");
++const picker = await readFile(new URL("./NewTaskPicker.tsx", import.meta.url), "utf8");
++
++test("the chat row offers select, new chat, configure and collapse as separate buttons", () => {
++  assert.match(row, /onClick=\{onSelect\}/);
++  assert.match(row, /onClick=\{onNewChat\}/);
++  assert.match(row, /onClick=\{onConfigure\}/);
++  assert.match(row, /onClick=\{onToggle\}/);
++  // Action buttons must not be nested inside the row's select button.
++  const selectButtonEnd = row.indexOf("</button>", row.indexOf("onClick={onSelect}"));
++  const newChatIndex = row.indexOf("onClick={onNewChat}");
++  assert.ok(selectButtonEnd > 0 && newChatIndex > selectButtonEnd, "action buttons follow the select button");
++});
++
++// 聊天 与 项目 平级：标题行与「项目」标题行同款排版（同一字号/字重/颜色与 28×28 图标按钮）。
++test("the chat caption matches the projects caption typography", () => {
++  assert.match(row, /fontSize: 12\.5,\n\s+fontWeight: 500,/);
++  assert.match(row, /minHeight: 28,/);
++  assert.match(row, /width: 28,\n\s+height: 28,/);
++});
++
++test("the workspace picker lists projects plus the not-in-a-project entry", () => {
++  assert.match(picker, /t\("sidebar\.newTaskNoProject"\)/);
++  assert.match(picker, /t\("sidebar\.newTaskChooseProject"\)/);
++  assert.match(picker, /t\("sidebar\.addProject"\)/);
++  assert.match(picker, /project\.key === activeKey/);
++  assert.match(picker, /onNewIn\(cwd\)/);
++});
++
++test("the workspace picker closes on Escape and on an outside click", () => {
++  assert.match(picker, /event\.key === "Escape"/);
++  assert.match(picker, /rootRef\.current\?\.contains\(event\.target as Node\)/);
++  assert.match(picker, /document\.addEventListener\("mousedown", onPointerDown\)/);
++});
++
++test("the picker panel is anchored to the whole 新建任务 row, not to the chevron", () => {
++  assert.match(picker, /left: 0,\n\s+right: 0,/);
++  assert.doesNotMatch(picker, /position: "relative", flexShrink: 0/);
++});
