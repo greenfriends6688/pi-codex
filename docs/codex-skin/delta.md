@@ -893,6 +893,27 @@ Windows bash 环境隔离、PTY 运行时、1 条既有 ChatInput 用例）｜ `
 - **ui-10 全量 `DialogShell`**：见上表说明。
 - **ui-14 顶栏次级动作收进 `⋯`**：手机端已有溢出菜单；桌面端需要新增宽度侦测状态，收益仅「少几个图标」。
 
+### 25. 顶栏边界按钮对齐 + ⤢ 不再抢整屏（2026-09-17）
+
+| 反馈 | 实测 | 改法 |
+| --- | --- | --- |
+| 顶栏没对齐 | 顶栏 46px、内容中心 y=23；三个**绝对定位**的边界按钮是 `top: 0` + 28px 高 → 中心 y=14，**偏高 9px** | 侧栏开关 / 副区开关 / 工作区角色开关三处 `top` 改为 `calc(env(safe-area-inset-top,0px) + (var(--height-toolbar,46px) - var(--control-md,28px)) / 2)`，实测 cy 均回到 23 |
+| 点 ⤢ 直接整屏，应该只占工作区那块 | 工具栏上有两个相近按钮：栏内展开（`data-expanded`，文件树让位）与 Fullscreen API（`requestFullscreen()`） | **删掉 Fullscreen API 那个**，⤢ 图标交给栏内展开；`isFullscreen` state、`fullscreenchange` 监听、`shellRef` 一并移除。实测点击后 `data-expanded=true`、文件树隐藏、`document.fullscreenElement=false`、查看器宽 775px |
+
+### 24. 供应商报错里的链接可点（2026-09-17）
+
+用户在 web 端用 `opencode-go:muse-spark-1.3-contributor` 收到 `DataPolicyError (403)`，报文里带一条
+必须去点的 opt-in 链接（`https://opencode.ai/workspace/<id>/go`）。
+
+- **根因在供应商侧**：`-contributor` 档位要求先在该 workspace 显式同意「数据用于改进模型」；
+  `@earendil-works/pi-ai` 的 `opencode-go` provider 定义里除 API key 外没有任何 opt-in 参数
+  （`dist/providers/opencode-go.js`），本地配置无法绕过。同 provider 的非 contributor 档位
+  （`muse-spark-1.3`）与 `opencode` provider 下的 `-contributor-free` 不需要这个开关。
+- **本仓库的改动**：`MessageView` 的 provider 错误框原来整段纯文本。新增 `splitErrorLinks()`，
+  把 `http(s)` token 渲染成 `<a target="_blank" rel="noreferrer noopener">`，其余文本**原样拼接**
+  （不包 `<span>`，否则既有断言 `Error: OpenAI API error (403)` 会被拆断）。
+  测试用真实报文新增一例。
+
 ### 23. 性能：git status 3.7s→0.16s、首屏 3.6s→0.9s（2026-09-17）
 
 用户反馈「加载慢」。实测（prod 构建 + curl/Playwright，非估算）：
