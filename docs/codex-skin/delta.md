@@ -808,9 +808,11 @@ x=1546 新建浏览器标签 / x=1572 交换聊天区与工作区
 - `lib/border-depth.ts` + `hooks/useBorderDepth.ts` —— 三级描边联动滑杆。快照 `--border-*-orig`
   后再混合，避免反复拖动叠加漂移。
 - `lib/wallpaper.ts` / `lib/wallpaper-builtin.ts` / `hooks/useWallpaper.ts` / `components/WallpaperLayer.tsx` / `app/wallpaper.css`
-- `lib/step-categorizer.ts` / `lib/process-content.ts` / `lib/stream-update-scheduler.ts` /
-  `lib/mention-tokens.ts` / `lib/file-mentions.ts` / `lib/time-groups.ts` / `lib/time-group-state.ts` /
-  `lib/session-flags.ts` / `lib/ui-scale.ts` / `lib/git-graph-*.ts`（后两项本轮未接线）
+- `lib/step-categorizer.ts` / `lib/process-content.ts` / `lib/session-flags.ts`
+- （合入本机时删除：`lib/stream-update-scheduler.ts` / `lib/mention-tokens.ts` / `lib/file-mentions.ts` /
+  `lib/time-groups.ts` / `lib/time-group-state.ts` / `lib/git-graph-*.ts` / `lib/ui-scale.ts` /
+  `lib/provider-icon.ts` / `lib/input-compact.ts` —— 原作者标注「本轮未接线」，没有任何生产 import，
+  连 `TimeBucket`、`Settings.sessionGrouping*` 一起不并入，等真正接线时再单独提 PR）
 - `components/ProcessGroup.tsx` / `components/ContextMenu.tsx` / `components/SessionRowContextMenuBridge.tsx`
 - `hooks/useProcessDisplayMode.ts` / `hooks/usePiTheme.ts`
 - `public/monet-artworks/*.jpg`（6 张，5.5MB，取自 desktop 的内置壁纸）

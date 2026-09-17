@@ -98,8 +98,6 @@ export const zhCNLocale: LocalePlugin = {
     "settings.processDisplayLegacy": "平铺列表",
     "settings.processDisplayTimeline": "步骤（时间线）",
     "settings.processDisplayTabs": "步骤（标签）",
-    "settings.sessionGrouping": "会话按时间分组",
-    "settings.sessionGroupingDescription": "在会话列表中加入今天 / 昨天 / 本周 / 本月 / 更早的分组标题。",
     "process.expandFull": "展开全文",
     "process.summaryTools": "{count} 次工具调用",
     "process.summaryFailed": "{count} 次失败",

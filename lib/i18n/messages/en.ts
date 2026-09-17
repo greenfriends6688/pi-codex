@@ -98,8 +98,6 @@ export const enLocale: LocalePlugin = {
     "settings.processDisplayLegacy": "Flat list",
     "settings.processDisplayTimeline": "Steps (timeline)",
     "settings.processDisplayTabs": "Steps (tabs)",
-    "settings.sessionGrouping": "Group sessions by time",
-    "settings.sessionGroupingDescription": "Adds Today / Yesterday / This week / This month / Earlier headers to the session list.",
     "process.expandFull": "Show full text",
     "process.summaryTools": "{count} tools",
     "process.summaryFailed": "{count} failed",

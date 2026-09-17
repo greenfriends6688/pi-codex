@@ -309,17 +309,6 @@ export interface SessionTreeNode {
   branchPreview?: BranchPreview;
 }
 
-/** Time-group buckets for the session list, newest first.
- *  `pinned` is assigned by the UI from the persisted pin flag; the remaining
- *  buckets are computed from the session's `modified` timestamp. */
-export type TimeBucket =
-  | "pinned"
-  | "today"
-  | "yesterday"
-  | "week"
-  | "month"
-  | "earlier";
-
 export interface SessionInfo {
   path: string;
   id: string;
@@ -356,9 +345,6 @@ export interface SessionInfo {
   /** True while the runtime session exists only in memory and its JSONL file
    *  has not been created yet. Disk-backed actions must wait until this clears. */
   transient?: boolean;
-  /** True when the user pinned the session to the top of the session list.
-   *  Client-side metadata (localStorage), never written to the session file. */
-  pinned?: boolean;
 }
 
 export interface SessionContext {

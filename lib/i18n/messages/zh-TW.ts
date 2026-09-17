@@ -98,8 +98,6 @@ export const zhTWLocale: LocalePlugin = {
     "settings.processDisplayLegacy": "平鋪清單",
     "settings.processDisplayTimeline": "步驟（時間線）",
     "settings.processDisplayTabs": "步驟（標籤）",
-    "settings.sessionGrouping": "工作階段按時間分組",
-    "settings.sessionGroupingDescription": "在工作階段清單中加入今天 / 昨天 / 本週 / 本月 / 更早的分組標題。",
     "process.expandFull": "展開全文",
     "process.summaryTools": "{count} 次工具呼叫",
     "process.summaryFailed": "{count} 次失敗",
