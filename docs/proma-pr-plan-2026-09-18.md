@@ -45,7 +45,7 @@ npm run desktop                    # 起桌面壳冒烟
 | **P1** | Agent 编排与权限 | 4 | — | 中高（碰工具执行链） | ★★★★★ |
 | **P2** | 上下文与协作 | 5 | PROMA-01（阻塞冒泡复用审批通道） | 中 | ★★★★☆ |
 | **P3** | 右栏与文件 | 5 | — | 低 | ★★★☆☆ |
-| **P4** | 平台能力 | 6 | — | 低-中 | ★★★☆☆ |
+| **P4** | 平台能力 | 7 | — | 低-中 | ★★★☆☆ |
 | **P5** | 评估型（先 spike） | 3 | 视 spike 结论 | 高 | ★★☆☆☆ |
 
 **推荐节奏**：`P1 → (P2 ∥ P3) → P4 → P5`。
@@ -424,7 +424,7 @@ npm run desktop                    # 起桌面壳冒烟
 
 ---
 
-## 5. P4 — 平台能力（6 个 PR）
+## 5. P4 — 平台能力（7 个 PR）
 
 ### PROMA-14 · 定时任务生命周期语义
 
@@ -454,8 +454,38 @@ npm run desktop                    # 起桌面壳冒烟
 - **工作量**：M–L（~550 行 + 测试 + i18n ~20 key）
 - **风险**：中（定时器 + 复用会话的上下文增长 + 持久化迁移）。
 
-### PROMA-15 · 终端 Agent 工具（6 个）
+### PROMA-24 · 定时任务的 Agent 工具（7 个）
 
+> **这一条是第四轮核对时才发现的：定时任务在 pi-web 里对 agent 完全不可见。**
+> 仓内只注册过两个工具型内联扩展：`lib/todo-extension.ts`（todo）与 `lib/subagent-extension.ts`（Agent）。
+> `/api/cron` 只服务于设置面板，**没有任何工具入口**。
+
+- **目标**：让 agent 自己管理定时任务：`list_workspaces` / `list_automations` / `get_automation` / `create_automation` / `update_automation` / `delete_automation` / `run_automation_now`，并**在自动运行中禁止递归创建**。
+
+- **依据（Proma）**：
+  - 工具集：`main/lib/adapters/pi-builtin-tools.ts:334-572`（create `:382`、update `:447`、delete `:537`、run `:551`）
+  - **递归保护**：自动运行中禁止再创建任务 `:395-397`
+  - 工具描述强调“纯提醒不要创建 Automation”，与应用内 `automation` Skill 配合：`default-skills/automation/SKILL.md:1-80`；系统提示词要求 `agent-prompt-builder.ts:106-109`
+  - UI 联动：工具改动后广播刷新：`automation-scheduler.ts:102-108`
+
+- **接入点**（**照搬仓内已有的 todo 模式**）：
+  - 新 `lib/cron-extension.ts`：完全对照 `lib/todo-extension.ts` 的写法（`defineTool` + `pi.registerTool` + SDK 的状态持久化模式），直接复用 `lib/cron-store.ts` 的 CRUD（`readCronFile` / `patchCronTask`）与 `lib/cron-schedule.ts` 的校验（`validateSchedule` 类函数）
+  - 工具的 schedule 参数用**结构化字段**（kind/expression/times/weekdays/idleWindow/timezone），不要让 agent 拼 cron 字符串——`cron-expression.ts` 已有解析器，报错要回给模型让它重试
+  - 递归保护：**给 cron 运行创建的会话打标记**（`startRpcSession(\`__cron__${randomUUID()}\`)` 已有前缀，`lib/cron-runner.ts:68`），工具里检测到当前会话就是 `__cron__` 时直接拒绝 create/update
+  - 改动后刷新 UI：`components/fork/CronConfig.tsx` 需要知道任务被 agent 改了（复用仓内已有的 `workspaceFilesVersion` 类刷新信号模式）
+
+- **注意**：
+  - **递归保护是必须的，不是优化**。没有它，一个定时任务可以不断创建新的定时任务（每个都会跑），几十秒内就能把机器跟 API 额度拖干。Proma 专门做了这个拦截，参考值：`:395-397`。
+  - 同时限制**单任务最大数量**（如 50）与**最短间隔**（如 1 分钟），三层防护。
+  - `delete_automation` 让 agent 能删用户手工建的任务：高风险，应要求确认（接入 PROMA-01 的审批通道）。
+  - 不要让 agent 能改 `cwd` 到未授权目录（复用 `lib/path-security.ts`）。
+  - 配套小项：agent 改了任务后 UI 自动切到定时任务面板（Proma 的 `agent-component-activation.ts`）——不做也行，放到本 PR 可选范围。
+
+- **工作量**：M（~450 行 + 测试 + i18n ~16 key）
+- **风险**：中高（给 agent 创建定时执行的能力）。缓解：递归保护 + 数量上限 + 最短间隔 + 删除需确认。
+- **依赖**：无（与 PROMA-14 同域但不互为前置；两个都改 `lib/cron-*.ts`，建议同一批次以免冲突）
+
+### PROMA-15 · 终端 Agent 工具（6 个）
 - **目标**：把已有的终端暴露给 agent：`TerminalOpen` / `TerminalExecute` / `TerminalRead` / `TerminalList` / `TerminalInterrupt` / `TerminalClose`。输出分页、剥控制序列、cwd 必须在授权根内、无人值守运行禁用。
 
 - **依据**：
@@ -699,6 +729,7 @@ P4 (全独立，可任意插队)
   PROMA-17 存储管理 + 自动归档
   PROMA-18 快捷键系统
   PROMA-19 自动更新（并入 omp PR-13/14）
+  PROMA-24 定时任务 Agent 工具（与 PROMA-14 同改 cron-*，建议同批次）
 
 P5 (spike 不合并，结论出来再决定)
   PROMA-20 浏览器 CDP（预期：只桌面端）
@@ -714,7 +745,7 @@ P5 (spike 不合并，结论出来再决定)
 | 批 2 | PROMA-04 + PROMA-05 | 都是"会话文件操作"，共用 wrapper destroy 纪律 |
 | 批 3 | PROMA-07 + 08 + 13 + 23 | 四个小 PR 一起清掉聊天面与健壮性细节；PROMA-23 最简单，可作热身 |
 | 批 4 | PROMA-09 + 10 + 11 + 12 | 右栏/文件一整批，全部可独立验证 |
-| 批 5 | PROMA-14..19 | 平台能力，按实际痛点排序 |
+| 批 5 | PROMA-14 + 24 → 15..19 | 平台能力；PROMA-14 与 24 同改 `lib/cron-*.ts`，放同一批次以免冲突 |
 | 批 6 | PROMA-06 | 依赖审批通道，放最后做风险最低 |
 | 批 7 | PROMA-20..22 spike | 只在有余力时做 |
 

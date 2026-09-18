@@ -11,9 +11,9 @@
 > **一句话结论**：Proma 与本仓库是**同一个 pi SDK 0.85.1 上的两种架构**——
 > 它把 agent loop、provider、权限、存储全部换成自己的一套（桌面优先的独立产品），
 > 我只做 pi 的 UI（Web 优先，与 pi CLI 共享同一份真相）。
-> 因此它的能力分三类：**能直接搬的交互与工具设计（21 项，§2.1）**、
+> 因此它的能力分三类：**能直接搬的交互与工具设计（22 项，§2.1）**、
 > **必须换掉 pi 引擎才能做的（7 项，§2.3）**、**桌面平台绑定的（6 项，§2.3）**。
-> 真正的「我完全没有且值得做」是 **21 项**，其中 6 项已有既有计划（§10 去重）。
+> 真正的「我完全没有且值得做」是 **22 项**，其中 6 项已有既有计划（§10 去重）。
 
 ---
 
@@ -47,7 +47,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 
 ## 2. 结论摘要
 
-### 2.1 真正的独立能力：我完全没有、值得做（21 项）
+### 2.1 真正的独立能力：我完全没有、值得做（22 项）
 
 | # | 能力 | Proma 做到什么程度 | 可搬性 | 归属 |
 | --- | --- | --- | --- | --- |
@@ -66,12 +66,13 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | G13 | **会话内消息搜索** | 预计算归一化文本（流式 token 不重扫全历史）、打分片段、2 字符下限、50 条上限 | ★★★★★ 纯前端 | P3 |
 | G14 | **终端 Agent 工具（5 个）** | `TerminalOpen/Execute/Read/List/Interrupt/Close`：复用已列出的终端、分页归一化文本（默认 12k / 最大 48k）、剥控制序列、cwd 必须在授权根内、无人值守运行禁用终端 | ★★★★★ **我已有终端**（`lib/terminal-manager.ts`），只缺给 agent 的工具 | P4 |
 | G15 | **定时任务生命周期语义** | ① 子会话复用策略（同日复用/跨日新建/上下文 ≥70% 换新）+ 用户手发消息即"毕业" ② 连续失败 5 次自动暂停 ③ `maxRuns` 达上限自动停用并标完成 ④ 完成通知（always/success/error 三选一） | ★★★★★ 我的 `cron-store.ts` + `cron-runner.ts` 已是同一套骨架；**时间窗/运行历史/重入跳过/错过标记我已有**，只补这四项 | P4 |
-| G16 | **提醒条（Reminder rail）** | 到点主进程发系统通知（silent）+ 点击聚焦；未确认提醒在 UI 常驻成一条 rail；acknowledge/complete/snooze/open 四个动作 | ★★★★☆ Web 端用 Notification + 常驻条等价 | P4 |
-| G17 | **存储管理** | 用量统计、启动清临时文件、按天数清理已归档会话消息与 SDK 数据 | ★★★★★ 我的会话 jsonl 会一直涨 | P4 |
-| G18 | **快捷键系统** | 20 条默认快捷键分 4 组（app/edit/navigation/global）、点击录制、冲突即时检测、单条禁用、恢复默认、主进程 `globalShortcut`、严格修饰键匹配（防 Cmd+K 被 Cmd+Shift+K 误触） | ★★★★☆ 我有 `useKeyboardShortcuts.ts`（固定集合） | P4 |
-| G19 | **自动更新（完整版）** | `electron-updater`（autoDownload=false 自控时机）、启动后 10s 首查 / 每 4h、**空闲安装**（等所有 agent 结束再退出安装）、安装包缓存清理、GitHub Release 更新日志（30 分钟缓存 + 403/429 冷却） | ★★★☆☆ 我有 `/api/app-update` 版本检查 | P4 |
-| G20 | **内嵌真实浏览器 + Agent CDP 工具** | Electron `WebContentsView` + CDP：`observe/find/click/hover/drag/fill/press/waitFor/act/domAction/scroll/extract/selectOption/upload/evaluate/screenshot/...`，AX 快照带 ref + 失效语义，观察预算 240 元素，profile 按工作区隔离，本地 HTML 预览用 token 化 `proma-file://` | ★★☆☆☆ 需要 Electron 原生视图 + 大改造（先把现有 iframe 面板升级为可选 CDP 后端） | P5 spike |
-| G21 | **会话恢复降级（context replay）** | 续接失败时不报错就死：回退到“重放上下文”——注入最近 20 条消息 + 会话元信息 + 完整历史文件路径，并要求 agent 自己 Read 完整历史；另备一个 `buildRecoveryPrompt`。触发面覆盖 session-not-found / prompt-too-long / thinking-signature 三类错误 | ★★★★★ 纯应用层，无引擎依赖 | P2 |
+| G16 | **定时任务的 Agent 工具** | 7 个工具让 agent 自己建/改/删/立刻跑定时任务，并**在自动运行中禁止递归创建**（防 runaway） | ★★★★★ 仓内已有现成模式：`lib/todo-extension.ts` 就是“inline 扩展 + `defineTool` + SDK 状态存储”的参考实现 | P4 |
+| G17 | **提醒条（Reminder rail）** | 到点主进程发系统通知（silent）+ 点击聚焦；未确认提醒在 UI 常驻成一条 rail；acknowledge/complete/snooze/open 四个动作 | ★★★★☆ Web 端用 Notification + 常驻条等价 | P4 |
+| G18 | **存储管理** | 用量统计、启动清临时文件、按天数清理已归档会话消息与 SDK 数据 | ★★★★★ 我的会话 jsonl 会一直涨 | P4 |
+| G19 | **快捷键系统** | 20 条默认快捷键分 4 组（app/edit/navigation/global）、点击录制、冲突即时检测、单条禁用、恢复默认、主进程 `globalShortcut`、严格修饰键匹配（防 Cmd+K 被 Cmd+Shift+K 误触） | ★★★★☆ 我有 `useKeyboardShortcuts.ts`（固定集合） | P4 |
+| G20 | **自动更新（完整版）** | `electron-updater`（autoDownload=false 自控时机）、启动后 10s 首查 / 每 4h、**空闲安装**（等所有 agent 结束再退出安装）、安装包缓存清理、GitHub Release 更新日志（30 分钟缓存 + 403/429 冷却） | ★★★☆☆ 我有 `/api/app-update` 版本检查 | P4 |
+| G21 | **内嵌真实浏览器 + Agent CDP 工具** | Electron `WebContentsView` + CDP：`observe/find/click/hover/drag/fill/press/waitFor/act/domAction/scroll/extract/selectOption/upload/evaluate/screenshot/...`，AX 快照带 ref + 失效语义，观察预算 240 元素，profile 按工作区隔离，本地 HTML 预览用 token 化 `proma-file://` | ★★☆☆☆ 需要 Electron 原生视图 + 大改造（先把现有 iframe 面板升级为可选 CDP 后端） | P5 spike |
+| G22 | **会话恢复降级（context replay）** | 续接失败时不报错就死：回退到“重放上下文”——注入最近 20 条消息 + 会话元信息 + 完整历史文件路径，并要求 agent 自己 Read 完整历史；另备一个 `buildRecoveryPrompt`。触发面覆盖 session-not-found / prompt-too-long / thinking-signature 三类错误 | ★★★★★ 纯应用层，无引擎依赖 | P2 |
 
 ### 2.2 我有等价物、只是叫法/位置不同的（不再做）
 
@@ -82,7 +83,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | 探索 / 分叉 | fork（新 `.jsonl`）+ in-session branch（`navigate_tree`）+ `BranchNavigator.tsx` | 缺"结论带回主线"的收口动作 → G5 |
 | 工具调用分组 / 过程折叠 | `ProcessGroup.tsx` + `lib/step-categorizer.ts` + `lib/process-content.ts` | 它的工具短语（中文人话）与 8 种专属结果渲染更细 → 见 §3.6 |
 | Todo | `lib/todo-extension.ts` + `lib/todo-state.ts` + `components/fork/TodoChip.tsx` | 它有 SQLite + 提醒 + 日程；我只有会话级 todo |
-| 定时任务 | `lib/cron-*.ts` + `app/api/cron` + `components/fork/CronConfig.tsx` + agent 工具 | **我的 cron 表达力更强**（完整 5 字段 + 时区），它缺窗口/运行日/失败暂停 → G15 |
+| 定时任务 | `lib/cron-*.ts` + `app/api/cron` + `components/fork/CronConfig.tsx`（**无 agent 工具**） | **我的 cron 表达力更强**（完整 5 字段 + 时区），它缺窗口/运行日/失败暂停 → G15；agent 自建任务我完全无 → G16 |
 | 长期记忆 | `pi-memory` 包 + `/api/memory/files` + `components/fork/PiMemoryConfig.tsx` | 语义接近（MEMORY.md 索引 + 主题文件）；它多"3 天未整理就邀请回顾"和"记忆变更 diff watcher" |
 | Skills | `/api/skills{,/search,/install,/check,/update}` + `SkillsConfig.tsx` | 我多 skills.sh 搜索安装与更新检查；它多"按工作区隔离 + 导入导出 + 子文件编辑器 + 版本升级" |
 | MCP | `/api/mcp` CRUD + `/api/mcp/discover`（从 Claude/Codex/Cursor/VS Code 导入）+ `components/fork/McpConfig.tsx` | 我多一键导入；它多 OAuth PKCE + Keychain 加密 + 内置集成目录 + handshake 验证 |
@@ -92,11 +93,11 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | Worktree | `/api/worktrees` + 会话分组 + `lib/worktree.ts` | 我多"所有 worktree 归到一个项目行"；它多"会话级 activeWorktree + 子会话/终端跟随 + fork 时复制工作台文件" |
 | 终端 | `lib/terminal-manager.ts`（128KB ring + lease/expiry）+ `app/api/terminal/*` + `TerminalPanel.tsx`（xterm） | 它多"独立进程 PTY + 快照恢复 + agent 工具" → G14 |
 | 文件预览 | PDF + DOCX + 图片 + 音频 + 视频 + 文本/代码 + 不可预览卡片 | 缺 XLSX/PPTX → G11 |
-| 内嵌浏览器 | `BrowserPanel.tsx`（sandboxed iframe + 视口预设，明确说明 X-Frame-Options 站点会白屏） | 它是真 Chromium + CDP + agent 控制 → G20 |
+| 内嵌浏览器 | `BrowserPanel.tsx`（sandboxed iframe + 视口预设，明确说明 X-Frame-Options 站点会白屏） | 它是真 Chromium + CDP + agent 控制 → G21 |
 | 主题 | pi CLI 主题集（`/api/themes`）+ 6 套 Codex 皮肤 + 壁纸/密度/边框深度 | 我多得多；它只有 3 档外观 |
 | 提示词管理 | pi 的 prompt templates + `SystemPromptPanel.tsx`（查看） | 它多"多套提示词 CRUD + 设为默认" |
 | 项目信任 | `lib/project-trust.ts` + `ProjectTrustDialog.tsx` | 它有类似的项目根授权模型（`project-instruction-resolver.ts`） |
-| 自动归档 | 手工 pin/archive（`lib/session-flags.ts`） | 它按 0/7/14/30/60 天自动归档 → G17 可顺带 |
+| 自动归档 | 手工 pin/archive（`lib/session-flags.ts`） | 它按 0/7/14/30/60 天自动归档 → G18 可顺带 |
 | 消息编辑/删除/重发 | `MessageView.tsx`（edit / fork / delete / copy） | 它有 inline 编辑表单 + 用户/助手成对删除警告 |
 
 ### 2.3 不搬（换引擎才能做 / 桌面绑定 / 与本仓库定位冲突）
@@ -343,7 +344,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | 退出提示 | 灰字"终端已退出（code）" | 有 | 对齐 |
 | **Agent 终端工具** | 6 个工具 + 分页归一化输出 + cwd 授权 + 无人值守禁用 | **无** | **缺**（G14） |
 | 从文件区开终端 | 文件树每目录 hover 按钮、改动面板每目录按钮、worktree 按钮 | 部分（右栏终端 tab） | 缺入口 |
-| 浏览器 | Electron `WebContentsView`（原生栈顶）+ 完整 CDP + 24 个 agent 工具 + 风险告知门 + profile 隔离 | sandboxed iframe（明确不支持 X-Frame-Options 站点） | **缺**（G20，P5 spike） |
+| 浏览器 | Electron `WebContentsView`（原生栈顶）+ 完整 CDP + 24 个 agent 工具 + 风险告知门 + profile 隔离 | sandboxed iframe（明确不支持 X-Frame-Options 站点） | **缺**（G21，P5 spike） |
 | **回答里的链接路由** | `AgentBrowserLinkProvider`：agent 回答里的 http(s) 链接**路由到内嵌浏览器面板**（按会话排队，带活动点），而不是系统浏览器 | 本地文件链接已路由到应用内查看器（`MarkdownBody.tsx:80-81` 的 `onOpenFile`），但 http(s) 链接是 `target="_blank"`（`:85`）→ 开系统浏览器 | **小缺口**（可独立先做，不需 CDP；见 PROMA-20 的小项） |
 
 ---
@@ -364,7 +365,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | 错过的执行 | 顺延一个完整间隔（防重启雪崩） | **已有等价物但语义不同**：超出容差窗口的直接跳过并写 `lastError: "skipped (server was not running)"`（`lib/cron-runner.ts:103-105`），UI 用 `missed` 标记（`CronTaskView.missed`） |
 | 运行历史 | 记录可点进子会话 | **已有**：`CronRunRecord[]`（`lib/cron-schedule.ts:302-310`，上限 20 条）+ `lastSessionId` |
 | 通知 | 完成按 always/success/error 三选一发飞书卡片（**目前只实现飞书**） | 无（有 Web Push 基础设施可复用） |
-| Agent 自建 | 7 个 MCP 工具（list/get/create/update/delete/run_now），自动运行中禁止递归创建 | 有 cron 工具（递归保护需核对） |
+| Agent 自建 | 7 个工具（list_workspaces / list_automations / get_automation / create_automation / update_automation / delete_automation / run_automation_now），自动运行中**禁止递归创建** | **无**。定时任务只有设置面板（`components/fork/CronConfig.tsx`）+ `/api/cron` CRUD，**agent 看不见也改不了**。全仓库只注册过两个工具型内联扩展：`lib/todo-extension.ts`（todo）与 `lib/subagent-extension.ts`（Agent）→ **PROMA-24** |
 
 结论：**我的调度表达力与可观测性更强**（真 cron、时区、idleWindow、历史、missed 标记都是现成的），它的优势集中在**运行生命周期语义**：会话复用 + 失败自动暂停 + 限次自动完成 + 完成通知。G15 只应该做这四件事，不要重做已经有的。
 
@@ -377,7 +378,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | 日程 | 独立模型 + 月视图 + 分组 + 关联 Todo | **无** |
 | 提醒 | 主进程系统通知（silent）+ 30s 轮询 + snooze/acknowledge 工具 + 常驻 rail | **无** |
 | Agent 工具 | 22+ 个 `mcp__planning__*`（Todo/日程/分组/标签/提醒的 CRUD + complete + snooze） | 有 todo 工具 |
-| Agent 变更自动展示 | 写 Todo/日程 → 自动切到对应项目组件（记忆除外，等 watcher 真实 diff） | 有 TodoChip |
+| Agent 变更自动展示 | 写 Todo/日程 → **按工具名/ scope/targetType 自动切到对应项目组件**（记忆写入除外，等 watcher 真实 diff） | `agent-component-activation.ts:3-33, 22-30, 96-103` | 部分（我有 `TodoChip` 只读进度条，**不会自动切面板**） → 并入 PROMA-24 的配套项 |
 | macOS EventKit 双向同步 | N-API addon + 权限状态机（7 态）+ 30s 轮询 + 变更通知 + outbox 重试 + 冲突表 + 有界导入窗口（-30 天~+12 月） | 不搬（N4） |
 | Agent Island | macOS 刘海 / Windows 托盘显示待接手 agent + 1h 内到期项（最多 3 条，标逾期） | 不搬（N5） |
 | 快速任务浮窗 | 全局 `Alt+Space` 无边框置顶窗口 + 附件 + Chat/Agent 切换 + `⌘1/⌘2` | 不搬（N9）/ P5 退化版 |
@@ -448,9 +449,9 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | proxy | 代理 | 无（走环境变量） |
 | voice-input | 豆包 ASR | 无（N8） |
 | bots | 飞书/Slack/微信/钉钉 + 用法 + 品牌素材 | 无（N6） |
-| **shortcuts** | 快捷键总表 + 录制 + 冲突 + 禁用 + 恢复默认 | **无**（G18） |
+| **shortcuts** | 快捷键总表 + 录制 + 冲突 + 禁用 + 恢复默认 | **无**（G19） |
 | migration | 迁移压缩包/恢复 prompt | 无 |
-| **storage** | 用量统计 + 清理策略 | **无**（G17） |
+| **storage** | 用量统计 + 清理策略 | **无**（G18） |
 | appearance | 主题模式 / 界面缩放 / markdown 字号 | 我多得多（6 套皮肤 + pi 主题 + 壁纸 + 密度 + 边框深度） |
 | onboarding | 重放新手引导 | 无 |
 | about | 版本/运行时/协议/更新卡片/Agent Shell（Windows Git Bash/WSL 选择与检测）/版本历史 | 部分（about + app-update 提示） |
@@ -473,7 +474,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | --- | --- | --- |
 | 多窗口 | 主窗 + 预览窗 + 记忆窗 + 听写窗 + 指示器窗 + 快速任务窗 | 单窗 |
 | 托盘/状态 | Agent Island + 托盘 | 托盘（显示/退出） |
-| 自动更新 | 完整（见 G19） | `/api/app-update`（npm registry 版本比对 + 12h 缓存） |
+| 自动更新 | 完整（见 G20） | `/api/app-update`（npm registry 版本比对 + 12h 缓存） |
 | 更新 UI | 设置 about 的更新卡片（checking/downloading/downloaded/error + 进度 + 空闲安装/取消）+ 版本历史 + ReleaseNotesViewer | ChatWindow 顶部提示条（有更新时） |
 | 发布日志 | GitHub Release API（30 分钟缓存 + 403/429 冷却 15 分钟 + 中文错误） | 无 |
 | 打包 | 四平台（mac arm/intel + win + linux deb/AppImage），node-pty rebuild、原生 helper 编译、officecli 准备 | mac `dir` target，`after-pack.mjs` 注入 externalized 包 |
@@ -531,7 +532,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | MU-31 审批卡 | `musepi-borrowing-plan-2026-09-17.md:558` **MU-31** | 本计划的 PROMA-01 是 MU-31 的**超集**（MU-31 只升级卡片；PROMA-01 连引擎、白名单、恢复、风险档一起做）。且 **MU-31 的「不做（等引擎）」结论已在 §3.2.1 被推翻**——引擎已支持，无阻塞。建议 MU-31 并入 PROMA-01 |
 | 划词工具条 | `musepi-borrowing-plan-2026-09-17.md:531` **MU-04** | Proma 的 `AgentHistorySelectionLayer` 多一个"探索此分支"动作 → 并入 PROMA-05 |
 | Git 面板 | `musepi-borrowing-plan-2026-09-17.md:543` **MU-16** | Proma 的改动面板（G9）是 MU-16 的**只读半边**（不做 stage/commit/PR）。建议先做 PROMA-09，MU-16 的 stage/commit 后置 |
-| 更新对话框 | `omp-web-pr-plan-2026-09-17.md` **PR-13/PR-14** | Proma 的 G19 是这两条的实现参考。PROMA-18 与 PR-13/14 **合并为一个 PR** |
+| 更新对话框 | `omp-web-pr-plan-2026-09-17.md` **PR-13/PR-14** | Proma 的 G20 是这两条的实现参考。PROMA-19 与 PR-13/14 **合并为一个 PR** |
 | 命令面板 + 快捷键 | `musepi-borrowing-plan-2026-09-17.md:532` **MU-05** | Proma 的 G18 是 MU-05 的"设置页 + 录制"半边。PROMA-17 只做快捷键表/录制/冲突，命令面板留给 MU-05 |
 | 消息树画布 | `musepi-borrowing-plan-2026-09-17.md:674` **MU-25** | 与本计划无重叠（Proma 没有消息树画布） |
 | 底部面板 / 右栏瘦身 | `ui-layout-pr-plan-2026-09-17.md` **UI-06 / MU-12** | Proma 的右栏双 pane（G-5.1）与 UI-06 方向相反，**本计划不做双 pane** |
