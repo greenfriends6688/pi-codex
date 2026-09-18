@@ -1462,7 +1462,66 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               );
             })()}
             {streamState.isStreaming && hasStreamingContent && streamState.streamingMessage && (
-              <MessageView message={streamState.streamingMessage as AgentMessage} toolResults={toolResultsMap} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} expandedToolIds={expandedToolIds} onToggleTool={handleToggleTool} />
+              (() => {
+                // fork:process-live — the in-flight message used to render through the flat
+                // MessageView, so switching the process-display setting mid-run changed
+                // nothing until the turn finished and the finalized message reached the
+                // grouped path below. Build the same group from the streaming message and
+                // keep the flat renderer only for `legacy`.
+                const live = streamState.streamingMessage as AgentMessage;
+                const liveSplit = processDisplayMode === "legacy" || live.role !== "assistant"
+                  ? null
+                  : splitFinalAssistantBlocks(live);
+                const liveProcessBlocks = liveSplit
+                  ? messageToProcessContentBlocks(
+                      { ...live, content: liveSplit.processBlocks } as AgentMessage,
+                      { messageIndex: messages.length, phase: "process", toolResults: toolResultsMap, isStreaming: true },
+                    )
+                  : [];
+                if (liveProcessBlocks.length === 0) {
+                  // Unchanged flat renderer (and unchanged expression): the streaming
+                  // message must keep receiving `toolResultsMap` so live shell output
+                  // stays attached to its tool call.
+                  return <MessageView message={streamState.streamingMessage as AgentMessage} toolResults={toolResultsMap} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} expandedToolIds={expandedToolIds} onToggleTool={handleToggleTool} />;
+                }
+                const liveToolCalls = liveProcessBlocks.filter((block) => block.type === "toolCall").length;
+                return (
+                  <>
+                    <div key="process-group-live">
+                      <ProcessDetailsGroup
+                        messageCount={Math.max(1, liveToolCalls)}
+                        toolCallCount={liveToolCalls}
+                        // Open while the model is still working, collapse once the answer
+                        // starts — the same rule the finalized group uses.
+                        defaultExpanded={liveSplit!.answerBlocks.length === 0}
+                        summaryText={summarizeProcessBlocks(liveProcessBlocks, (key, params) => t(key, params), (key) => t(key))}
+                        t={t}
+                      >
+                        <ProcessGroup
+                          blocks={liveProcessBlocks}
+                          isStreaming
+                          toolResults={toolResultsMap}
+                          onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
+                          onOpenSession={onOpenSession}
+                        />
+                      </ProcessDetailsGroup>
+                    </div>
+                    {liveSplit!.answerBlocks.length > 0 && (
+                      <MessageView
+                        message={{ ...live, content: liveSplit!.answerBlocks } as AgentMessage}
+                        toolResults={toolResultsMap}
+                        isStreaming
+                        modelNames={modelNames}
+                        cwd={messageCwd}
+                        onOpenFile={onOpenFile}
+                        onOpenSession={onOpenSession}
+                        expandedToolIds={expandedToolIds}
+                        onToggleTool={handleToggleTool}
+                      />
+                    )}
+                  </>
+                );
+              })()
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (

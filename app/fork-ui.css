@@ -348,6 +348,24 @@ html.keyboard-open .extension-status-shelf {
   -webkit-app-region: drag;
 }
 
+/* The two workspace-boundary toggles are NOT children of the header: they are absolutely
+ * positioned siblings that happen to sit on top of it (x = sidebar/panel edge, y = the
+ * 46px bar). The drag region is hit-tested by the *browser process* before the renderer
+ * sees the event, and only an explicit `no-drag` carves a hole in it — an element that is
+ * merely painted above the region is still swallowed. So both toggles (and the svg inside
+ * them) must opt out by name; the header's own `button` rule cannot reach them.
+ *
+ * This is why they were "点不动" in the packaged app while working in the browser build
+ * and under CDP-injected clicks: DevTools input bypasses the browser-process hit test. */
+[data-desktop-shell="true"] .desktop-sidebar-toggle,
+[data-desktop-shell="true"] .desktop-sidebar-toggle *,
+[data-desktop-shell="true"] .desktop-secondary-workspace-toggle,
+[data-desktop-shell="true"] .desktop-secondary-workspace-toggle *,
+[data-desktop-shell="true"] .desktop-workspace-role-toggle,
+[data-desktop-shell="true"] .desktop-workspace-role-toggle * {
+  -webkit-app-region: no-drag;
+}
+
 /* Secondary handle: the sidebar's brand row. It has a wide empty stretch between the
  * brand and the search button, and it sits under the traffic lights anyway — moving the
  * window from there is what people expect in a sidebar app. Its own controls opt out. */

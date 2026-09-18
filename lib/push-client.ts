@@ -5,6 +5,8 @@
  * path keeps working as a fallback.
  */
 
+import { isDesktopShell } from "./desktop-shell";
+
 let activeSubscriptionPromise: Promise<boolean> | null = null;
 
 // Standard base64url → Uint8Array conversion for applicationServerKey.
@@ -28,6 +30,13 @@ export function isPushSupported(): boolean {
 
 export async function setupPushSubscription(locale: string): Promise<boolean> {
   if (!isPushSupported() || Notification.permission !== "granted") return false;
+  // fork:desktop-shell — the packaged app notifies through the native bridge
+  // (lib/browser-notifications.ts), so a web-push subscription would only add a
+  // second, browser-branded notification for the same event: Chrome's icon, the
+  // `127.0.0.1:<port>` origin and a "设置" button, which is exactly what users
+  // reported seeing instead of the app's own notification. Skip the subscription
+  // entirely there; the server prunes the endpoint when it is gone.
+  if (isDesktopShell()) return false;
   if (activeSubscriptionPromise) return activeSubscriptionPromise;
 
   const attempt = (async () => {

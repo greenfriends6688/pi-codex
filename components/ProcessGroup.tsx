@@ -307,6 +307,7 @@ export function buildProcessSteps(blocks: ProcessContentBlock[], t: (key: string
         && previous.failed !== true;
       if (canMerge) {
         previous.blocks.push(block);
+        previous.detail = oneLine(block.type === "thinking" ? block.thinking : block.text);
         // Only thinking blocks carry a duration; text blocks contribute 0 and
         // must not turn a known duration back into `undefined`.
         const added = block.type === "thinking" ? block.duration : undefined;
@@ -321,6 +322,10 @@ export function buildProcessSteps(blocks: ProcessContentBlock[], t: (key: string
         duration: block.type === "thinking" ? block.duration : undefined,
         thinking: block.type === "thinking",
         reasoning: true,
+        // fork:process-live — a closed reasoning row used to read "推理" and nothing
+        // else, which is what made the grouped views feel like a table of contents.
+        // The first line of the model's own words belongs on the row itself.
+        detail: oneLine(block.type === "thinking" ? block.thinking : block.text),
         blocks: [block],
       });
       continue;
@@ -674,7 +679,11 @@ export function ProcessGroup({
     });
   };
 
-  const chipStep = tabsMode && activeChip ? steps.find((step) => step.id === activeChip) ?? null : null;
+  // fork:process-live — with no chip selected the strip showed nothing at all, so a
+  // running turn looked like a row of labels. Follow the newest step until the user
+  // picks one (their choice then wins for the rest of the session).
+  const shownChip = activeChip ?? (tabsMode && isStreaming ? steps[steps.length - 1]?.id ?? null : null);
+  const chipStep = tabsMode && shownChip ? steps.find((step) => step.id === shownChip) ?? null : null;
 
   return (
     <section
@@ -685,7 +694,7 @@ export function ProcessGroup({
       {tabsMode ? (
         <div className="process-chips" role="list">
           {steps.map((step) => {
-            const active = step.id === activeChip;
+            const active = step.id === shownChip;
             return (
               <button
                 key={step.id}
@@ -698,7 +707,7 @@ export function ProcessGroup({
                   step.failed ? " is-failed" : "",
                   step.thinking ? " is-thinking" : "",
                 ].filter(Boolean).join(" ")}
-                onClick={() => setActiveChip(active ? null : step.id)}
+                onClick={() => setActiveChip(step.id === activeChip ? null : step.id)}
               >
                 <StepIcon name={step.icon} />
                 <span className="process-chip-label">{step.label}</span>
