@@ -19,12 +19,15 @@ test("configures iOS standalone mode to use the full screen", () => {
 
 test("tracks the visual viewport while the software keyboard is open", () => {
   assert.match(appShellSource, /useViewportHeight\(\)/);
-  assert.match(appShellSource, /paddingTop: "env\(safe-area-inset-top\)"/);
+  // fork:desktop-shell — the inset now adds the macOS title-bar band on top of the
+  // safe area; the safe area itself must still be part of the expression.
+  assert.match(appShellSource, /paddingTop: `calc\(env\(safe-area-inset-top\) \+ \$\{desktopTitleBarInset\(\)\}px\)`/);
   assert.match(appShellSource, /paddingBottom: "env\(safe-area-inset-bottom\)"/);
   assert.match(appShellSource, /paddingLeft: "env\(safe-area-inset-left\)"/);
   assert.match(appShellSource, /paddingRight: "env\(safe-area-inset-right\)"/);
-  assert.match(appShellSource, /height: "calc\(var\(--height-toolbar, 46px\) \+ env\(safe-area-inset-top\)\)"/);
-  assert.match(appShellSource, /\/\* Right panel tab bar \*\/[\s\S]*?height: "calc\(var\(--height-toolbar-pane, 40px\) \+ env\(safe-area-inset-top\)\)"/);
+  assert.match(appShellSource, /height: `calc\(var\(--height-toolbar, 46px\) \+ env\(safe-area-inset-top\) \+ \$\{desktopTitleBarInset\(\)\}px\)`/);
+  // fork:desktop-shell — the right panel header also reserves the title-bar band.
+  assert.match(appShellSource, /\/\* Right panel tab bar \*\/[\s\S]*?height: `calc\(var\(--height-toolbar-pane, 40px\) \+ env\(safe-area-inset-top\) \+ \$\{desktopTitleBarInset\(\)\}px\)`/);
   assert.match(appShellSource, /height: "var\(--app-viewport-height, 100dvh\)"/);
   assert.match(appShellSource, /data-mobile-toolbar-file=\{mobile \? "true" : undefined\}/);
   assert.match(viewportHookSource, /window\.visualViewport/);
