@@ -11,9 +11,9 @@
 > **一句话结论**：Proma 与本仓库是**同一个 pi SDK 0.85.1 上的两种架构**——
 > 它把 agent loop、provider、权限、存储全部换成自己的一套（桌面优先的独立产品），
 > 我只做 pi 的 UI（Web 优先，与 pi CLI 共享同一份真相）。
-> 因此它的能力分三类：**能直接搬的交互与工具设计（20 项，§2.1）**、
+> 因此它的能力分三类：**能直接搬的交互与工具设计（21 项，§2.1）**、
 > **必须换掉 pi 引擎才能做的（7 项，§2.3）**、**桌面平台绑定的（6 项，§2.3）**。
-> 真正的「我完全没有且值得做」是 **20 项**，其中 6 项已有既有计划（§10 去重）。
+> 真正的「我完全没有且值得做」是 **21 项**，其中 6 项已有既有计划（§10 去重）。
 
 ---
 
@@ -47,7 +47,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 
 ## 2. 结论摘要
 
-### 2.1 真正的独立能力：我完全没有、值得做（20 项）
+### 2.1 真正的独立能力：我完全没有、值得做（21 项）
 
 | # | 能力 | Proma 做到什么程度 | 可搬性 | 归属 |
 | --- | --- | --- | --- | --- |
@@ -71,6 +71,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | G18 | **快捷键系统** | 20 条默认快捷键分 4 组（app/edit/navigation/global）、点击录制、冲突即时检测、单条禁用、恢复默认、主进程 `globalShortcut`、严格修饰键匹配（防 Cmd+K 被 Cmd+Shift+K 误触） | ★★★★☆ 我有 `useKeyboardShortcuts.ts`（固定集合） | P4 |
 | G19 | **自动更新（完整版）** | `electron-updater`（autoDownload=false 自控时机）、启动后 10s 首查 / 每 4h、**空闲安装**（等所有 agent 结束再退出安装）、安装包缓存清理、GitHub Release 更新日志（30 分钟缓存 + 403/429 冷却） | ★★★☆☆ 我有 `/api/app-update` 版本检查 | P4 |
 | G20 | **内嵌真实浏览器 + Agent CDP 工具** | Electron `WebContentsView` + CDP：`observe/find/click/hover/drag/fill/press/waitFor/act/domAction/scroll/extract/selectOption/upload/evaluate/screenshot/...`，AX 快照带 ref + 失效语义，观察预算 240 元素，profile 按工作区隔离，本地 HTML 预览用 token 化 `proma-file://` | ★★☆☆☆ 需要 Electron 原生视图 + 大改造（先把现有 iframe 面板升级为可选 CDP 后端） | P5 spike |
+| G21 | **会话恢复降级（context replay）** | 续接失败时不报错就死：回退到“重放上下文”——注入最近 20 条消息 + 会话元信息 + 完整历史文件路径，并要求 agent 自己 Read 完整历史；另备一个 `buildRecoveryPrompt`。触发面覆盖 session-not-found / prompt-too-long / thinking-signature 三类错误 | ★★★★★ 纯应用层，无引擎依赖 | P2 |
 
 ### 2.2 我有等价物、只是叫法/位置不同的（不再做）
 
@@ -219,6 +220,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 
 | 项 | 它的实现 | 依据 | 我的状态 |
 | --- | --- | --- | --- |
+| **会话恢复降级** | 续接失败时不直接报错：降级为“重放上下文”（最近 20 条消息 + 会话元信息 + 完整历史文件路径 + 指示 agent 自己 Read 完整历史）；另备 `buildRecoveryPrompt`。触发面覆盖 session-not-found / prompt-too-long / thinking-signature | `agent-session-context-prompt.ts:5, 94-150, 152-181`；恢复处理 `agent-orchestrator.ts:1815-1930` | **无**。`lib/prompt-recovery.ts` 只做“失败后恢复上一条提示词”的去重，与上下文重建无关；`lib/rpc-manager.ts` 的 `startRpcSession` 失败就直接抛。→ **PROMA-23** |
 | 工具人话短语 | `getToolPhrase` / `getToolResultSummary`，支持 `_intent` 与 Bash description，MCP 显示 `SERVER / TOOL`，diff 统计 | `tool-phrase.ts:35, 105, 483`；`tool-utils.ts:117, 522, 537` | 无（我显示原始工具名） |
 | 8 种专属工具结果渲染 | Bash / Read / Edit / Write / Grep / Glob / WebSearch / WebFetch + CollapsibleResult + PreviewOpenButton | `tool-result-renderers/index.tsx:29-52` | 部分（ANSI/bash-output） |
 | 子 agent 渲染 | 折叠的子工具、prompt 气泡、工具计数、最终输出、用量 footer、编辑冒泡到父轮次 | `ContentBlock.tsx:320-330, 410-600` | 部分 |
@@ -568,6 +570,8 @@ apps/electron/src/renderer/
   components/settings/             14 个设置面板
   lib/shortcut-*.ts                快捷键系统
 ```
+
+- 会话 **jsonl** 的鲁棒性：Proma 对“续接失败”做了上下文重放降级，我目前直接报错（→ PROMA-23）。
 
 ## 附录 B：本次对比用到的探索结论（保存供 PR 计划引用）
 
