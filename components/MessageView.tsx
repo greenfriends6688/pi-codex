@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, useRef, useEffect, useMemo } from "react";
+import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
 import { CopyStateIcon } from "./fork/CopyStateIcon";
@@ -164,6 +164,12 @@ function SafeMarkdownBody({ children, className, ...props }: React.ComponentProp
 // Cap the user "sent" bubble's height so an abnormally long message does not
 // push the conversation off screen; overflow scrolls inside the bubble.
 const USER_BUBBLE_MAX_HEIGHT = 300;
+
+/**
+ * fork:fix-thinking-affordance — 流式结束后多久自动折叠思考块。
+ * 取 1s：足够让用户看到"思考结束"这个状态变化，又不会一直占着版面。
+ */
+const THINKING_AUTO_COLLAPSE_MS = 1_000;
 
 function loadThinkingContent(sessionId: string, entryId: string, blockIndex: number): Promise<string> {
   const key = `${sessionId}:${entryId}:${blockIndex}`;
@@ -921,7 +927,7 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} /></div>;
   }
   if (block.type === "thinking") {
-    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} />;
+    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} isStreaming={isStreaming} />;
   }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
@@ -940,12 +946,13 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }
 
-export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex }: {
+export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex, isStreaming }: {
   block: ThinkingContent;
   duration?: number;
   sessionId?: string;
   entryId?: string;
   blockIndex: number;
+  isStreaming?: boolean;
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(isThinkingExpandedByDefault);
@@ -956,12 +963,61 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex 
   tRef.current = t;
   const preview = getThinkingPreview(block.thinking);
 
+  // fork:fix-thinking-affordance — 两个只在本次运行内有意义的标记。
+  // `autoOpenedRef`：展开是"流式期间被自动打开的"，结束后才允许自动收回；
+  // `manualOverrideRef`：用户手动点过（或改过全局偏好），此后不再替他决定。
+  const autoOpenedRef = useRef(false);
+  const manualOverrideRef = useRef(false);
+  const autoCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Keep already-mounted blocks in sync when the preference changes.
   useEffect(() => {
-    const onChange = () => setExpanded(isThinkingExpandedByDefault());
+    const onChange = () => {
+      manualOverrideRef.current = true;
+      setExpanded(isThinkingExpandedByDefault());
+    };
     window.addEventListener(THINKING_EXPANDED_EVENT, onChange);
     return () => window.removeEventListener(THINKING_EXPANDED_EVENT, onChange);
   }, []);
+
+  // fork:fix-thinking-affordance — 流式期间强制展开，结束后自动收起（1s）。
+  // 之前思考块全程跟随持久化偏好：偏若是折叠，用户在流式期间看不到推理；
+  // 偏若是展开，一轮结束后整屏还留着上一条的思考。现在的行为与对照项目一致。
+  useEffect(() => {
+    if (isStreaming) {
+      if (autoCloseTimerRef.current) {
+        clearTimeout(autoCloseTimerRef.current);
+        autoCloseTimerRef.current = null;
+      }
+      setExpanded((current) => {
+        if (!current) autoOpenedRef.current = true;
+        return true;
+      });
+      return;
+    }
+    if (!autoOpenedRef.current || manualOverrideRef.current) return;
+    autoOpenedRef.current = false;
+    autoCloseTimerRef.current = setTimeout(() => {
+      autoCloseTimerRef.current = null;
+      setExpanded(isThinkingExpandedByDefault());
+    }, THINKING_AUTO_COLLAPSE_MS);
+  }, [isStreaming]);
+
+  useEffect(() => () => {
+    if (autoCloseTimerRef.current) clearTimeout(autoCloseTimerRef.current);
+  }, []);
+
+  // fork:fix-thinking-affordance — 展开前预取。
+  // 惰性加载本身是对的（长思考不随列表全量渲染），但代价是展开时要等一次往返、
+  // 期间只有骨架屏。悬停/聚焦就开始拉，真正点开时内容已经在了。
+  const prefetch = useCallback(() => {
+    if (!block.deferred || content !== null || !sessionId || !entryId) return;
+    void loadThinkingContent(sessionId, entryId, blockIndex)
+      .then((value) => setContent(value))
+      .catch(() => {
+        // 失败留给展开时的正常路径报错，预取不打扰用户。
+      });
+  }, [block.deferred, blockIndex, content, entryId, sessionId]);
 
   // Load deferred history content whenever the block is expanded.
   // loadThinkingContent() memoizes in-flight promises and drops failed ones
@@ -1010,7 +1066,12 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex 
         aria-expanded={expanded}
         aria-label={`${t("i18n.thinking")}${preview ? `: ${preview}` : ""}`}
         title={t("i18n.thinking")}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={() => {
+          manualOverrideRef.current = true;
+          setExpanded((v) => !v);
+        }}
+        onPointerEnter={prefetch}
+        onFocus={prefetch}
         style={{
           display: "inline-flex",
           alignItems: "center",
