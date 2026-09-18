@@ -77,15 +77,3 @@ export function setDesktopBadge(count: number): void {
 export function setDesktopKeepAwake(active: boolean): void {
   getDesktopBridge()?.setKeepAwake(active);
 }
-
-/**
- * Height of the strip the macOS traffic lights need at the top of the window.
- *
- * The lights sit at `{x: 14, y: 16}` and are ~62×14px, so the app's own bars must
- * start below them — otherwise the sidebar's brand text is drawn underneath the close
- * button. Every top-level panel header adds this inset in the desktop shell, so all
- * three columns keep their headers aligned.
- */
-export function desktopTitleBarInset(platform: string | undefined = getDesktopBridge()?.platform): number {
-  return platform === "darwin" ? 28 : 0;
-}

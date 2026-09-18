@@ -348,6 +348,15 @@ html.keyboard-open .extension-status-shelf {
   -webkit-app-region: drag;
 }
 
-/* The actual handle is the 28px band the traffic lights live in: it is the header's
- * own padding (no child element covers it), so it stays draggable even though every
- * control inside the bar opts out. Double-clicking it zooms, as on any title bar. */
+/* Secondary handle: the sidebar's brand row. It has a wide empty stretch between the
+ * brand and the search button, and it sits under the traffic lights anyway — moving the
+ * window from there is what people expect in a sidebar app. Its own controls opt out. */
+[data-desktop-shell="true"] .sidebar-brand-row {
+  -webkit-app-region: drag;
+}
+[data-desktop-shell="true"] .sidebar-brand-row button,
+[data-desktop-shell="true"] .sidebar-brand-row button *,
+[data-desktop-shell="true"] .sidebar-brand-row a,
+[data-desktop-shell="true"] .sidebar-brand-row a * {
+  -webkit-app-region: no-drag;
+}

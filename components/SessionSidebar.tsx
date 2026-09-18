@@ -8,6 +8,7 @@ import { skillExpansionToCommand } from "@/lib/slash-display";
 import { chatProjectOf, getProjectActivity, getRecentProjects, sessionsForProject, withoutChatProject } from "@/lib/project-groups";
 import type { RecentProject } from "@/lib/project-groups";
 import { SESSION_TAG_TONES, applySessionFlags, archivedSessions, useSessionFlags, type SessionTag } from "@/lib/session-flags";
+import { desktopTrafficLightInset } from "@/lib/desktop-shell";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import { getFileName } from "@/lib/file-paths";
@@ -1329,7 +1330,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        {/* fork:desktop-shell — the traffic lights sit over this row's left edge, so the
+            brand starts to their right instead of the whole bar moving down. The row also
+            doubles as the window's drag handle (see fork-ui.css). */}
+        <div
+          className="sidebar-brand-row"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: 10,
+            paddingLeft: desktopTrafficLightInset(),
+          }}
+        >
           <PiWebTitle />
           <button
             type="button"

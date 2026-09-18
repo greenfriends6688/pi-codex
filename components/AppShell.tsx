@@ -40,8 +40,6 @@ import {
 import { setupPushSubscription } from "@/lib/push-client";
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import {
-  desktopTitleBarInset,
-  desktopTrafficLightInset,
   getDesktopBridge,
   markDesktopShell,
   setDesktopBadge,
@@ -2109,7 +2107,7 @@ export function AppShell() {
         // the header's own centre (28px button in a 46px bar), so the boundary
         // toggle looked out of line with every icon in the bar.
         position: mobile ? "relative" : "absolute",
-        top: mobile ? undefined : `calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2 + ${desktopTitleBarInset()}px)`,
+        top: mobile ? undefined : "calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2)",
         // The sidebar resizer writes this inherited variable on every pointer
         // move. Reading it here keeps the boundary button in lockstep instead
         // of waiting for React to commit the final width on pointer-up.
@@ -2156,7 +2154,7 @@ export function AppShell() {
         style={{
           // fork:ui-topbar-align — see the sidebar toggle: same 9px offset.
           position: mobile ? "relative" : "absolute",
-          top: mobile ? undefined : `calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2 + ${desktopTitleBarInset()}px)`,
+          top: mobile ? undefined : "calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2)",
           // The resizer writes this CSS variable on every pointer move, while
           // React state is intentionally committed only when dragging ends.
           // Reading the variable here keeps the divider control in lockstep.
@@ -2201,7 +2199,7 @@ export function AppShell() {
       style={{
         position: "absolute",
         // fork:ui-topbar-align — third boundary control, same centring fix.
-        top: `calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2 + ${desktopTitleBarInset()}px)`,
+        top: "calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2)",
         right: 0,
         zIndex: 261,
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -2408,8 +2406,7 @@ export function AppShell() {
           display: "flex",
           flexDirection: "column",
           flexShrink: 0,
-          // fork:desktop-shell — the macOS traffic lights live in this band.
-          paddingTop: `calc(env(safe-area-inset-top) + ${desktopTitleBarInset()}px)`,
+          paddingTop: "env(safe-area-inset-top)",
           paddingBottom: "env(safe-area-inset-bottom)",
           zIndex: 200,
         } as React.CSSProperties}
@@ -2435,7 +2432,7 @@ export function AppShell() {
            // The sidebar control is deliberately outside the workspace header.
            // Reserve its hit-target width inside whichever surface is currently
            // in the main region, so the control never covers its first action.
-           "--main-workspace-header-leading-inset": `${TOP_BAR_ICON_BUTTON_SIZE + desktopTrafficLightInset()}px`,
+           "--main-workspace-header-leading-inset": `${TOP_BAR_ICON_BUTTON_SIZE}px`,
            // The right-edge role control is independent of both content
            // surfaces, so keep it out of the last header action as well.
            "--main-workspace-header-trailing-inset": `${TOP_BAR_ICON_BUTTON_SIZE}px`,
@@ -2453,7 +2450,7 @@ export function AppShell() {
        >
         {/* Top bar with sidebar toggle */}
         <div ref={topBarRef} style={{ flexShrink: 0, background: "var(--bg)" }}>
-        <div className="main-workspace-header" style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: `calc(var(--height-toolbar, 46px) + env(safe-area-inset-top) + ${desktopTitleBarInset()}px)`, paddingTop: `calc(env(safe-area-inset-top) + ${desktopTitleBarInset()}px)` }}>
+        <div className="main-workspace-header" style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(var(--height-toolbar, 46px) + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
           {isMobile && <button
             onClick={handleSidebarToggle}
              title={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
@@ -3121,8 +3118,8 @@ export function AppShell() {
           display: "flex",
           alignItems: "center",
           flexShrink: 0,
-          height: `calc(var(--height-toolbar-pane, 40px) + env(safe-area-inset-top) + ${desktopTitleBarInset()}px)`,
-          paddingTop: `calc(env(safe-area-inset-top) + ${desktopTitleBarInset()}px)`,
+          height: "calc(var(--height-toolbar-pane, 40px) + env(safe-area-inset-top))",
+          paddingTop: "env(safe-area-inset-top)",
           background: "var(--bg-panel)",
           borderBottom: "1px solid var(--border)",
         }}>

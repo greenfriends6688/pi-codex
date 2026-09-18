@@ -37,9 +37,7 @@ test("resizing updates live without layout-transition lag", () => {
 });
 
 test("the main workspace header reserves the independent sidebar control lane", () => {
-  // fork:desktop-shell — the inset now also reserves room for the macOS traffic
-  // lights when the app runs inside Electron.
-  assert.match(source, /"--main-workspace-header-leading-inset": `\$\{TOP_BAR_ICON_BUTTON_SIZE \+ desktopTrafficLightInset\(\)\}px`/);
+  assert.match(source, /"--main-workspace-header-leading-inset": `\$\{TOP_BAR_ICON_BUTTON_SIZE\}px`/);
   assert.match(source, /"--main-workspace-header-trailing-inset": `\$\{TOP_BAR_ICON_BUTTON_SIZE\}px`/);
   assert.equal(source.match(/className="main-workspace-header"/g)?.length, 2);
   assert.match(css, /\.main-panels > \.main-workspace \.main-workspace-header[\s\S]*?padding-inline-start: var\(--main-workspace-header-leading-inset, 36px\)/);
