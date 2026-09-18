@@ -616,6 +616,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [error, setError] = useState<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [treeRefreshKey, setTreeRefreshKey] = useState(0);
+  // fork:fix-tree-watch — 目录变更脉冲。外部（agent/终端/编辑器）改了文件后，
+  // 服务端 SSE 推一次，这里自增把已展开目录的重取带动起来。
+  const [watchPulse, setWatchPulse] = useState(0);
+  const [watchDegraded, setWatchDegraded] = useState(false);
+  // fork:fix-tree-git-debounce — git status 单独一条节流脉冲。
+  // 目录事件可能连续来（一次写入触发多个事件），而 `git status` 要起进程、扫索引，
+  // 不能跟着每次事件重拉；这里用 1.2s 去抖，保证「最终一致」而不跟着抖。
+  const [gitPulse, setGitPulse] = useState(0);
   const [highlightedPaths, setHighlightedPaths] = useState<Set<string>>(new Set());
   const [gitFiles, setGitFiles] = useState<GitFileStatus[]>([]);
   const [gitLineStats, setGitLineStats] = useState({ additions: 0, deletions: 0 });
@@ -632,7 +640,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const searchInputRef = useRef<HTMLInputElement>(null);
   const prevCwdRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
-  const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}`;
+  const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}:${watchPulse}`;
   const uploadBusy = uploadPhase !== "idle";
   const hasSearchQuery = searchQuery.trim().length > 0;
 
@@ -851,8 +859,38 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
       .then((entries) => { if (!cancelled) setRoots(entries); })
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
+
     return () => { cancelled = true; };
-  }, [cwd, refreshKey, treeRefreshKey]);
+  }, [cwd, gitPulse, refreshKey, treeRefreshKey]);
+
+  // fork:fix-tree-git-debounce — 目录事件 → git 状态刷新的去抖桥。
+  useEffect(() => {
+    if (watchPulse === 0) return;
+    const timer = setTimeout(() => setGitPulse((pulse) => pulse + 1), 1200);
+    return () => clearTimeout(timer);
+  }, [watchPulse]);
+
+  // fork:fix-tree-watch — 订阅目录变更。原先刷新只靠父级 refreshKey 自上而下重取，
+  // 组件从未订阅任何事件流，所以外部改动后文件树不会自己更新。
+  //
+  // 注意与 git status 那条 effect 的分工：这里只在**收到服务端事件**时自增脉冲，
+  // 不做轮询；SSE 断开由 EventSource 自己按浏览器默认节奏重连。
+  useEffect(() => {
+    if (!cwd || typeof EventSource === "undefined") return;
+    const source = new EventSource(`/api/file-watch?path=${encodeURIComponent(cwd)}`);
+    let disconnected = false;
+    source.addEventListener("change", () => {
+      if (disconnected) return;
+      setWatchPulse((pulse) => pulse + 1);
+    });
+    source.addEventListener("degraded", () => { setWatchDegraded(true); });
+    source.addEventListener("error", () => {
+      // 这里是服务端主动 close（非 404 等 HTTP 错误）：不再重连，改用原有刷新路径。
+      disconnected = true;
+      source.close();
+    });
+    return () => source.close();
+  }, [cwd]);
 
   useEffect(() => {
     let cancelled = false;
@@ -890,6 +928,11 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   return (
     <div style={{ minHeight: "100%" }}>
       <input ref={uploadInputRef} type="file" multiple hidden onChange={handleUploadInput} />
+      {watchDegraded && (
+        <div role="status" style={{ padding: "4px 8px", fontSize: 11, color: "var(--text-dim)" }}>
+          {t("files.watchDegraded")}
+        </div>
+      )}
       {showUploadFeedback && (
         <div style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
         {uploadBusy && (
@@ -910,7 +953,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
             </div>
             {uploadPhase === "uploading" && (
               <div style={{ height: 3, marginTop: 4, overflow: "hidden", borderRadius: 2, background: "var(--border)" }}>
-                <div style={{ width: `${uploadProgress}%`, height: "100%", background: "var(--text-muted)", transition: "width 120ms ease" }} />
+                <div style={{ width: "100%", height: "100%", background: "var(--text-muted)", transform: `scaleX(${Math.max(0, Math.min(100, uploadProgress)) / 100})`, transformOrigin: "left", transition: "transform 120ms ease" }} />
               </div>
             )}
           </div>

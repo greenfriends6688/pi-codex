@@ -100,10 +100,13 @@ export function TodoChip({ summary }: { summary: TodoSummary }): ReactNode {
           <span
             style={{
               display: "block",
-              width: `${percent}%`,
+              // DSN-05：宽度固定 100% + transform: scaleX，避免逐帧触发布局重排。
+              width: "100%",
               height: "100%",
+              transform: `scaleX(${Math.max(0, Math.min(100, percent)) / 100})`,
+              transformOrigin: "left",
               background: complete ? "var(--text-muted)" : "var(--accent)",
-              transition: "width var(--fork-motion-chip, 180ms) var(--ease-out)",
+              transition: "transform var(--fork-motion-chip, 180ms) var(--ease-out)",
             }}
           />
         </span>

@@ -715,7 +715,7 @@ export function ChatMinimap({
                   : isNearest
                     ? "color-mix(in srgb, var(--text) 55%, transparent)"
                     : "color-mix(in srgb, var(--text) 22%, transparent)",
-                transition: "transform 0.1s, background 0.1s, width 0.1s",
+                transition: "transform 0.1s, background 0.1s",
                 transform: isNearest || isActive ? "scaleX(1)" : "scaleX(0.65)",
                 transformOrigin: "center",
               }}
