@@ -327,7 +327,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | **XLSX** | OfficeCLI → 内建 adm-zip+XML 表格（8 sheet/200 行/40 列上限） | **无** |
 | **PPTX** | OfficeCLI → 内建解析（80 张上限） | **无** |
 | 旧版 Office | 明确不支持 + 提示用默认 App | 同 |
-| 图片 | 10–500% 缩放 + Ctrl/Cmd 滚轮 + 拖拽平移 + 初始 25% 适应 | lightbox |
+| 图片 | 10–500% 缩放 + Ctrl/Cmd 滚轮 + 拖拽平移 + 初始 25% 适应 | lightbox（`ImagePreview.tsx` 是一个 `<dialog>`，**无缩放/平移**） |
 | 文本/代码 | `@pierre/diffs` highlighter + wrap + 500k 字符/5MB 上限 | CodeMirror/高亮 |
 | 音频/视频 | 有 | 有 |
 | 不可预览 | 元数据卡片（名/大小/mtime）+ 默认 App 打开，绝不解码 | 有 (`/api/files/reveal`) |
@@ -344,6 +344,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | **Agent 终端工具** | 6 个工具 + 分页归一化输出 + cwd 授权 + 无人值守禁用 | **无** | **缺**（G14） |
 | 从文件区开终端 | 文件树每目录 hover 按钮、改动面板每目录按钮、worktree 按钮 | 部分（右栏终端 tab） | 缺入口 |
 | 浏览器 | Electron `WebContentsView`（原生栈顶）+ 完整 CDP + 24 个 agent 工具 + 风险告知门 + profile 隔离 | sandboxed iframe（明确不支持 X-Frame-Options 站点） | **缺**（G20，P5 spike） |
+| **回答里的链接路由** | `AgentBrowserLinkProvider`：agent 回答里的 http(s) 链接**路由到内嵌浏览器面板**（按会话排队，带活动点），而不是系统浏览器 | 本地文件链接已路由到应用内查看器（`MarkdownBody.tsx:80-81` 的 `onOpenFile`），但 http(s) 链接是 `target="_blank"`（`:85`）→ 开系统浏览器 | **小缺口**（可独立先做，不需 CDP；见 PROMA-20 的小项） |
 
 ---
 
