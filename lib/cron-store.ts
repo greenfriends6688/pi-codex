@@ -122,6 +122,16 @@ export function normalizeTask(input: Partial<CronTask>): CronTask | null {
     ...(typeof input.thinking === "string" && input.thinking ? { thinking: input.thinking } : {}),
     runCount: Number.isFinite(input.runCount) && (input.runCount ?? 0) >= 0 ? Math.floor(input.runCount as number) : 0,
     ...(Array.isArray(input.history) ? { history: normalizeHistory(input.history) } : {}),
+    // fork:fix-cron-lifecycle — 生命周期字段（全部可选）。
+    // 取值都做范围校验：坏数据宁可退回默认，也不要让调度器拿着 NaN 去比较。
+    ...(Number.isFinite(input.maxRuns) && (input.maxRuns ?? 0) > 0 ? { maxRuns: Math.floor(input.maxRuns as number) } : {}),
+    ...(input.sessionMode === "new" || input.sessionMode === "daily" || input.sessionMode === "reuse" ? { sessionMode: input.sessionMode } : {}),
+    ...(Number.isFinite(input.consecutiveFailures) && (input.consecutiveFailures ?? 0) >= 0 ? { consecutiveFailures: Math.floor(input.consecutiveFailures as number) } : {}),
+    ...(typeof input.pausedReason === "string" && input.pausedReason ? { pausedReason: input.pausedReason } : {}),
+    ...(typeof input.completedAt === "string" ? { completedAt: input.completedAt } : {}),
+    ...(Number.isFinite(input.timeoutMs) && (input.timeoutMs ?? 0) > 0 ? { timeoutMs: Math.floor(input.timeoutMs as number) } : {}),
+    ...(typeof input.reusableSessionId === "string" && input.reusableSessionId ? { reusableSessionId: input.reusableSessionId } : {}),
+    ...(typeof input.reusableSessionDayKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.reusableSessionDayKey) ? { reusableSessionDayKey: input.reusableSessionDayKey } : {}),
   };
 }
 

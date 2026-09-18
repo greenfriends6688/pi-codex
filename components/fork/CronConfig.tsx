@@ -59,6 +59,9 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
   const [timezone, setTimezone] = useState("host");
   const [thinking, setThinking] = useState("");
   const [modelKey, setModelKey] = useState("");
+  // fork:fix-cron-lifecycle — 运行次数上限与子会话策略（不填即旧行为：不限次 + 每次新建）。
+  const [maxRuns, setMaxRuns] = useState("");
+  const [sessionMode, setSessionMode] = useState<"new" | "daily" | "reuse">("new");
   const [taskEnabled, setTaskEnabled] = useState(true);
   const [models, setModels] = useState<{ key: string; label: string }[]>([]);
   const zones = useMemo(() => timezoneOptions(), []);
@@ -113,6 +116,8 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
       enabled: taskEnabled,
       ...(modelKey ? { model: { provider: modelKey.split("/")[0], modelId: modelKey.split("/").slice(1).join("/") } } : {}),
       ...(thinking ? { thinking } : {}),
+      ...(Number.isFinite(Number(maxRuns)) && Number(maxRuns) > 0 ? { maxRuns: Math.floor(Number(maxRuns)) } : {}),
+      ...(sessionMode !== "new" ? { sessionMode } : {}),
       schedule: {
         kind,
         times: kind === "cron" ? [] : times.split(",").map((value) => value.trim()).filter(Boolean),
@@ -221,6 +226,31 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
               <select className="settings-select" value={thinking} onChange={(event) => setThinking(event.target.value)}>
                 <option value="">{t("cron.default")}</option>
                 {THINKING_LEVELS.map((level) => <option key={level} value={level}>{THINKING_LABELS[level]}</option>)}
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span className="settings-chat-option-label">{t("cron.maxRuns")}</span>
+              <input
+                className="settings-field-input"
+                inputMode="numeric"
+                value={maxRuns}
+                onChange={(event) => setMaxRuns(event.target.value.replace(/[^0-9]/g, ""))}
+                placeholder={t("cron.maxRunsPlaceholder")}
+                title={t("cron.maxRunsHint")}
+                style={{ width: 110, fontVariantNumeric: "tabular-nums" }}
+              />
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span className="settings-chat-option-label">{t("cron.sessionMode")}</span>
+              <select
+                className="settings-select"
+                value={sessionMode}
+                onChange={(event) => setSessionMode(event.target.value as "new" | "daily" | "reuse")}
+                title={t("cron.sessionModeHint")}
+              >
+                <option value="new">{t("cron.sessionModeNew")}</option>
+                <option value="daily">{t("cron.sessionModeDaily")}</option>
+                <option value="reuse">{t("cron.sessionModeReuse")}</option>
               </select>
             </label>
             <label style={{ display: "grid", gap: 4 }}>

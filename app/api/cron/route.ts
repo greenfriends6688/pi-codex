@@ -74,14 +74,29 @@ export async function PATCH(req: Request) {
     return NextResponse.json(result, { status: result.status === "ok" ? 200 : 500 });
   }
 
+  // fork:fix-cron-lifecycle — 用户显式重新启用时视为一次"重启"：
+  // 清掉自动暂停原因与失败计数；若此前是因达到 maxRuns 而完成，
+  // 一并清掉完成标记并把计数归零（否则 isTaskExhausted 会立刻再次挡住它，
+  // 界面看起来就是"开关打开了却不跑"）。
+  const explicitlyEnabling = body.enabled === true && existing.enabled === false;
+  const restart: Partial<CronTask> = explicitlyEnabling
+    ? {
+        pausedReason: undefined,
+        consecutiveFailures: 0,
+        ...(existing.completedAt ? { completedAt: undefined } : {}),
+        ...(existing.completedAt ? { runCount: 0 } : {}),
+      }
+    : {};
+
   // Patch semantics: absent fields stay, `enabled` toggles alone, and a malformed
   // schedule is rejected instead of silently dropping the task's only trigger.
   const merged = normalizeTask({
     ...existing,
+    ...restart,
     ...body,
     id: existing.id,
     createdAt: existing.createdAt,
-    runCount: existing.runCount,
+    runCount: restart.runCount ?? existing.runCount,
     schedule: body.schedule ?? existing.schedule,
   });
   if (!merged) return NextResponse.json({ error: "Invalid task" }, { status: 400 });

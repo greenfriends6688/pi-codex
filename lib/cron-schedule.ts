@@ -296,6 +296,25 @@ export interface CronTask {
   runCount: number;
   /** Most recent runs, newest first (bounded — see CRON_HISTORY_LIMIT). */
   history?: CronRunRecord[];
+  // ---------------------------------------------------------------------
+  // fork:fix-cron-lifecycle — 运行生命周期字段（全部可选，旧任务文件无需迁移）
+  // ---------------------------------------------------------------------
+  /** 达到该运行次数后自动停用并标记完成；未设置表示不限次。 */
+  maxRuns?: number;
+  /** 子会话策略：new（每次新建，默认）/ daily（同日复用）/ reuse（始终复用）。 */
+  sessionMode?: "new" | "daily" | "reuse";
+  /** 连续失败计数；成功一次即清零。 */
+  consecutiveFailures?: number;
+  /** 自动暂停的原因（用户可在 UI 上看到并手动恢复）。 */
+  pausedReason?: string;
+  /** 因达到 maxRuns 而完成的时间。 */
+  completedAt?: string;
+  /** 单次运行超时（毫秒）；未设置时用 DEFAULT_RUN_TIMEOUT_MS。 */
+  timeoutMs?: number;
+  /** 最近一次运行留下的会话 id，供复用判定。 */
+  reusableSessionId?: string;
+  /** 该复用会话最后一次运行的自然日键（`YYYY-MM-DD`）。 */
+  reusableSessionDayKey?: string;
 }
 
 /** One entry of the run log, so the page can show "what happened" without the session. */
