@@ -115,11 +115,11 @@
     "electron": "^39.0.0",
     "electron-builder": "^25.1.8"
   },
-  "productName": "pi-web",
+  "productName": "Pi Codex",
   "main": "electron/main.js",
   "build": {
-    "appId": "com.agegr.piweb",
-    "productName": "pi-web",
+    "appId": "com.greenfriends6688.picodex",
+    "productName": "Pi Codex",
     "asar": false,
     "npmRebuild": false,
     "files": [

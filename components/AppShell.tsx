@@ -39,6 +39,13 @@ import {
 } from "@/lib/browser-notifications";
 import { setupPushSubscription } from "@/lib/push-client";
 import { getInitialNavigation } from "@/lib/initial-navigation";
+import {
+  desktopTrafficLightInset,
+  getDesktopBridge,
+  markDesktopShell,
+  setDesktopBadge,
+  setDesktopKeepAwake,
+} from "@/lib/desktop-shell";
 import { getRecentProjects, withoutChatProject } from "@/lib/project-groups";
 import { rekeyDraft } from "@/lib/draft-store";
 import {
@@ -1254,6 +1261,14 @@ export function AppShell() {
   useLayoutEffect(() => {
     activeNewSessionDraftKeyRef.current = newSessionDraftKey;
   }, [newSessionDraftKey]);
+  // fork:desktop-shell — Dock badge (how many runs are live) and keep-awake for the
+  // duration of a run. Both are no-ops in the browser.
+  useEffect(() => {
+    setDesktopBadge(runningSessionIds.size);
+    setDesktopKeepAwake(runningSessionIds.size > 0);
+    return () => setDesktopKeepAwake(false);
+  }, [runningSessionIds]);
+
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
   // fork:ui-projectchip — the new-session page's workspace selector. Mirrors what the
   // sidebar's NewTaskPicker already offers, minus the two actions it lacks:
@@ -1276,6 +1291,29 @@ export function AppShell() {
   // Move the workspace, then open a fresh composer there. Same two steps the sidebar
   // performs for 新建任务 (setSelectedCwd + onNewSession); handleCwdChange keeps the
   // project identity, file tabs and per-workspace memory in step.
+  // fork:desktop-shell — native-only signals: tell CSS it can install the drag
+  // region, and follow notification clicks / system theme flips. Re-subscribes when
+  // the catalog changes (cheap: one listener swap) instead of caching refs.
+  useEffect(() => {
+    markDesktopShell();
+    const bridge = getDesktopBridge();
+    if (!bridge) return;
+    return bridge.onAction((action) => {
+      if (action.kind === "notification-clicked") {
+        const match = /[?&]session=([^&]+)/.exec(action.url);
+        const sessionId = match ? decodeURIComponent(match[1]) : null;
+        if (!sessionId) return;
+        const session = sessionCatalog.find((item) => item.id === sessionId);
+        if (session) handleSelectSession(session, true);
+        return;
+      }
+      if (action.kind === "theme-changed") {
+        // The app has its own palettes; an "auto" palette can listen for this.
+        window.dispatchEvent(new CustomEvent("pi-desktop-theme", { detail: action.dark }));
+      }
+    });
+  }, [sessionCatalog, handleSelectSession]);
+
   const startSessionIn = useCallback((cwd: string, projectRoot?: string | null, projectKey?: string | null) => {
     handleCwdChange(cwd, projectRoot ?? null, projectKey ?? null);
     const tempId = typeof crypto.randomUUID === "function"
@@ -1419,7 +1457,7 @@ export function AppShell() {
 
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-  const windowTitle = activeCwdName ? `${activeCwdName} - Pi Web` : "Pi Web";
+  const windowTitle = activeCwdName ? `${activeCwdName} - Pi Codex` : "Pi Codex";
   const topBarSessionTitle = selectedSession
     ? (selectedSession.name?.trim()
       || selectedSession.firstMessage?.trim().replace(/\s+/g, " ").slice(0, 80)
@@ -2395,7 +2433,7 @@ export function AppShell() {
            // The sidebar control is deliberately outside the workspace header.
            // Reserve its hit-target width inside whichever surface is currently
            // in the main region, so the control never covers its first action.
-           "--main-workspace-header-leading-inset": `${TOP_BAR_ICON_BUTTON_SIZE}px`,
+           "--main-workspace-header-leading-inset": `${TOP_BAR_ICON_BUTTON_SIZE + desktopTrafficLightInset()}px`,
            // The right-edge role control is independent of both content
            // surfaces, so keep it out of the last header action as well.
            "--main-workspace-header-trailing-inset": `${TOP_BAR_ICON_BUTTON_SIZE}px`,

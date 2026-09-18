@@ -1234,3 +1234,17 @@ SDK 里唯一的 `--approve/--no-approve` 是**项目信任**（是否加载项�
 - `SettingsPanel` 新增 `onOpenFile`，由 AppShell 接到既有的 `handleOpenFile`（与 `onOpenSession` 同一层）。
 
 **验证**：`tsc` 0 错 ｜ `lint` 0 错（8 条既有 warning）｜ `npm test` 1344/1344 ｜ 三语键集合一致（1003 × 3，memory.* 23 键）｜ prod 构建后真 Chrome + 隔离 agent 目录实测：开关拨动写入 `settings.json` 的 packages 状态、`MEMORY.md`/`SCRATCHPAD.md` 显示「尚未创建」并可新建、PUT 拒绝越界路径（403）。
+### 30. macOS 原生适配 + 改名 Pi Codex（2026-09-17，electron 壳）
+
+用户反馈打包后「窗口不能移动、系统通知不工作、很多没适配」，并要把产品名改成 **Pi Codex**。
+
+**根因（逐条）**：
+
+| 症状 | 根因 | 改法 |
+| --- | --- | --- |
+| **窗口不能移动** | 主进程用 `titleBarStyle: "hidden"`（为了交通灯浮在自家顶栏上），但**网页里没有任何 `-webkit-app-region: drag` 区域** —— 隐藏标题栏 + 无拖拽区 = 没有任何可抓的地方 | `lib/desktop-shell.ts` 在检测到 preload 桥时给 `<html>` 加 `data-desktop-shell`，`app/fork-ui.css` 据此把顶栏设为拖拽区、并把其中所有控件（button/a/input/select/textarea/tab/menuitem/contenteditable）设为 `no-drag`；双击拖拽区仍是原生 zoom |
+| **macOS 系统通知不工作** | 通知只走渲染层的 Web Notification API（preload 桥根本不存在）；窗口隐藏/失焦时才需要通知，而那时 Web API 在 Electron 里最不可靠 | 新增 `electron/preload.js`（contextBridge）+ 主进程 `ipcMain.handle("desktop:notify")` → 原生 `Notification`；点击通知会 focus 窗口并把 url 回传渲染层（`desktop:action`），渲染层据此跳到对应会话。渲染层 `showBrowserNotification` 现在优先走 native，失败再回落 service worker / window |
+| 其他未适配 | 见下 | 菜单栏 role 化（含视图缩放 / 全屏 / 帮助）、`setAboutPanelOptions`、窗口位置尺寸记忆（含多屏 clamp）、Dock 角标（运行中的会话数）、任务运行时 `powerSaveBlocker` 防息屏、渲染进程崩溃对话框、`will-navigate` 外链交给系统浏览器、**`tray.setTemplateImage` 修到 `nativeImage` 上**（原来调在 Tray 上，技能台账里明确记录过这个 API 不存在） |
+| 改名 | 产品名散在 4 处 | `package.json` 顶层 `productName`（决定 userData 与单实例锁）+ `build.productName` + `build.appId` → `com.greenfriends6688.picodex`；渲染层 `layout.tsx` 元数据 / `manifest.ts` / `login` / `AppShell` 窗口标题 / 侧栏品牌标题。**另加一次性 userData 迁移**：`~/Library/Application Support/pi-web` → `Pi Codex`，否则老的书签/草稿/布局状态在新名字下全部消失 |
+
+**验证**：`tsc` 0 错 ｜ `lint` 0 错 ｜ `npm test` **1346/1346**（新增 2 例：原生通知优先且不触发渲染层 onClick、桥拒绝时回落 window 通知；并把 header 让位断言更新为含交通灯 inset）｜ 打包后按技能清单验签名 / DMG / 冒烟 / 架构。

@@ -9,19 +9,35 @@
 delete process.env.ELECTRON_RUN_AS_NODE;
 delete process.env.ELECTRON_RUNNING;
 
-const { app, BrowserWindow, Menu, Tray, shell, dialog } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Notification,
+  Tray,
+  dialog,
+  ipcMain,
+  nativeImage,
+  nativeTheme,
+  powerSaveBlocker,
+  screen,
+  shell,
+} = require("electron");
 const { spawn } = require("node:child_process");
 const { createServer } = require("node:net");
 const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
 
-const APP_NAME = "pi-web";
+const APP_NAME = "Pi Codex";
+/** Previous product name, used for the one-time userData migration below. */
+const LEGACY_APP_NAME = "pi-web";
 let mainWindow = null;
 let tray = null;
 let serverProc = null;
 let serverPort = null;
 let quitting = false;
+let keepAwakeId = null;
 
 // ── 路径解析 ────────────────────────────────────────────────────────────────
 function getAppRoot() {
@@ -66,7 +82,7 @@ async function startServer(appRoot) {
   const nextBin = getNextBin(appRoot);
   if (!nextBin) {
     dialog.showErrorBox(
-      "pi-web 启动失败",
+      `${APP_NAME} 启动失败`,
       "找不到 Next.js CLI（node_modules/next/dist/bin/next），请重新打包。",
     );
     app.quit();
@@ -96,7 +112,7 @@ async function startServer(appRoot) {
     if (!quitting && !useDevServer) {
       // 服务意外退出：提示并退出，避免窗口停留在无法连接的页面上
       dialog.showErrorBox(
-        "pi-web 服务已退出",
+        `${APP_NAME} 服务已退出`,
         "Next.js 本地服务异常退出，应用将关闭。可重新打开应用重试。",
       );
       app.quit();
@@ -104,7 +120,7 @@ async function startServer(appRoot) {
   });
 
   serverPort = port;
-  console.log(`[pi-web] Next.js 服务启动: http://127.0.0.1:${port} (dev=${useDevServer})`);
+  console.log(`[pi-codex] Next.js 服务启动: http://127.0.0.1:${port} (dev=${useDevServer})`);
   return { port, useDevServer };
 }
 
@@ -141,35 +157,129 @@ function waitReady(port, timeoutMs) {
 function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
 
+  const state = loadWindowState();
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 820,
+    width: state.width,
+    height: state.height,
+    ...(state.x !== undefined && state.y !== undefined ? { x: state.x, y: state.y } : {}),
     minWidth: 940,
     minHeight: 600,
     title: APP_NAME,
-    // macOS 保留原生交通灯 + 原生全屏，隐藏标题栏；不要用 frame:false
+    // macOS keeps the native traffic lights and native fullscreen; the web app draws
+    // its own bar, so the title bar stays hidden. `movable` is on and the renderer
+    // marks the bar as a drag region (see lib/desktop-shell.ts + fork-ui.css) —
+    // without that region a hidden-title-bar window cannot be dragged at all.
     titleBarStyle: "hidden",
-    trafficLightPosition: { x: 14, y: 14 },
+    trafficLightPosition: { x: 14, y: 16 },
+    movable: true,
+    fullscreenable: true,
     backgroundColor: "#0f1117",
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
+      preload: path.join(__dirname, "preload.js"),
+      spellcheck: false,
     },
   });
 
+  if (state.maximized) mainWindow.maximize();
+
+  for (const event of ["resize", "move"]) {
+    mainWindow.on(event, () => saveWindowState(mainWindow));
+  }
   mainWindow.on("close", () => {
+    saveWindowState(mainWindow);
     mainWindow = null;
   });
 
-  // 外部链接一律交给系统浏览器
+  // Crash visibility: a silent white window is the worst possible failure mode.
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error("[pi-codex] renderer gone:", details.reason);
+    dialog.showMessageBox({
+      type: "error",
+      title: APP_NAME,
+      message: "界面进程异常退出",
+      detail: `原因：${details.reason}。点击「重新加载」可以恢复当前会话。`,
+      buttons: ["重新加载", "退出"],
+      defaultId: 0,
+    }).then(({ response }) => {
+      if (response === 0 && mainWindow) mainWindow.reload();
+      else app.quit();
+    });
+  });
+
+  // 外部链接一律交给系统浏览器；页面内跳转到其它 host 也走同一规则
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^https?:\/\//.test(url)) shell.openExternal(url);
+    if (/^(https?|mailto):/.test(url)) shell.openExternal(url);
     return { action: "deny" };
+  });
+  mainWindow.webContents.on("will-navigate", (event, url) => {
+    const target = new URL(url);
+    if (target.port && Number(target.port) === serverPort) return;
+    event.preventDefault();
+    if (/^(https?|mailto):/.test(url)) shell.openExternal(url);
   });
 
   const url = `http://127.0.0.1:${serverPort}`;
   mainWindow.loadURL(url);
   return mainWindow;
+}
+
+// ── 原生集成（通知 / Dock 角标 / 防休眠 / 外部工具） ─────────────────────────
+function setupDesktopIpc() {
+  ipcMain.handle("desktop:notify", (_event, payload) => {
+    if (!Notification.isSupported()) return false;
+    const { title, body, tag, url } = payload ?? {};
+    if (!title && !body) return false;
+    const notification = new Notification({
+      title: String(title ?? APP_NAME),
+      body: String(body ?? ""),
+      // The app already plays its own completion sound; the system one would double it.
+      silent: payload?.silent !== false,
+      ...(tag ? { tag: String(tag) } : {}),
+    });
+    notification.on("click", () => {
+      showWindow();
+      if (url) {
+        mainWindow?.webContents.send("desktop:action", { kind: "notification-clicked", url: String(url) });
+      }
+    });
+    notification.show();
+    return true;
+  });
+
+  ipcMain.on("desktop:badge", (_event, text) => {
+    // Dock badge: the macOS-native place for "there are unread conversations".
+    if (process.platform !== "darwin" || !app.dock) return;
+    app.dock.setBadge(text ? String(text) : "");
+  });
+
+  ipcMain.on("desktop:keep-awake", (_event, active) => {
+    // Long agent runs should not be interrupted by the display sleeping.
+    if (active && keepAwakeId === null) {
+      keepAwakeId = powerSaveBlocker.start("prevent-display-sleep");
+    } else if (!active && keepAwakeId !== null) {
+      powerSaveBlocker.stop(keepAwakeId);
+      keepAwakeId = null;
+    }
+  });
+
+  ipcMain.on("desktop:open-external", (_event, url) => {
+    if (typeof url === "string" && /^(https?|mailto):/.test(url)) void shell.openExternal(url);
+  });
+
+  ipcMain.on("desktop:reveal", (_event, target) => {
+    if (typeof target === "string" && target) shell.showItemInFolder(target);
+  });
+
+  // The renderer keeps its own palette; this only tells it when the *system* flipped
+  // so an "auto" palette can follow without a reload.
+  nativeTheme.on("updated", () => {
+    mainWindow?.webContents.send("desktop:action", {
+      kind: "theme-changed",
+      dark: nativeTheme.shouldUseDarkColors,
+    });
+  });
 }
 
 function showWindow() {
@@ -185,9 +295,13 @@ function setupTray() {
     : path.join(getAppRoot(), "build", "trayTemplate.png");
   if (!fs.existsSync(iconPath)) return;
 
-  tray = new Tray(iconPath);
+  // Template image must be set on the nativeImage, not on the Tray (Tray has no
+  // setTemplateImage — calling it throws an unhandled rejection and the menu bar
+  // icon keeps its original colours).
+  const trayIcon = nativeImage.createFromPath(iconPath);
+  trayIcon.setTemplateImage(true);
+  tray = new Tray(trayIcon);
   tray.setToolTip(APP_NAME);
-  tray.setTemplateImage(true); // 菜单栏图标：单色黑 + alpha
   tray.on("click", showWindow);
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -204,6 +318,64 @@ function setupTray() {
   );
 }
 
+// ── 改名后的一次性迁移 ──────────────────────────────────────────────────────
+// The product name decides `app.getPath("userData")`, and the renderer keeps its
+// window geometry, drafts and layout state there (localStorage). After renaming
+// pi-web → Pi Codex the old directory would simply be ignored, so copy it once.
+function migrateLegacyUserData() {
+  if (process.platform !== "darwin") return;
+  try {
+    const support = path.join(app.getPath("appData"));
+    const next = path.join(support, APP_NAME);
+    const legacy = path.join(support, LEGACY_APP_NAME);
+    if (fs.existsSync(next) || !fs.existsSync(legacy)) return;
+    fs.cpSync(legacy, next, { recursive: true });
+    console.log(`[pi-codex] migrated user data: ${legacy} → ${next}`);
+  } catch (error) {
+    console.error("[pi-codex] user data migration failed:", error);
+  }
+}
+
+// ── 窗口位置/尺寸记忆 ───────────────────────────────────────────────────────
+function windowStatePath() {
+  return path.join(app.getPath("userData"), "window-state.json");
+}
+
+function loadWindowState() {
+  const fallback = { width: 1280, height: 820 };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(windowStatePath(), "utf8"));
+    const state = { width: Number(parsed.width) || fallback.width, height: Number(parsed.height) || fallback.height };
+    if (Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
+      // Keep the window on a screen that still exists (a monitor may be gone).
+      const area = screen.getDisplayMatching({ x: parsed.x, y: parsed.y, width: state.width, height: state.height }).workArea;
+      const onScreen = parsed.x + 80 > area.x && parsed.y + 40 > area.y && parsed.x < area.x + area.width - 80 && parsed.y < area.y + area.height - 40;
+      if (onScreen) {
+        state.x = parsed.x;
+        state.y = parsed.y;
+      }
+    }
+    if (parsed.maximized === true) state.maximized = true;
+    return state;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveWindowState(win) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const bounds = win.getNormalBounds ? win.getNormalBounds() : win.getBounds();
+    fs.mkdirSync(path.dirname(windowStatePath()), { recursive: true });
+    fs.writeFileSync(windowStatePath(), JSON.stringify({
+      ...bounds,
+      maximized: win.isMaximized(),
+    }, null, 2));
+  } catch (error) {
+    console.error("[pi-codex] failed to persist window state:", error);
+  }
+}
+
 // ── 应用生命周期 ────────────────────────────────────────────────────────────
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -211,11 +383,15 @@ if (!gotLock) {
 } else {
   app.on("second-instance", showWindow);
 
+  // Must run before the first window/state write so the migrated state is the one
+  // that gets read.
+  migrateLegacyUserData();
+
   app.whenReady().then(async () => {
     const appRoot = getAppRoot();
     if (!fs.existsSync(path.join(appRoot, ".next"))) {
       dialog.showErrorBox(
-        "pi-web 缺少构建产物",
+        `${APP_NAME} 缺少构建产物`,
         ".next 目录不存在。打包前请先执行 npm run build。",
       );
       app.quit();
@@ -232,17 +408,55 @@ if (!gotLock) {
       return;
     }
 
-    // 角色化菜单：Cmd+Q/W/M/H 等快捷键自动生效
+    // 角色化菜单：Cmd+Q/W/M/H、复制粘贴、缩放、原生全屏等快捷键自动生效
+    app.setAboutPanelOptions({
+      applicationName: APP_NAME,
+      applicationVersion: app.getVersion(),
+      version: `Electron ${process.versions.electron} · Node ${process.versions.node}`,
+      copyright: "Pi Codex — local coding agent workbench",
+    });
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
         { role: "appMenu" },
         { role: "fileMenu" },
         { role: "editMenu" },
-        { role: "viewMenu" },
+        {
+          label: "视图",
+          submenu: [
+            { role: "reload" },
+            { role: "forceReload" },
+            { role: "toggleDevTools" },
+            { type: "separator" },
+            { role: "resetZoom" },
+            { role: "zoomIn" },
+            { role: "zoomOut" },
+            { type: "separator" },
+            { role: "togglefullscreen" },
+          ],
+        },
         { role: "windowMenu" },
+        {
+          role: "help",
+          submenu: [
+            {
+              label: "GitHub 仓库",
+              click: () => void shell.openExternal("https://github.com/greenfriends6688/pi-codex"),
+            },
+            {
+              label: "打开数据目录",
+              click: () => void shell.openPath(app.getPath("userData")),
+            },
+            { type: "separator" },
+            {
+              label: "显示窗口",
+              click: showWindow,
+            },
+          ],
+        },
       ]),
     );
 
+    setupDesktopIpc();
     createWindow();
     setupTray();
 
@@ -264,5 +478,9 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", () => {
   quitting = true;
+  if (keepAwakeId !== null) {
+    powerSaveBlocker.stop(keepAwakeId);
+    keepAwakeId = null;
+  }
   if (serverProc && !serverProc.killed) serverProc.kill("SIGTERM");
 });

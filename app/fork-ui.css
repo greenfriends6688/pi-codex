@@ -305,3 +305,34 @@ html.keyboard-open .extension-status-shelf {
 .settings-general-section {
   margin-bottom: calc(20px * var(--fork-density));
 }
+
+/* ---------------------------------------------------------------------------
+ * fork:desktop-shell — drag region for the packaged app.
+ *
+ * The Electron window is created with `titleBarStyle: "hidden"` so the traffic lights
+ * float over the app's own bar. Without a `-webkit-app-region: drag` element such a
+ * window cannot be moved at all (that was the "窗口不能移动" bug). The attribute is set
+ * by lib/desktop-shell.ts, so the browser build never sees these rules.
+ *
+ * Interaction: the header itself is the handle, every control inside it opts out —
+ * that leaves the padding between the title/stat buttons as grabbable space, and
+ * double-clicking it zooms the window (native behaviour).
+ * ------------------------------------------------------------------------- */
+[data-desktop-shell="true"] .main-workspace-header {
+  -webkit-app-region: drag;
+}
+[data-desktop-shell="true"] .main-workspace-header button,
+[data-desktop-shell="true"] .main-workspace-header a,
+[data-desktop-shell="true"] .main-workspace-header input,
+[data-desktop-shell="true"] .main-workspace-header select,
+[data-desktop-shell="true"] .main-workspace-header textarea,
+[data-desktop-shell="true"] .main-workspace-header [role="tab"],
+[data-desktop-shell="true"] .main-workspace-header [role="menu"],
+[data-desktop-shell="true"] .main-workspace-header [role="menuitem"],
+[data-desktop-shell="true"] .main-workspace-header [contenteditable="true"] {
+  -webkit-app-region: no-drag;
+}
+/* The right panel's tab strip and the sidebar header are useful secondary handles. */
+[data-desktop-shell="true"] #file-panel .main-workspace-header {
+  -webkit-app-region: drag;
+}
