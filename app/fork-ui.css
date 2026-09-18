@@ -153,10 +153,10 @@ html.keyboard-open .extension-status-shelf {
     0.9640 76.92%, 0.9865 79.49%, 0.9971 82.05%, 1.0000 84.62%, 0.9974 87.18%,
     0.9928 89.74%, 0.9895 92.31%, 0.9900 94.87%, 0.9958 97.44%, 1
   );
-  --fork-motion-menu: 130ms;
-  --fork-motion-chip: 180ms;
-  --fork-motion-fade: 160ms;
-  --fork-motion-height: 240ms;
+  --fork-motion-menu: var(--motion-fast); /* DSN-06：130ms→120ms，同档 */
+  --fork-motion-chip: var(--motion-base); /* DSN-06：180ms→150ms，同档 */
+  --fork-motion-fade: var(--motion-base); /* DSN-06：160ms→150ms，同档 */
+  --fork-motion-height: var(--motion-slow); /* DSN-06：240ms→250ms，同档 */
   --fork-travel-menu: 4px;
 }
 
@@ -191,12 +191,12 @@ html.keyboard-open .extension-status-shelf {
   opacity: 0;
   transform: translateY(-4px) scale(0.98);
   transition:
-    opacity 90ms ease,
-    transform 90ms ease;
+    opacity var(--motion-instant) ease,
+    transform var(--motion-instant) ease;
 }
 /* Submenus mount per hover; they ride the same two-phase contract. */
 .context-menu-submenu {
-  transition-duration: 110ms;
+  transition-duration: var(--motion-fast);
 }
 
 /* ---------------------------------------------------------------------------

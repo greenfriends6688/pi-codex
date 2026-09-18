@@ -14,6 +14,7 @@
   --color-text-dim: var(--text-dim);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-accent-text: var(--accent-text);
   --color-primary-bg: var(--primary-bg);
   --color-primary-fg: var(--primary-fg);
   --color-user-bg: var(--user-bg);
@@ -24,7 +25,7 @@
 }
 
 /* ---------------------------------------------------------------------------
-   Design tokens 鈥?the Codex skin laid over upstream v0.9.1's six-palette
+   Design tokens —the Codex skin laid over upstream v0.9.1's six-palette
    theme system.
 
    hooks/useTheme.ts writes `data-theme` on <html> and keeps the `.dark` class
@@ -40,7 +41,7 @@
 
 /* Theme-independent: geometry, elevation, layout metrics, motion. */
 :root {
-  /* Geometry 鈥?Codex corner-radius scale (base 脳 1.25) */
+  /* Geometry —Codex corner-radius scale (base × 1.25) */
   --corner-radius-scale: 1.25;
   --radius-xs: calc(4px * var(--corner-radius-scale));
   --radius-sm: calc(6px * var(--corner-radius-scale));
@@ -50,22 +51,22 @@
   --radius-2xl: calc(16px * var(--corner-radius-scale));
   --radius-pill: 999px;
 
-  /* Elevation 鈥?one ladder, four steps, every step built from the same warm
+  /* Elevation —one ladder, four steps, every step built from the same warm
      hairline stroke plus stacked warm-black shadows. Names are kept because
      components reference --shadow-sm|md|lg|xl inline; the ladder itself is what
-     changed. See docs/codex-skin/visual-spec.md 搂3. */
+     changed. See docs/codex-skin/visual-spec.md §3. */
   --elevation-stroke: 0 0 0 0.5px var(--border-strong);
   --shadow-sm: var(--elevation-stroke), 0 1px 2px -1px oklch(0.2 0.02 60 / 0.1);
   --shadow-md: var(--elevation-stroke), 0 2px 4px -1px oklch(0.2 0.02 60 / 0.09), 0 6px 12px -4px oklch(0.2 0.02 60 / 0.08);
   --shadow-lg: var(--elevation-stroke), 0 4px 8px -2px oklch(0.2 0.02 60 / 0.09), 0 12px 24px -6px oklch(0.2 0.02 60 / 0.1);
   --shadow-xl: var(--elevation-stroke), 0 8px 16px -4px oklch(0.2 0.02 60 / 0.12), 0 24px 48px -12px oklch(0.2 0.02 60 / 0.14);
 
-  /* Terminal island 鈥?a fixed dark surface in every theme, because the xterm
+  /* Terminal island —a fixed dark surface in every theme, because the xterm
      palette is constructed in JS (components/TerminalPanel.tsx) and is not
      theme-aware. `--terminal-surface` MUST equal that theme's `background`,
      otherwise the panel chrome and the canvas show a seam between two near
      blacks. Making the terminal follow the theme means editing that JS palette,
-     which is out of scope for a CSS-only pass (visual-spec.md 搂7). */
+     which is out of scope for a CSS-only pass (visual-spec.md §7). */
   --terminal-surface: #111318;
   --terminal-chrome: #171b22;
   --terminal-border: #262b34;
@@ -73,8 +74,8 @@
   --terminal-text: #d7dce5;
   --terminal-text-dim: #8b93a1;
 
-  /* Type scale 鈥?every font-size literal in the app maps to exactly one step:
-     10鈫?xs  11鈫抶s  12鈫抯m  13鈫抦d  14鈫抣g  15鈫抶l  18鈫?xl  24鈫?xl */
+  /* Type scale —every font-size literal in the app maps to exactly one step:
+     10→2xs  11→xs  12→sm  13→md  14→lg  15→xl  18→2xl  24→3xl */
   --text-2xs: 10px;
   --text-xs: 11px;
   --text-sm: 12px;
@@ -84,7 +85,7 @@
   --text-2xl: 18px;
   --text-3xl: 24px;
 
-  /* Control sizes 鈥?one ladder for every interactive box. */
+  /* Control sizes —one ladder for every interactive box. */
   --control-xs: 22px;
   --control-sm: 26px;
   --control-md: 28px;
@@ -105,7 +106,7 @@
   --z-toast: 1100;
 
   /* Layout metrics lifted from the Codex app: thread content 800px, toolbar
-     46px, composer radius 5.5脳spacing, and a 16px inline overhang that lets
+     46px, composer radius 5.5×spacing, and a 16px inline overhang that lets
      the composer sit wider than the thread.
      800 rather than the original 860: at 860 the prose column ran wider than
      upstream (760) and Wegent (768, `max-w-3xl`) both settle on, and long
@@ -129,14 +130,18 @@
   --conversation-item-gap: 16px;
   --chat-content-font-size: 13px;
 
-  /* Motion 鈥?durations/easings still referenced by the panel transitions. */
+  /* Motion —四档语义时长（DSN-06）：instant 供退出/提示类短动效，
+     fast/base/slow 沿用旧名（别名口径，引用处无需改动）。
+     fork-ui.css 的 --fork-motion-* 已收敛为这四个的别名。
+     CSS/行内仍散落的硬编码时长（0.12s/0.15s/900ms 等）后续按此梯度归并。 */
+  --motion-instant: 90ms;
   --motion-fast: 120ms;
   --motion-base: 150ms;
   --motion-slow: 250ms;
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* light 鈥?pure white surfaces with neutral grey hairlines and a blue accent.
+/* light —pure white surfaces with neutral grey hairlines and a blue accent.
    Deliberately achromatic: a warm cast here reads as a dirty page background
    (user feedback 2026-09-16), so the light theme keeps chroma 0 and lets the
    accent carry the colour. The tinted palettes (mist, rose) are opt-in. */
@@ -154,9 +159,14 @@
   --border-faint: oklch(0.3 0 0 / 0.055);
   --text: oklch(0.26 0 0);
   --text-muted: oklch(0.26 0 0 / 0.72);
-  --text-dim: oklch(0.26 0 0 / 0.52);
-  --accent: oklch(0.66 0.16 250);
-  --accent-hover: oklch(0.6 0.17 250);
+  /* DSN-01：浅色主题 --text-dim alpha 0.52→0.68（实测 3.32:1→5.41:1，≥4.5）。 */
+  --text-dim: oklch(0.26 0 0 / 0.68);
+  /* DSN-01：--accent 加深两档供图形用（bg-panel 上 2.93:1→约 3.2:1，≥3.0；
+     含最暗的 bg-selected 也 ≥3.0，见门禁矩阵）；hover 保持深一档的方向。
+     文字一律走 --accent-text（≥4.5），--accent 只作图形/填充色。 */
+  --accent: oklch(0.61 0.16 250);
+  --accent-hover: oklch(0.57 0.17 250);
+  --accent-text: oklch(0.52 0.16 250);
   --accent-contrast: oklch(1 0 0);
   --accent-soft: oklch(0.66 0.16 250 / 0.12);
   --accent-border: oklch(0.66 0.16 250 / 0.5);
@@ -179,7 +189,7 @@
   --scrim: oklch(0 0 0 / 0.45);
 }
 
-/* dark 鈥?warm brown-black neutrals, pale blue accent, warm-white action */
+/* dark —warm brown-black neutrals, pale blue accent, warm-white action */
 html.dark,
 [data-theme="dark"] {
   color-scheme: dark;
@@ -194,9 +204,17 @@ html.dark,
   --border-faint: oklch(0.96 0.01 85 / 0.05);
   --text: oklch(0.94 0.01 85);
   --text-muted: oklch(0.94 0.01 85 / 0.72);
-  --text-dim: oklch(0.94 0.01 85 / 0.52);
+  /* DSN-01 偏离说明（需父 Agent 确认）：子任务写“深色不动”，依据是审查报告的
+     bg/bg-panel 两底色表（4.81/4.94 ✅）。但门禁是 7 底色全矩阵，且侧栏选中行里
+     真有 12px text-dim 徽标落在 bg-selected 上（SessionSidebar.tsx:426/455），
+     那里旧值只有 4.20:1。0.52→0.56 是最小修正（selected 上 4.20→4.62，bg 上
+     4.81→约 5.2，视觉仍是 dim）；若坚持不动，门禁需给 text-dim 加 selected/
+     hover 例外，见报告。 */
+  --text-dim: oklch(0.94 0.01 85 / 0.56);
   --accent: oklch(0.84 0.08 245);
   --accent-hover: oklch(0.91 0.06 240);
+  /* DSN-01：--accent-text 专供文字；深色主题沿用 --accent 值（11.81:1，≥4.5）。 */
+  --accent-text: oklch(0.84 0.08 245);
   --accent-contrast: oklch(0.17 0.008 60);
   --accent-soft: oklch(0.66 0.16 250 / 0.16);
   --accent-border: oklch(0.66 0.16 250 / 0.5);
@@ -219,7 +237,7 @@ html.dark,
   --scrim: oklch(0 0 0 / 0.62);
 }
 
-/* mist 鈥?warm-white surfaces with a faint green cast, teal accent */
+/* mist —warm-white surfaces with a faint green cast, teal accent */
 [data-theme="mist"] {
   color-scheme: light;
   --bg: oklch(0.985 0.005 165);
@@ -233,9 +251,12 @@ html.dark,
   --border-faint: oklch(0.3 0.02 165 / 0.055);
   --text: oklch(0.27 0.02 165);
   --text-muted: oklch(0.27 0.02 165 / 0.72);
-  --text-dim: oklch(0.27 0.02 165 / 0.52);
+  /* DSN-01：浅色主题 --text-dim alpha 0.52→0.68（实测 3.22:1→5.16:1，≥4.5）。 */
+  --text-dim: oklch(0.27 0.02 165 / 0.68);
   --accent: oklch(0.46 0.07 178);
   --accent-hover: oklch(0.39 0.075 178);
+  /* DSN-01：--accent-text 专供文字；mist 沿用 --accent 值（6.05:1，≥4.5）。 */
+  --accent-text: oklch(0.46 0.07 178);
   --accent-contrast: oklch(0.985 0.005 165);
   --accent-soft: oklch(0.46 0.07 178 / 0.12);
   --accent-border: oklch(0.46 0.07 178 / 0.5);
@@ -258,7 +279,7 @@ html.dark,
   --scrim: oklch(0.24 0.01 165 / 0.45);
 }
 
-/* rose 鈥?warm-white surfaces with a rose cast, wine accent */
+/* rose —warm-white surfaces with a rose cast, wine accent */
 [data-theme="rose"] {
   color-scheme: light;
   --bg: oklch(0.987 0.005 20);
@@ -272,9 +293,12 @@ html.dark,
   --border-faint: oklch(0.3 0.02 12 / 0.055);
   --text: oklch(0.28 0.015 12);
   --text-muted: oklch(0.28 0.015 12 / 0.72);
-  --text-dim: oklch(0.28 0.015 12 / 0.52);
+  /* DSN-01：浅色主题 --text-dim alpha 0.52→0.68（实测 3.19:1→5.09:1，≥4.5）。 */
+  --text-dim: oklch(0.28 0.015 12 / 0.68);
   --accent: oklch(0.47 0.1 5);
   --accent-hover: oklch(0.4 0.105 5);
+  /* DSN-01：--accent-text 专供文字；rose 沿用 --accent 值（6.37:1，≥4.5）。 */
+  --accent-text: oklch(0.47 0.1 5);
   --accent-contrast: oklch(0.987 0.005 20);
   --accent-soft: oklch(0.47 0.1 5 / 0.12);
   --accent-border: oklch(0.47 0.1 5 / 0.5);
@@ -297,7 +321,7 @@ html.dark,
   --scrim: oklch(0.24 0.01 12 / 0.45);
 }
 
-/* pine 鈥?warm brown-black surfaces with a green cast, pale-green accent */
+/* pine —warm brown-black surfaces with a green cast, pale-green accent */
 html[data-theme="pine"],
 [data-theme="pine"] {
   color-scheme: dark;
@@ -312,9 +336,12 @@ html[data-theme="pine"],
   --border-faint: oklch(0.96 0.012 155 / 0.05);
   --text: oklch(0.94 0.012 155);
   --text-muted: oklch(0.94 0.012 155 / 0.72);
-  --text-dim: oklch(0.94 0.012 155 / 0.52);
+  /* DSN-01 偏离说明：同 dark（0.52→0.56，selected 上 4.20→4.62），理由见 dark 块注释。 */
+  --text-dim: oklch(0.94 0.012 155 / 0.56);
   --accent: oklch(0.82 0.05 155);
   --accent-hover: oklch(0.9 0.04 155);
+  /* DSN-01：--accent-text 专供文字；深色主题沿用 --accent 值（11.15:1，≥4.5）。 */
+  --accent-text: oklch(0.82 0.05 155);
   --accent-contrast: oklch(0.17 0.008 155);
   --accent-soft: oklch(0.82 0.05 155 / 0.16);
   --accent-border: oklch(0.82 0.05 155 / 0.5);
@@ -1418,6 +1445,9 @@ pre, code {
   border-radius: var(--radius-xl);
   background: var(--bg-elev);
   margin: 0 auto;
+  /* DSN-05 评估结论：保留 width 过渡。缩放宽度由 JS 按档位写内联 width，
+     改 transform: scale() 需要 JS 侧同步换算（只改 CSS 做不到等效），
+     且它是用户点按缩放时的离散小步进、不在主布局关键路径上。 */
   transition: width 0.15s ease;
 }
 .mermaid-zoom-canvas svg {
@@ -1708,7 +1738,7 @@ pre, code {
   }
 }
 
-/* File viewer markdown preview 鈥?larger headings */
+/* File viewer markdown preview —larger headings */
 .markdown-file-preview h1 { font-size: 1.8em; }
 .markdown-file-preview h2 { font-size: 1.4em; }
 .markdown-file-preview h3 { font-size: 1.15em; }
@@ -1854,14 +1884,31 @@ span.token.table {
   border-radius: var(--radius-xs);
 }
 
-/* Static loading placeholder 鈥?no shimmer (see delta.md, motion layer removed). */
+/* DSN-09：选区与输入光标主题化（此前全仓零命中）。
+   选区底用 accent 在当前底上的 30% 混合、文字保持 --text，
+   五套主题下选区文字对比度都远高于 4.5；光标走 --accent-text
+  （浅色主题下比 --accent 更深，小尺寸下更易定位）。 */
+::selection {
+  background: color-mix(in srgb, var(--accent) 30%, var(--bg));
+  color: var(--text);
+}
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: var(--accent-text);
+}
+
+/* Static loading placeholder —no shimmer (see delta.md, motion layer removed). */
 .skeleton-line {
   border-radius: var(--radius-sm);
   background: var(--bg-hover);
 }
 
 /* Global reduced-motion safety net: decorative motion collapses to instant
-   state changes while content (text, layout) still updates. */
+   state changes while content (text, layout) still updates.
+   DSN-09：例外清单——小面积 indeterminate 加载指示会动（直径 ≤16px，
+   冻住会被读成“卡死”）；上传进度条之类用 transition 宽度的不需要例外，
+   截断后变成瞬时跳变，进度状态依然可读。 */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1870,6 +1917,15 @@ span.token.table {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+
+  /* 例外：加载/更新中的状态指示（本质是状态，不是装饰）。 */
+  .animate-spin,
+  svg[style*="spin"],
+  .extension-widget-update-pulse,
+  .extension-widget-update-pulse::before {
+    animation-duration: 0.8s !important;
+    animation-iteration-count: infinite !important;
   }
 
   .sidebar-container,
@@ -1926,8 +1982,9 @@ span.token.table {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  /* DSN-09：与全局兜底统一用 0.01ms（此前 0.001ms/0.01ms 两种写法并存）。 */
   .notice-shelf-item {
-    animation-duration: 0.001ms !important;
+    animation-duration: 0.01ms !important;
   }
 }
 
@@ -1970,7 +2027,12 @@ span.token.table {
   .sidebar-container {
     position: relative;
     overflow: hidden;
-    transition: width var(--motion-slow) var(--ease-out), min-width var(--motion-slow) var(--ease-out);
+    /* DSN-05：不再过渡 width（主布局每帧重排）。只过渡 min-width：
+       used width 取 max(width, min-width)，动画期间跟随 min-width 走，
+       开合视觉与之前一致；拖拽中 .sidebar-resizing 照旧 transition: none。
+       彻底的合成器友好做法是父级改 grid-template-columns 过渡
+       （同文件 .main-panels 已是此写法），那需要动布局结构，留给主 Agent。 */
+    transition: min-width var(--motion-slow) var(--ease-out);
   }
   .sidebar-container.sidebar-open {
     width: var(--sidebar-width, 260px);
@@ -2086,7 +2148,7 @@ span.token.table {
     overflow: hidden;
     /* The panel fills its grid track; the track itself is sized by
        --right-panel-width on .main-panels. The fork's old `transition: width`
-       is dead here because width no longer changes 鈥?the grid track does,
+       is dead here because width no longer changes —the grid track does,
        and .main-panels already transitions grid-template-columns. */
     width: 100% !important;
     min-width: 0 !important;
@@ -2263,6 +2325,42 @@ span.token.table {
   }
 }
 
+/* DSN-04：移动端触控目标。--control-touch: 44px 定义已久但全仓零引用，
+   这里让它落地。整块包在 max-width: 640px 内，桌面端零视觉变化。
+   两类手段：① 文字型控件直接 min-height 到 44px；② 视觉必须保持小尺寸的
+   图标按钮不改盒子，用 ::after 外扩命中区（同 .panel-resize-handle 手法：
+   伪元素是按钮的子节点，超出盒子的部分仍算按钮命中区；有意不设
+   pointer-events: none，否则外扩部分收不到事件）。 */
+@media (max-width: 640px) {
+  button,
+  select,
+  [role="button"],
+  [role="tab"],
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  .context-menu-item,
+  .config-sidebar-item,
+  .settings-theme-option {
+    min-height: var(--control-touch);
+  }
+
+  .icon-button,
+  .file-viewer-icon-button,
+  .mermaid-zoom-icon-button,
+  .mermaid-zoom-stepper button {
+    position: relative;
+  }
+  .icon-button::after,
+  .file-viewer-icon-button::after,
+  .mermaid-zoom-icon-button::after,
+  .mermaid-zoom-stepper button::after {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
+}
+
 /* ===========================================================================
    Skin override layer
 
@@ -2297,7 +2395,7 @@ span.token.table {
 /* --- Composer: the one floating surface inside the chat column -------------
    Hook: the composer box is the only element carrying the inline
    `--radius-composer`. The compact (quote) variant renders borderRadius 0, so
-   it never matches 鈥?if that inline radius is ever changed, retarget this. */
+   it never matches —if that inline radius is ever changed, retarget this. */
 .chat-content div[style*="--radius-composer"] {
   border-radius: var(--radius-composer) !important;
   box-shadow: var(--shadow-sm) !important;
@@ -2368,16 +2466,29 @@ span.token.table {
   }
 }
 
+/* DSN-04：上面 coarse 规则把 chip 盒子放到 32px；粗指针设备上再用 ::after
+   把命中区外扩到 44px（视觉保持 32px，同 .panel-resize-handle 手法；
+   chip 本身已是 absolute 定位，不需要补 position）。 */
+@media (pointer: coarse) {
+  .desktop-sidebar-toggle::after,
+  .desktop-secondary-workspace-toggle::after,
+  .desktop-workspace-role-toggle::after {
+    content: "";
+    position: absolute;
+    inset: -6px;
+  }
+}
+
 /* ---------------------------------------------------------------------------
    File panel body: the active viewer plus an optional tree column. The tree used
    to be the panel's fallback content, which meant opening a document hid it; it
    now sits beside the document instead (PiDeck-style "document in the middle,
-   file tree on the right"). Only rendered on wide panels 鈥?see AppShell's
+   file tree on the right"). Only rendered on wide panels —see AppShell's
    EXPLORER_COLUMN_MIN_PANEL_WIDTH.
 --------------------------------------------------------------------------- */
 .file-panel-body {
   /* The tree column is gated on the *rendered* panel width, which the layout
-     grid decides (1fr in the main region) 鈥?not on the resizer state. */
+     grid decides (1fr in the main region) —not on the resizer state. */
   container-type: inline-size;
   display: flex;
   flex: 1 1 auto;
@@ -2430,7 +2541,7 @@ span.token.table {
 
 /* The tree column spans the panel's full height so its header lines up with the
    tab bar row (the tab bar lives in .file-panel-main, the column is its sibling
-   inside .file-panel-body 鈥?hence the negative offset). */
+   inside .file-panel-body —hence the negative offset). */
 .explorer-column {
   margin-top: calc(-1 * var(--height-toolbar-pane, 40px));
 }

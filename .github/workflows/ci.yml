@@ -42,6 +42,19 @@ jobs:
       - run: npm run test:e2e
         env:
           E2E_SERVER_MODE: start
+      # DSN-02：WCAG AA 对比度门禁。此前 e2e/themes.mjs 既没被任何运行器调用，
+      # 且它的旧 contrast() 只会解析 hex（主题 token 已是 oklch）→ 断言恒失败。
+      # 本步骤自起服务跑它，让 token 色彩回归在 CI 上被拦住。
+      - name: Theme contrast gate (WCAG AA)
+        run: |
+          npx next start -H 127.0.0.1 -p 30141 &
+          SERVER_PID=$!
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null http://127.0.0.1:30141/ && break
+            sleep 1
+          done
+          E2E_BASE_URL=http://127.0.0.1:30141 npm run test:themes
+          kill "$SERVER_PID"
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
