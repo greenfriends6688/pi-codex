@@ -660,6 +660,38 @@ npm run desktop                    # 起桌面壳冒烟
 
 - **目标**：mac 从 `dir` 改成可发布的 `dmg` + `zip`；启用 hardened runtime + entitlements；接上公证环境变量；GitHub publish；**跨架构 `latest-mac.yml` 合并**；一个带宿主断言的打包编排脚本。
 
+#### 开工前先看这张表（避免重做已完成的）
+
+**已经具备（不要重做）**：
+
+| 项 | 现状 |
+| --- | --- |
+| 体积排除 | `package.json` 的 `files` 已有：`!docs/**` / `!release/**` / `!test-results/**` / `!**/*.map` / `!**/*.test.*` / `!node_modules/**/{test,examples,docs}/**` / `!node_modules/**/*.{md,ts,map}` / `!node_modules/{typescript,eslint,prettier,tailwindcss,postcss,autoprefixer}/**` |
+| 参考项目排除 | `!pi参考项目/**`（刚加，**这一条很关键：该目录 376 MB**） |
+| `.next` 瘦身 | `!.next/cache` / `!.next/dev` / `!.next/**/*.js.map` |
+| 打包后注入 | `scripts/after-pack.mjs`（把 `.next/node_modules` 注进 `.app`） |
+| node-pty 执行位 | `bin/prepare-terminal.js`（**仅 `postinstall`、仅 darwin** —— 不完整，见下） |
+| 体积基线 | dmg **209 MB**（从 321 MB 降下来，见下） |
+
+实测尺寸（供后续对比）：
+
+```
+release/Pi Codex-0.9.1-arm64.dmg     208.9 MB   ← 当前
+release/_prev-321MB.dmg              321.2 MB   ← 优化前
+release/pi-web-0.9.1-arm64.dmg       192.9 MB   ← 9/16 的旧构建
+```
+
+**尚缺（本 PR 要做的）**：
+
+| 项 | 现状 |
+| --- | --- |
+| 签名 / 公证 / 权利文件 | **全无** |
+| 可发布 target | 只有 `dir`（`package.json`）——**没有 zip 就没有 `latest-mac.yml`** |
+| GitHub publish + 跨架构 yml 合并 | 无 |
+| 打包编排脚本 + 构建期硬断言 | 无（只有 `npm run desktop`） |
+| `@electron/rebuild` | **无**：Electron Node ABI 一升级就报 `NODE_MODULE_VERSION` |
+| node-pty 执行位在**打包流程内**修复 | 无（只在 `postinstall`，CI 里跑不到点上） |
+
 - **依据（Proma）**：
   - `hardenedRuntime: true` + `entitlements(.Inherit)` + `gatekeeperAssess: false`：`electron-builder.yml:111-114`
   - entitlements 实际内容（含 **`network.server`**、`disable-library-validation`、`allow-jit`、`allow-unsigned-executable-memory`、`device.audio-input`、`files.user-selected.read-write`）：`resources/entitlements.mac.plist:5-45`
