@@ -132,6 +132,7 @@ export function normalizeTask(input: Partial<CronTask>): CronTask | null {
     ...(Number.isFinite(input.timeoutMs) && (input.timeoutMs ?? 0) > 0 ? { timeoutMs: Math.floor(input.timeoutMs as number) } : {}),
     ...(typeof input.reusableSessionId === "string" && input.reusableSessionId ? { reusableSessionId: input.reusableSessionId } : {}),
     ...(typeof input.reusableSessionDayKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.reusableSessionDayKey) ? { reusableSessionDayKey: input.reusableSessionDayKey } : {}),
+    ...(input.notify === "never" || input.notify === "always" || input.notify === "success" || input.notify === "error" ? { notify: input.notify } : {}),
   };
 }
 

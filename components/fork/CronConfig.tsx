@@ -62,6 +62,8 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
   // fork:fix-cron-lifecycle — 运行次数上限与子会话策略（不填即旧行为：不限次 + 每次新建）。
   const [maxRuns, setMaxRuns] = useState("");
   const [sessionMode, setSessionMode] = useState<"new" | "daily" | "reuse">("new");
+  // fork:fix-cron-notify — 完成通知策略（默认只失败时通知）。
+  const [notify, setNotify] = useState<"never" | "always" | "success" | "error">("error");
   const [taskEnabled, setTaskEnabled] = useState(true);
   const [models, setModels] = useState<{ key: string; label: string }[]>([]);
   const zones = useMemo(() => timezoneOptions(), []);
@@ -118,6 +120,7 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
       ...(thinking ? { thinking } : {}),
       ...(Number.isFinite(Number(maxRuns)) && Number(maxRuns) > 0 ? { maxRuns: Math.floor(Number(maxRuns)) } : {}),
       ...(sessionMode !== "new" ? { sessionMode } : {}),
+      ...(notify !== "error" ? { notify } : {}),
       schedule: {
         kind,
         times: kind === "cron" ? [] : times.split(",").map((value) => value.trim()).filter(Boolean),
@@ -251,6 +254,20 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
                 <option value="new">{t("cron.sessionModeNew")}</option>
                 <option value="daily">{t("cron.sessionModeDaily")}</option>
                 <option value="reuse">{t("cron.sessionModeReuse")}</option>
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span className="settings-chat-option-label">{t("cron.notify")}</span>
+              <select
+                className="settings-select"
+                value={notify}
+                onChange={(event) => setNotify(event.target.value as "never" | "always" | "success" | "error")}
+                title={t("cron.notifyHint")}
+              >
+                <option value="error">{t("cron.notifyError")}</option>
+                <option value="success">{t("cron.notifySuccess")}</option>
+                <option value="always">{t("cron.notifyAlways")}</option>
+                <option value="never">{t("cron.notifyNever")}</option>
               </select>
             </label>
             <label style={{ display: "grid", gap: 4 }}>

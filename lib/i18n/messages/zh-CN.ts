@@ -5,6 +5,12 @@ export const zhCNLocale: LocalePlugin = {
   id: "zh-CN",
   label: "简体中文",
   messages: {
+    "cron.notify": "完成通知",
+    "cron.notifyHint": "什么时候发完成通知（桌面通知或手机推送）。",
+    "cron.notifyError": "仅失败时",
+    "cron.notifySuccess": "仅成功时",
+    "cron.notifyAlways": "每次运行",
+    "cron.notifyNever": "不通知",
     "mcp.handshakeForceConfirm": "与 {name} 的握手失败。仍要启用吗？只有在服务可达后工具才会真正可用。",
     "cron.maxRuns": "最多运行次数",
     "cron.maxRunsPlaceholder": "不限次",

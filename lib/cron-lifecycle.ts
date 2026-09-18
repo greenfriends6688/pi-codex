@@ -26,6 +26,12 @@ export const SESSION_REUSE_CONTEXT_LIMIT = 0.7;
 
 export type CronSessionMode = "new" | "daily" | "reuse";
 
+/**
+ * 完成通知策略。默认 `"error"`：定时任务成功是常态、不该每次打扰，
+ * 失败才值得推一条到手机/桌面。
+ */
+export type CronNotifyMode = "never" | "always" | "success" | "error";
+
 export function resolveSessionMode(task: Pick<CronTask, "sessionMode">): CronSessionMode {
   return task.sessionMode ?? "new";
 }
@@ -162,6 +168,17 @@ export function applyRunResult(
     outcome.pausedReason = `连续失败 ${consecutiveFailures} 次，已自动暂停`;
   }
   return outcome;
+}
+
+/** 是否应该为这次运行发通知。 */
+export function shouldNotifyRun(
+  task: Pick<CronTask, "notify">,
+  status: "ok" | "error",
+): boolean {
+  const mode = task.notify ?? "error";
+  if (mode === "never") return false;
+  if (mode === "always") return true;
+  return mode === "success" ? status === "ok" : status === "error";
 }
 
 /** 运行超时的上限：任务自带 timeoutMs 优先，否则用默认值。 */

@@ -5,6 +5,12 @@ export const enLocale: LocalePlugin = {
   id: "en",
   label: "English",
   messages: {
+    "cron.notify": "Notify",
+    "cron.notifyHint": "When to send a completion notification (desktop notification or phone push).",
+    "cron.notifyError": "Only on failure",
+    "cron.notifySuccess": "Only on success",
+    "cron.notifyAlways": "Every run",
+    "cron.notifyNever": "Never",
     "mcp.handshakeForceConfirm": "Handshake with {name} failed. Enable it anyway? Tools will only work once the server is reachable.",
     "cron.maxRuns": "Max runs",
     "cron.maxRunsPlaceholder": "unlimited",

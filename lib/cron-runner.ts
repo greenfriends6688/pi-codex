@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { cronDueState } from "./cron-schedule";
 import {
   applyRunResult,
+  shouldNotifyRun,
   isTaskExhausted,
   resolveRunTimeoutMs,
   resolveSessionMode,
@@ -124,6 +125,7 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
       ...(outcome.completedAt ? { completedAt: outcome.completedAt } : {}),
     });
     appendCronHistory(task.id, { at: new Date().toISOString(), status: "ok", sessionId: realSessionId });
+    await notifyRunFinished(task, "ok", realSessionId);
     return { taskId: task.id, sessionId: realSessionId, status: "ok" };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -145,9 +147,36 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
     });
     appendCronHistory(task.id, { at: new Date().toISOString(), status: "error", error: message });
     console.error(`[pi-web] cron task "${task.name}" failed:`, message);
+    await notifyRunFinished(task, "error", task.lastSessionId);
     return { taskId: task.id, status: "error", error: message };
   } finally {
     running.delete(task.id);
+  }
+}
+
+/**
+ * fork:fix-cron-notify — 运行结束后的完成通知。
+ *
+ * 复用已有的 Web Push 基础设施（`lib/web-push.ts`，桌面壳下它会主动跳过，
+ * 由 Electron 原生通知接管），因此这里不需要新依赖。
+ *
+ * 两个刻意的边界：
+ *   - 策略由任务自己的 `notify` 决定（默认只在失败时通知，见 lib/cron-lifecycle.ts）；
+ *   - 失败发生在建会话之前时没有会话 id，此时**不发**通知——
+ *     推送里点开要落到一个会话上，指不到会话的通知比不发更糟。
+ *   - 通知失败绝不影响任务本身的成败（整段包在 try/catch 里）。
+ */
+async function notifyRunFinished(task: CronTask, status: "ok" | "error", sessionId?: string): Promise<void> {
+  if (!shouldNotifyRun(task, status)) return;
+  if (!sessionId) return;
+  try {
+    const { notifySessionComplete } = await import("./web-push");
+    await notifySessionComplete(sessionId);
+  } catch (error) {
+    console.warn(
+      `[pi-web] cron task "${task.name}" finished but the push notification failed:`,
+      error instanceof Error ? error.message : error,
+    );
   }
 }
 

@@ -315,6 +315,8 @@ export interface CronTask {
   reusableSessionId?: string;
   /** 该复用会话最后一次运行的自然日键（`YYYY-MM-DD`）。 */
   reusableSessionDayKey?: string;
+  /** 完成通知策略；未设置按 "error"（只在失败时通知）。 */
+  notify?: "never" | "always" | "success" | "error";
 }
 
 /** One entry of the run log, so the page can show "what happened" without the session. */
