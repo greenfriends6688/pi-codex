@@ -6,7 +6,8 @@ import { basename, dirname, join } from "path";
 import { promisify } from "util";
 import { fileURLToPath, pathToFileURL } from "url";
 import { NextResponse } from "next/server";
-import { resolveSessionPath } from "@/lib/session-reader";
+import { getSessionEntries, readSessionHeader, resolveSessionPath } from "@/lib/session-reader";
+import { sessionToMarkdown } from "@/lib/session-markdown";
 
 const execFileAsync = promisify(execFile);
 
@@ -243,12 +244,28 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
-  const inline = new URL(req.url).searchParams.get("inline") === "1";
+  const searchParams = new URL(req.url).searchParams;
+  const inline = searchParams.get("inline") === "1";
+  // fork:ui-18 — `?format=md` returns the conversation as a Markdown document
+  // (text + one-line tool summaries), which is the shape people paste elsewhere.
+  const asMarkdown = searchParams.get("format") === "md";
 
   try {
     const filePath = await resolveSessionPath(id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
+    }
+
+    if (asMarkdown) {
+      const markdown = sessionToMarkdown(readSessionHeader(filePath), getSessionEntries(filePath));
+      const downloadName = `pi-session-${basename(filePath, ".jsonl")}.md`;
+      return new Response(markdown, {
+        headers: {
+          "Content-Type": "text/markdown; charset=utf-8",
+          ...(inline ? {} : { "Content-Disposition": `attachment; filename="${downloadName}"` }),
+          "Cache-Control": "no-store",
+        },
+      });
     }
 
     const tempDir = join(tmpdir(), "pi-web-export");

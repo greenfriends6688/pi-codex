@@ -1203,3 +1203,19 @@ SDK 里唯一的 `--approve/--no-approve` 是**项目信任**（是否加载项�
 扩展发起审批/问答的唯一通路，且带键盘导航、倒计时、Esc。MusePi 的「审批卡 + 允许一次/总是允许/拒绝 + 托盘热键」
 建立在它自己 daemon 的 `approval-bridge` + `tools.approvalMode` 上，本仓库的引擎没有对应能力，
 硬做只能造一个没有数据源的空壳。**保持现状**，等上游 pi 暴露审批协议再补。
+
+### 28. MU-18（导出 Markdown / 标题即切换器）与 MU-12（标签溢出折叠）（2026-09-17）
+
+| 编号 | 改了什么 | 说明 |
+| --- | --- | --- |
+| MU-18a | **导出 Markdown**：`GET /api/sessions/<id>/export?format=md`（`?inline=1` 不下载），新 `lib/session-markdown.ts` 纯函数 —— 正文逐字、工具调用压成一行（名称 + 首个参数）、工具结果折叠进 `<details>` 且截断 600 字、**思考块丢弃**（它不属于"说出来的话"）。入口在顶栏 `⋯` → 「导出 Markdown」，仅在有选中会话时出现 | 「把对话给我」是真实需求，HTML 导出是给分享用的，另一条路 |
+| MU-18b | **标题即会话切换器**：顶栏标题变按钮，点开最近 10 条会话（当前项打勾）+ 「新建任务」。实现走 AppShell 已有的 top-panel 机制而不是 ContextMenu —— AppShell 自己在 `ContextMenuProvider` **之外**（provider 是它的子节点），这一点上次做工作区胶囊时已经踩过 | 换会话不必回侧栏 |
+| MU-12 | **标签溢出折叠**：TabBar 逐标签量宽 → 纯函数 `splitVisibleTabs()` 决定「哪些留在栏里、哪些收进 `…」`；两条规则：① **活动标签永不隐藏**（藏在 `…` 里的活动标签和坏掉的面板没区别）；② 折叠按钮自身占宽，预算要预先扣掉。折叠菜单用 `position: fixed` —— TabBar 是 `overflow-x: hidden`，in-flow 下拉会被裁掉 | `lib/tab-overflow.ts` + 5 例单测 |
+
+**验证**：`tsc` 0 错 ｜ `lint` 0 错（8 条既有 warning）｜ `npm test` **1344/1344**（新增 13 例：markdown 三例、溢出split 五例、以及 i18n 三语键一致性）｜
+真 Chrome：标题按钮打开面板并列出「新建任务」✓；选中会话后 `⋯` 菜单出现「导出 Markdown」✓；
+`/api/sessions/<id>/export?format=md` 返回 `text/markdown` 且正文/工具摘要格式正确（实测一份 500 条会话）✓；
+1000px 宽 + 打开 6 个文件 → 只留活动标签 `tsconfig.json`，折叠按钮显示 `5`，菜单列出被折叠的 5 个（各带关闭）✓
+（截图 `test-results/tier34/14-title-switcher.png`、`15-more-menu-export.png`、`16-tab-overflow.png`）。
+
+**备注**：dev server 胶囊没有做 —— 「起/停 dev server」需要往终端会话里注入命令，`/api/terminal` 目前只有创建/输入/关闭通道，TerminalPanel 没有"带初始命令创建"的入口；把这条链路补上属于独立一件（要动终端面板与标签状态），留在下一轮。

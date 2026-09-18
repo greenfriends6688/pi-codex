@@ -7,7 +7,6 @@ import {
   CRON_SCHEDULE_KINDS,
   cronDueState,
   parseCronDate,
-  parseCronTime,
   normalizeCronTimes,
   normalizeIdleWindow,
   normalizeWeekdays,

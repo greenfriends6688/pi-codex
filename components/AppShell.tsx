@@ -289,6 +289,8 @@ export function AppShell() {
   const [pendingQuotePrompt, setPendingQuotePrompt] = useState<{ sessionId: string; text: string } | null>(null);
   const [pendingNewSessionPrompt, setPendingNewSessionPrompt] = useState<{ draftId: string; cwd: string; text: string } | null>(null);
   const topBarRef = useRef<HTMLDivElement>(null);
+  // fork:ui-18 — anchor for the title session switcher.
+  const topBarTitleRef = useRef<HTMLButtonElement>(null);
   const mobileToolbarRef = useRef<HTMLDivElement>(null);
   // Branch navigator state — populated by ChatWindow via onBranchDataChange
   const [branchTree, setBranchTree] = useState<SessionTreeNode[]>([]);
@@ -361,9 +363,10 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | "more" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | "more" | "sessions" | null>(null);
   /** fork:ui-14 — the ⋯ menu width, so it hangs off the right edge of the bar. */
   const TOP_BAR_MORE_MENU_WIDTH = 200;
+  const TOP_BAR_SESSIONS_MENU_WIDTH = 300;
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   useEffect(() => {
@@ -379,7 +382,7 @@ export function AppShell() {
   }, [hasSubagentSessions]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "session" | "more",
+    panel: "agents" | "branches" | "system" | "tools" | "session" | "more" | "sessions",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -488,6 +491,18 @@ export function AppShell() {
           top: topBarRect.bottom,
           left: Math.max(8, topBarRect.right - TOP_BAR_MORE_MENU_WIDTH),
           width: TOP_BAR_MORE_MENU_WIDTH,
+        });
+        return;
+      }
+      // fork:ui-18 — the session switcher hangs under the title, so it keeps the
+      // left edge of the title area instead of the bar's right edge.
+      if (activeTopPanel === "sessions") {
+        const titleRect = topBarTitleRef.current?.getBoundingClientRect();
+        const width = Math.min(TOP_BAR_SESSIONS_MENU_WIDTH, topBarRect.width - 16);
+        setTopPanelPos({
+          top: topBarRect.bottom,
+          left: Math.max(8, Math.min(titleRect?.left ?? topBarRect.left, topBarRect.right - width - 8)),
+          width,
         });
         return;
       }
@@ -2450,21 +2465,41 @@ export function AppShell() {
                 <rect x="3" y="4" width="18" height="16" rx="2" />
                 <path d="M8 9h8M8 13h5" />
               </svg>
-              <span
+              {/* fork:ui-18 — the title doubles as the session switcher (MusePi
+                  GuiHeader.tsx:748): recent sessions open from here, so switching
+                  does not require going back to the sidebar. It uses the top-bar
+                  popover machinery (this component sits outside the ContextMenu
+                  provider, which its children use). */}
+              <button
+                type="button"
+                ref={topBarTitleRef}
                 title={topBarSessionTitle}
+                aria-label={translate("sidebar.recentSessions")}
+                aria-expanded={activeTopPanel === "sessions"}
+                onClick={() => toggleTopPanel("sessions", false)}
                 style={{
                   minWidth: 0,
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   whiteSpace: "nowrap",
+                  maxWidth: "100%",
+                  padding: "3px 6px",
+                  margin: "-3px -6px",
+                  background: activeTopPanel === "sessions" ? "var(--bg-selected)" : "none",
+                  border: "none",
+                  borderRadius: "var(--radius-sm)",
                   fontSize: 13,
                   fontWeight: 500,
                   letterSpacing: 0,
                   color: "var(--text)",
+                  cursor: "pointer",
+                  textAlign: "left",
                 }}
+                onMouseEnter={(event) => { event.currentTarget.style.background = activeTopPanel === "sessions" ? "var(--bg-selected)" : "var(--bg-hover)"; }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = activeTopPanel === "sessions" ? "var(--bg-selected)" : "none"; }}
               >
                 {topBarSessionTitle}
-              </span>
+              </button>
             </div>
           )}
           {isMobile && (
@@ -2597,6 +2632,71 @@ export function AppShell() {
                   translate={translate}
                 />
               )}
+              {activeTopPanel === "sessions" && (
+                // fork:ui-18 — recent sessions, newest first.
+                <div style={{
+                  margin: 4,
+                  padding: 4,
+                  background: "var(--bg-elev)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "var(--radius-lg)",
+                  boxShadow: "var(--shadow-lg)",
+                }}>
+                  {[...sessionCatalog]
+                    .sort((a, b) => b.modified.localeCompare(a.modified))
+                    .slice(0, 10)
+                    .map((session) => {
+                      const label = session.name?.trim()
+                        || session.firstMessage?.trim().replace(/\s+/g, " ").slice(0, 60)
+                        || translate("i18n.newSession");
+                      const isCurrent = session.id === selectedSession?.id;
+                      return (
+                        <button
+                          key={session.id}
+                          type="button"
+                          title={session.cwd}
+                          onClick={() => {
+                            toggleTopPanel("sessions", false);
+                            handleSelectSession(session, true);
+                          }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: 8, width: "100%", height: 30,
+                            padding: "0 10px", background: isCurrent ? "var(--bg-selected)" : "none",
+                            border: "none", borderRadius: "var(--radius-md)",
+                            color: isCurrent ? "var(--text)" : "var(--text-muted)",
+                            cursor: "pointer", fontSize: 12.5, textAlign: "left",
+                          }}
+                          onMouseEnter={(event) => { if (!isCurrent) event.currentTarget.style.background = "var(--bg-hover)"; }}
+                          onMouseLeave={(event) => { if (!isCurrent) event.currentTarget.style.background = "none"; }}
+                        >
+                          <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                          {isCurrent && <span style={{ flexShrink: 0, color: "var(--accent)" }}>✓</span>}
+                        </button>
+                      );
+                    })}
+                  <div style={{ height: 1, background: "var(--border)", margin: "4px 0" }} />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cwd = selectedSession?.cwd ?? activeCwd;
+                      toggleTopPanel("sessions", false);
+                      if (!cwd) return;
+                      const tempId = typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `${Date.now().toString(36)}`;
+                      handleNewSession(tempId, cwd);
+                    }}
+                    style={{
+                      display: "flex", alignItems: "center", width: "100%", height: 30,
+                      padding: "0 10px", background: "none", border: "none",
+                      borderRadius: "var(--radius-md)", color: "var(--text)",
+                      cursor: "pointer", fontSize: 12.5, textAlign: "left",
+                    }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
+                  >
+                    {translate("sidebar.newTask")}
+                  </button>
+                </div>
+              )}
               {activeTopPanel === "more" && (
                 // fork:ui-14 — desktop overflow menu (upstream collapses the
                 // reference panels into a ⋯ in TaskHeader). Same two actions,
@@ -2609,6 +2709,27 @@ export function AppShell() {
                   borderRadius: "var(--radius-lg)",
                   boxShadow: "var(--shadow-lg)",
                 }}>
+                  {selectedSession && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toggleTopPanel("more", false);
+                        // ?inline=1 keeps the browser's own text rendering instead of a
+                        // download prompt when the user wants to copy a section.
+                        window.open(`/api/sessions/${encodeURIComponent(selectedSession.id)}/export?format=md`, "_blank", "noopener,noreferrer");
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", width: "100%", height: 30,
+                        padding: "0 10px", background: "none", border: "none",
+                        borderRadius: "var(--radius-md)", color: "var(--text)",
+                        cursor: "pointer", fontSize: 13, textAlign: "left",
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
+                    >
+                      {translate("session.exportMarkdown")}
+                    </button>
+                  )}
                   {(["system", "tools"] as const).map((panel) => (
                     <button
                       key={panel}
