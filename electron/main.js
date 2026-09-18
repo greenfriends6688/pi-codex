@@ -209,15 +209,30 @@ function createWindow() {
   });
 
   // 外部链接一律交给系统浏览器；页面内跳转到其它 host 也走同一规则
+  //
+  // fork:fix-desktop-blocked-nav — 这里必须留痕。
+  // 之前被拦掉的导航是**静默**的（既不开系统浏览器也可能被 deny），
+  // 用户看到的现象就是"某个按钮点了没反应、也不报错"，而主进程日志里什么都没有，
+  // 排查只能靠猜。现在每次拦截都打一行日志，冒烟脚本会去收集它。
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (/^(https?|mailto):/.test(url)) shell.openExternal(url);
+    if (/^(https?|mailto):/.test(url)) {
+      console.log(`[pi-codex] blocked window.open → 交给系统浏览器: ${url}`);
+      shell.openExternal(url);
+    } else {
+      console.log(`[pi-codex] blocked window.open（非 http(s)/mailto，已丢弃）: ${url}`);
+    }
     return { action: "deny" };
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
     const target = new URL(url);
     if (target.port && Number(target.port) === serverPort) return;
     event.preventDefault();
-    if (/^(https?|mailto):/.test(url)) shell.openExternal(url);
+    if (/^(https?|mailto):/.test(url)) {
+      console.log(`[pi-codex] blocked will-navigate → 交给系统浏览器: ${url}（应用内表现为"按钮无反应"）`);
+      shell.openExternal(url);
+    } else {
+      console.log(`[pi-codex] blocked will-navigate（非 http(s)/mailto，已丢弃）: ${url}`);
+    }
   });
 
   const url = `http://127.0.0.1:${serverPort}`;

@@ -44,6 +44,9 @@
     "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
     "desktop": "electron .",
+    "desktop:verify": "node scripts/verify-desktop-bundle.mjs",
+    "desktop:smoke": "node scripts/desktop-smoke.mjs",
+    "desktop:dist": "npm run build && npm run desktop:verify && electron-builder",
     "desktop:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
@@ -144,6 +147,7 @@
       "!node_modules/{typescript,eslint,prettier,tailwindcss,postcss,autoprefixer}/**",
       "!pi参考项目/**",
       "!.playwright-mcp/**",
+      "!assets/**",
       "!.workbuddy/**",
       "!.workbuddy-ai/**",
       "!家里电脑跑的/**",
@@ -162,10 +166,30 @@
     "mac": {
       "category": "public.app-category.developer-tools",
       "target": [
-        "dir"
+        "dir",
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
       ]
     },
     "extraResources": [
+      {
+        "from": "assets/default-skills",
+        "to": "default-skills"
+      },
       {
         "from": "build/trayTemplate.png",
         "to": "trayTemplate.png"
