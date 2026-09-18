@@ -3192,6 +3192,7 @@ export function AppShell() {
     {settingsSection && (
       <SettingsPanel
         onOpenSession={handleOpenSession}
+        onOpenFile={(filePath) => handleOpenFile(filePath, getFileName(filePath))}
         sessionId={selectedSession?.id ?? null}
         initialSection={settingsSection}
         quoteSelectionEnabled={quoteSelectionEnabled}

@@ -59,6 +59,8 @@ interface Props {
   onQuoteSelectionChange: (enabled: boolean) => void;
   /** fork:cron — open the session a scheduled run created. */
   onOpenSession?: (sessionId: string) => void;
+  /** fork:memory-panel — open a memory markdown file in the main viewer. */
+  onOpenFile?: (filePath: string) => void;
 }
 
 export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: { section: SettingsSection; size?: number; strokeWidth?: number }) {
@@ -503,7 +505,7 @@ function sectionSearchTerms(id: SettingsSection): string[] {
   return SECTION_SEARCH_TERMS[id] ?? [];
 }
 
-export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange, onOpenSession }: Props) {
+export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange, onOpenSession, onOpenFile }: Props) {
   const { t } = useI18n();
   const [section, setSection] = useState<SettingsSection>(initialSection);
   // fork:ui-14 — settings search. Sections stay mounted (they are `hidden`, not
@@ -661,7 +663,7 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
             {/* fork:cron / fork:memory / fork:mcp-section — global pages, no project needed. */}
             {sectionHost("mcp", <McpConfig cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
             {sectionHost("cron", <CronConfig cwd={cwd} onOpenSession={onOpenSession} />)}
-            {sectionHost("memory", <PiMemoryConfig cwd={cwd} />)}
+            {sectionHost("memory", <PiMemoryConfig cwd={cwd} onOpenFile={onOpenFile} />)}
           </main>
         </div>
       </div>

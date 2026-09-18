@@ -1219,3 +1219,18 @@ SDK 里唯一的 `--approve/--no-approve` 是**项目信任**（是否加载项�
 （截图 `test-results/tier34/14-title-switcher.png`、`15-more-menu-export.png`、`16-tab-overflow.png`）。
 
 **备注**：dev server 胶囊没有做 —— 「起/停 dev server」需要往终端会话里注入命令，`/api/terminal` 目前只有创建/输入/关闭通道，TerminalPanel 没有"带初始命令创建"的入口；把这条链路补上属于独立一件（要动终端面板与标签状态），留在下一轮。
+
+### 29. 记忆面板 v3：真开关 + 让记忆文件看得见（2026-09-17）
+
+用户反馈两点：**要一个开关**、**看不到任何记忆文档**。两点都成立：
+
+| 问题 | 原因 | 改法 |
+| --- | --- | --- |
+| 没有开关 | 上一版是「启用 / 禁用」两个按钮，语义对但不是开关 | 换成 `ConfigSwitch` —— 拨动即调用插件 API 的 `enable`/`disable`。关闭 = 包被禁用 = **工具不注册、不注入**（不是把文件藏起来），面板文案写清了这一点 |
+| 看不到记忆文档 | 面板只列**已存在**的文件，而新装的 pi-memory 目录里只有空的 `daily/`、`recovery/`，于是显示"还没有文件" | 面板现在列出 pi-memory 的**已知文件全集**：`MEMORY.md`、`SCRATCHPAD.md`、`daily/<今天>.md`。不存在的显示「尚未创建」+ 一键**新建**（带 starter 模板）；存在的可**预览**、**手改**（PUT，256KB 上限）、或**在编辑器打开** |
+
+配套：
+- `app/api/memory/files/route.ts` 增加 `PUT`，写入白名单只允许 `MEMORY.md` / `SCRATCHPAD.md` / `daily/<YYYY-MM-DD>.md`（路径包含检查 + 正则），原子写、大小上限；`GET` 时 `allowFileRoot(记忆目录)`，这样主文件查看器（含 markdown 编辑器）能打开这些路径 —— 之前它们在任何会话 cwd 之外，查看器会以"未受保护路径"拒绝。
+- `SettingsPanel` 新增 `onOpenFile`，由 AppShell 接到既有的 `handleOpenFile`（与 `onOpenSession` 同一层）。
+
+**验证**：`tsc` 0 错 ｜ `lint` 0 错（8 条既有 warning）｜ `npm test` 1344/1344 ｜ 三语键集合一致（1003 × 3，memory.* 23 键）｜ prod 构建后真 Chrome + 隔离 agent 目录实测：开关拨动写入 `settings.json` 的 packages 状态、`MEMORY.md`/`SCRATCHPAD.md` 显示「尚未创建」并可新建、PUT 拒绝越界路径（403）。
