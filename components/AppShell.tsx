@@ -2460,6 +2460,11 @@ export function AppShell() {
         {/* Top bar with sidebar toggle */}
         <div ref={topBarRef} style={{ flexShrink: 0, background: "var(--bg)" }}>
         <div className="main-workspace-header" style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(var(--height-toolbar, 46px) + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
+          {/* fork:desktop-shell — the drag handle is a real element, not the header box:
+              it is inset past the boundary toggles so the drag region never covers them.
+              `no-drag` alone only helps elements the region rule can reach, and those two
+              toggles are siblings of the header, which is why they stayed unclickable. */}
+          <div className="desktop-drag-handle" aria-hidden="true" />
           {isMobile && <button
             onClick={handleSidebarToggle}
              title={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
@@ -3131,7 +3136,13 @@ export function AppShell() {
           paddingTop: "env(safe-area-inset-top)",
           background: "var(--bg-panel)",
           borderBottom: "1px solid var(--border)",
+          position: "relative",
         }}>
+          {/* fork:desktop-shell — the drag handle is a real element, not the header box:
+              it is inset past the boundary toggles so the drag region never covers them.
+              `no-drag` alone only helps elements the region rule can reach, and those two
+              toggles are siblings of the header, which is why they stayed unclickable. */}
+          <div className="desktop-drag-handle" aria-hidden="true" />
           <div style={{ flex: 1, overflow: "hidden" }}>
             <TabBar
               tabs={panelTabs}

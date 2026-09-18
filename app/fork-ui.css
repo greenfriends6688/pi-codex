@@ -318,8 +318,21 @@ html.keyboard-open .extension-status-shelf {
  * that leaves the padding between the title/stat buttons as grabbable space, and
  * double-clicking it zooms the window (native behaviour).
  * ------------------------------------------------------------------------- */
-[data-desktop-shell="true"] .main-workspace-header {
+/* The header box itself is NOT a drag region: the two workspace-boundary toggles are
+ * absolutely positioned siblings that overlap its first and last 28px, and a drag region
+ * swallows any click inside its shape unless the target is an explicitly `no-drag`
+ * descendant — a sibling is not. Instead a real handle element carries the drag, inset
+ * past both toggles, so the region cannot reach them at all. */
+[data-desktop-shell="true"] .desktop-drag-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 28px;
+  right: 28px;
   -webkit-app-region: drag;
+}
+[data-desktop-shell="true"] .main-workspace-header {
+  -webkit-app-region: no-drag;
 }
 /* The bug this fixes: `no-drag` on the <button> alone leaves the <svg> inside it in the
  * drag region, so Chromium starts a window drag instead of a click — the top-right
@@ -343,9 +356,9 @@ html.keyboard-open .extension-status-shelf {
 [data-desktop-shell="true"] .main-workspace-header [contenteditable="true"] {
   -webkit-app-region: no-drag;
 }
-/* The right panel's tab strip and the sidebar header are useful secondary handles. */
+/* The right panel's tab strip keeps its handle for the same reason. */
 [data-desktop-shell="true"] #file-panel .main-workspace-header {
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 
 /* The two workspace-boundary toggles are NOT children of the header: they are absolutely
