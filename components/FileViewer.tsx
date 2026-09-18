@@ -2614,7 +2614,8 @@ function TextFileViewer({
               </div>
               <div className="markdown-body markdown-file-preview markdown-readable-column" style={{ padding: "16px 32px 24px" }}>
                 <MarkdownFilePreview content={content} filePath={filePath} cwd={cwd}
-                  sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} />
+                  sourceSessionId={sourceSessionId} onOpenFile={onOpenFile}
+                  sourceLines={Boolean(locationTarget)} />
               </div>
             </div>
           )}>
@@ -2634,7 +2635,8 @@ function TextFileViewer({
         ) : isMarkdown && effectiveDisplayMode === "preview" ? (
           <div className="markdown-body markdown-file-preview markdown-readable-column" style={{ padding: "24px 32px" }}>
             <MarkdownFilePreview content={content} filePath={filePath} cwd={cwd}
-              sourceSessionId={sourceSessionId} onOpenFile={onOpenFile} />
+              sourceSessionId={sourceSessionId} onOpenFile={onOpenFile}
+              sourceLines={Boolean(locationTarget)} />
           </div>
         ) : useLightweightSource ? (
           <div

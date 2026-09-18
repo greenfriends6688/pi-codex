@@ -5,6 +5,7 @@ import { LazyCodeHighlighter, useHighlighterReady } from "./useLazyHighlighter";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
+import { HIGHLIGHT_SKIPPED_I18N_KEY, highlightBudgetMs, shouldHighlightCode } from "@/lib/code-highlight-schedule";
 
 interface MermaidBlockProps {
   code: string;
@@ -264,21 +265,69 @@ interface CodeBlockProps {
  * monospace text — highlighting a growing block re-tokenizes all of it on
  * every chunk, which is the single most expensive part of streamed rendering.
  */
-function PlainCode({ code }: { code: string }) {
+function PlainCode({ code, note }: { code: string; note?: string }) {
   return (
-    <pre
-      style={{
-        margin: 0,
-        padding: "11px 13px",
-        fontSize: "calc(12.5px + var(--chat-font-size-offset, 0px))",
-        lineHeight: 1.62,
-        overflowX: "auto",
-        background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
-      }}
-    >
-      <code style={{ fontFamily: "var(--font-mono)" }}>{code}</code>
-    </pre>
+    <>
+      {note && (
+        <div className="markdown-code-note" role="note">{note}</div>
+      )}
+      <pre
+        style={{
+          margin: 0,
+          padding: "11px 13px",
+          fontSize: "calc(12.5px + var(--chat-font-size-offset, 0px))",
+          lineHeight: 1.62,
+          overflowX: "auto",
+          background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
+        }}
+      >
+        <code style={{ fontFamily: "var(--font-mono)" }}>{code}</code>
+      </pre>
+    </>
   );
+}
+
+/**
+ * fork:fix-highlight-chunk — 把「流式结束那一帧一次性全量 tokenize」改成错峰执行。
+ *
+ * 原来的行为：流式期间渲染纯文本，`isStreaming` 转 false 的那一帧对整块跑 Prism。
+ * 一条回答多个大代码块时，它们会在同一帧排队，观感就是「停下来顿一下」。
+ *
+ * 现在：便宜块（≤ `IMMEDIATE_HIGHLIGHT_CHARS`）仍然立即上色；更大的块按
+ * `highlightBudgetMs()` 的预算用 `requestIdleCallback` 推到空闲帧，多个块因此自然分散。
+ * 超过 `MAX_HIGHLIGHT_CHARS` / `MAX_HIGHLIGHT_LINES` 的块永不上色，只给一行提示。
+ */
+function useDeferredHighlight(code: string, enabled: boolean): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    if (!enabled) {
+      setReady(false);
+      return;
+    }
+    const budget = highlightBudgetMs(code);
+    if (budget === 0) {
+      setReady(true);
+      return;
+    }
+    let cancelled = false;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      const handle = idleWindow.requestIdleCallback(() => { if (!cancelled) setReady(true); }, { timeout: budget + 200 });
+      return () => {
+        cancelled = true;
+        idleWindow.cancelIdleCallback?.(handle);
+      };
+    }
+    const timer = setTimeout(() => { if (!cancelled) setReady(true); }, budget);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [code, enabled]);
+  return ready;
 }
 
 export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isStreaming }: CodeBlockProps) {
@@ -286,6 +335,11 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isS
   const { t } = useI18n();
   const highlighterReady = useHighlighterReady();
   const [copied, setCopied] = useState(false);
+  // fork:fix-highlight-chunk — 超大块直接跳过高亮，并在下方给出原因提示。
+  const highlightable = shouldHighlightCode(code);
+  const deferredReady = useDeferredHighlight(code, !isStreaming && highlighterReady && highlightable);
+  const showHighlight = !isStreaming && highlighterReady && highlightable && deferredReady;
+  const skippedNote = !isStreaming && code.trim() !== "" && !highlightable ? t(HIGHLIGHT_SKIPPED_I18N_KEY) : undefined;
 
   const copy = () => {
     copyText(code).then(() => {
@@ -308,9 +362,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isS
           </button>
         </div>
       </div>
-      {isStreaming || !highlighterReady ? (
-        <PlainCode code={code} />
-      ) : (
+      {showHighlight ? (
         <LazyCodeHighlighter
           language={lang || "text"}
           isDark={isDark}
@@ -328,6 +380,8 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isS
         >
           {code}
         </LazyCodeHighlighter>
+      ) : (
+        <PlainCode code={code} note={skippedNote} />
       )}
     </div>
   );

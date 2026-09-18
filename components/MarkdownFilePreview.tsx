@@ -109,7 +109,7 @@ function sourceLineAttributes(node: unknown): Record<string, number> {
 }
 
 /** Shared by the read-only preview and editor's complex blocks. */
-export function MarkdownFilePreview({ content, filePath, cwd, sourceSessionId, onOpenFile }: MarkdownFileContext & { content: string }) {
+export function MarkdownFilePreview({ content, filePath, cwd, sourceSessionId, onOpenFile, sourceLines = false }: MarkdownFileContext & { content: string; sourceLines?: boolean }) {
   const directory = getFileDirectory(filePath);
   const frontmatter = useMemo(() => parseFrontmatter(content), [content]);
   const normalized = useMemo(() => normalizeDisplayMath(content), [content]);
@@ -153,10 +153,15 @@ export function MarkdownFilePreview({ content, filePath, cwd, sourceSessionId, o
       return <img src={imageSrc} alt={alt ?? ""} loading="lazy" {...props} />;
     },
   }), [directory, cwd, sourceSessionId, onOpenFile]);
-  const rehypePlugins = useMemo(() => [
-    ...(markdownPreviewRehypePlugins ?? []),
-    rehypeSourceLineSpans,
-  ], []);
+  // fork:fix-md-preview — 行号 spans 现在是可选的。
+  //
+  // `rehypeSourceLineSpans` 会逐个 text 节点按换行切分并给每一行注上 `data-source-line`，
+  // 大文档下这是预览打开耗时的主要部分；而它只服务于一个需求：把「跳转到某一行」的
+  // 定位高亮落到具体行（`FileViewer` 监听 `data-source-line` 属性变化来定位）。
+  // 没有待定位目标时（绝大多数阅读场景）不再注入这些 span。
+  const rehypePlugins = useMemo(() => sourceLines
+    ? [...(markdownPreviewRehypePlugins ?? []), rehypeSourceLineSpans]
+    : (markdownPreviewRehypePlugins ?? []), [sourceLines]);
   return <>
     {frontmatter.data && <FrontmatterCard data={frontmatter.data} />}
     <ReactMarkdown remarkPlugins={markdownPreviewRemarkPlugins} rehypePlugins={rehypePlugins}

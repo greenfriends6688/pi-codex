@@ -378,6 +378,30 @@ export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   [rehypeKatex, { throwOnError: false, strict: false }],
 ];
 
+/**
+ * fork:fix-markdown-stream — 流式期间使用的轻量 rehype 插件组。
+ *
+ * 与完整组的唯一差别是 **不含 `rehypeKatex`**：KaTeX 是同步排版，
+ * 且每次 delta 都要对整篇重新排一次，是长公式/多公式回答卡顿的主要来源之一。
+ * 流式期间公式暂时以纯文本呈现，流式结束（`isStreaming` 转 false）后
+ * `MarkdownBody` 会切回 `markdownRehypePlugins` 完成正式排版。
+ *
+ * 参考：Proma 的聊天正文只用 `remarkGfm + remarkMath + rehypeKatex`，
+ * 且刻意不在聊天热路径引入 `rehype-raw`；本仓库还需要 sanitize，因此保留 raw+sanitize。
+ */
+export const markdownStreamingRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
+  rehypeRaw,
+  [rehypeSanitize, markdownSanitizeSchema],
+];
+
+/**
+ * fork:fix-markdown-stream — 按流式状态挑选 rehype 插件组。
+ * 两个数组都是模块常量，引用稳定，不会因为每帧调用而重建插件管线。
+ */
+export function markdownRehypePluginsFor(streaming: boolean): ReactMarkdownOptions["rehypePlugins"] {
+  return streaming ? markdownStreamingRehypePlugins : markdownRehypePlugins;
+}
+
 export const markdownPreviewRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],

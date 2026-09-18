@@ -922,6 +922,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     return history.reverse();
   }, [messages]);
   const messageRefs = useMessageRefs(visibleMessages.length);
+  // fork:fix-render-split — 见下方 attachVisibleRefCached：ref 回调按 (idx, refIndex) 缓存，
+  // 避免每次渲染都新建 N 个函数导致逐帧 ref 抖动。
+  const visibleRefCacheRef = useRef<Map<string, (el: HTMLDivElement | null) => void> | null>(null);
   const revealHistoryForMinimap = useCallback(() => {
     setVisibleCount((current) => Math.max(current, messages.length * 2));
   }, [messages.length]);
@@ -1236,9 +1239,24 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 }
               });
 
-              const attachVisibleRef = (idx: number, refIndex: number) => (el: HTMLDivElement | null) => {
-                messageRefs.current[refIndex] = el;
-                if (idx === lastUserIdx) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
+              // fork:fix-render-split — 稳定的 ref 回调。
+              //
+              // 原来每次渲染都会新建 N 个箭头函数作为 `ref`，React 因此每帧都要
+              // 对每个可见消息执行「旧 ref(null) + 新 ref(node)」，流式期间就是每秒几十次
+              // 与消息数成正比的无效赋值。改成按 (idx, refIndex) 缓存后，ref 只在消息
+              // 真正增删时才会变动。（缓存上界 = 会话消息数 × 2，随会话增长但不会泄漏到其他会话。）
+              const visibleRefCallbacks = (visibleRefCacheRef.current ??= new Map());
+              const attachVisibleRefCached = (idx: number, refIndex: number, isLastUser: boolean) => {
+                const cacheKey = `${refIndex}:${idx}:${isLastUser ? 1 : 0}`;
+                let callback = visibleRefCallbacks.get(cacheKey);
+                if (!callback) {
+                  callback = (el: HTMLDivElement | null) => {
+                    messageRefs.current[refIndex] = el;
+                    if (isLastUser) { (lastUserMsgRef as { current: HTMLDivElement | null }).current = el; }
+                  };
+                  visibleRefCallbacks.set(cacheKey, callback);
+                }
+                return callback;
               };
 
               const renderMessage = (idx: number, options: { attachRef?: boolean; keyPrefix?: string; messageOverride?: AgentMessage; showTimestamp?: boolean; writtenFiles?: WrittenFile[] } = {}): ReactNode => {
@@ -1286,7 +1304,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 );
                 if (!isVisible || currentRefIdx === undefined) return view;
                 return (
-                  <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} ref={options.attachRef === false ? undefined : attachVisibleRef(idx, currentRefIdx)}>
+                  <div key={`${keyPrefix}-${messageKey}`} data-entry-id={entryIds[idx]} ref={options.attachRef === false ? undefined : attachVisibleRefCached(idx, currentRefIdx, idx === lastUserIdx)}>
                     {view}
                   </div>
                 );
