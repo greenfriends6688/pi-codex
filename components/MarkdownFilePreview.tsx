@@ -109,7 +109,7 @@ function sourceLineAttributes(node: unknown): Record<string, number> {
 }
 
 /** Shared by the read-only preview and editor's complex blocks. */
-export function MarkdownFilePreview({ content, filePath, cwd, sourceSessionId, onOpenFile, sourceLines = false }: MarkdownFileContext & { content: string; sourceLines?: boolean }) {
+export function MarkdownFilePreview({ content, filePath, cwd, sourceSessionId, onOpenFile, sourceLines = true }: MarkdownFileContext & { content: string; sourceLines?: boolean }) {
   const directory = getFileDirectory(filePath);
   const frontmatter = useMemo(() => parseFrontmatter(content), [content]);
   const normalized = useMemo(() => normalizeDisplayMath(content), [content]);
@@ -153,12 +153,16 @@ export function MarkdownFilePreview({ content, filePath, cwd, sourceSessionId, o
       return <img src={imageSrc} alt={alt ?? ""} loading="lazy" {...props} />;
     },
   }), [directory, cwd, sourceSessionId, onOpenFile]);
-  // fork:fix-md-preview — 行号 spans 现在是可选的。
+  // fork:fix-md-preview — 行号 spans 现在是可选的（默认仍开启，见下方权衡）。
   //
   // `rehypeSourceLineSpans` 会逐个 text 节点按换行切分并给每一行注上 `data-source-line`，
   // 大文档下这是预览打开耗时的主要部分；而它只服务于一个需求：把「跳转到某一行」的
   // 定位高亮落到具体行（`FileViewer` 监听 `data-source-line` 属性变化来定位）。
-  // 没有待定位目标时（绝大多数阅读场景）不再注入这些 span。
+  //
+  // 默认保持 true：这个组件同时被文件查看器与 Markdown 编辑器（渲染复杂块）复用，
+  // 后者的行定位依赖这些 span，默认关闭会静默改变它的行为。
+  // 真正省下的开销来自 `FileViewer` 显式传 `sourceLines={Boolean(locationTarget)}`：
+  // 没有待定位目标时（绝大多数阅读场景）不注入。
   const rehypePlugins = useMemo(() => sourceLines
     ? [...(markdownPreviewRehypePlugins ?? []), rehypeSourceLineSpans]
     : (markdownPreviewRehypePlugins ?? []), [sourceLines]);

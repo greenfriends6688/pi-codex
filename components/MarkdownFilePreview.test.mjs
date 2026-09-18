@@ -56,3 +56,15 @@ test("does not wrap fenced code text with source-line spans", () => {
   assert.match(html, /class="markdown-code-block"/);
   assert.doesNotMatch(html, /class="token"/);
 });
+
+test("fork:fix-md-preview — sourceLines=false 时不注入行号 spans（阅读路径的省钱开关）", () => {
+  const html = renderToStaticMarkup(React.createElement(MarkdownFilePreview, {
+    content: "# Title\n\nFirst paragraph\ncontinues here\n",
+    filePath: "D:/workspace/example.md",
+    sourceLines: false,
+  }));
+
+  assert.doesNotMatch(html, /data-source-line=/);
+  // 块级区间仍然保留：它只服务滚动定位，不会产生逐行节点。
+  assert.match(html, /<p[^>]*data-source-start-line="3"[^>]*data-source-end-line="4"/);
+});
