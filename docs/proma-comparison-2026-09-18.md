@@ -51,7 +51,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 
 | # | 能力 | Proma 做到什么程度 | 可搬性 | 归属 |
 | --- | --- | --- | --- | --- |
-| G1 | **工具审批卡 + 风险档** | FIFO 队列、危险等级配色、命令/JSON 摘要、拒绝/总是允许/允许、Enter 快捷键、会话白名单、PowerShell 永不加白名单 | ★★★★★ pi 的 `tool_call` 阻断 + 已有 ExtensionDialog | P1 |
+| G1 | **工具审批卡 + 风险档** | FIFO 队列、危险等级配色、命令/JSON 摘要、拒绝/总是允许/允许、Enter 快捷键、会话白名单、PowerShell 永不加白名单 | ★★★★★ pi 的 `tool_call` 阻断 + 已有 ExtensionDialog（**§3.2.1 已推翻 `delta.md` §27 的「等引擎」结论**） | P1 |
 | G2 | **权限模式（bypass / plan）** | 每会话持久化 + 运行时热切换 + 失败回滚；新会话默认全自动 | ★★★★☆ 需要工具层拦截 | P1 |
 | G3 | **计划模式（plan mode）** | 计划写入会话 `plan/*.md`（真实路径校验 + 非符号链接 + ≤1MB）、`ExitPlanMode` 三条出口（批准→转 bypass / 拒绝 / 反馈）、审批时重新哈希校验计划文档、`allowedPrompts` | ★★★★☆ 同上 + 计划文件预览 | P1 |
 | G4 | **会话回退 rewind** | 严格 JSONL 解析 → pi branch artifact → 原子截断 → 元数据提交（失败回滚）；运行中/无 pi session id 时拒绝 | ★★★★★ `createBranchedSession` 已有 | P1 |
@@ -147,6 +147,33 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | 恢复 | renderer 重载后从 `getPendingRequests()` 恢复待决请求 | `useGlobalAgentListeners.ts:982-995` |
 
 **我的状态**：pi 的 `tool_call` 事件天生支持阻断（`docs/extensions.md:778-817`），我的 `ExtensionDialog` 也已经能跑 `confirm`。缺的正是**审批这一路的语义**：风险档、参数摘要、总是允许白名单、FIFO 队列、恢复。这个缺口在 `docs/musepi-borrowing-plan-2026-09-17.md:558`（MU-31）已被识别，但当时只当作"卡片升级"，Proma 证明它应该配一整套模式 + 引擎。
+
+### 3.2.1 ⚠️ 需要推翻的一条既有结论：`delta.md` §27「不做（等引擎）」
+
+本仓库 `docs/codex-skin/delta.md:1199-1205` 对 MU-31 的核实结论是 **「不做（等引擎）」**，理由是：
+
+> SDK 里唯一的 `--approve/--no-approve` 是**项目信任**…没有 per-tool 审批协议…
+> 硬做只能造一个没有数据源的空壳。**保持现状**，等上游 pi 暴露审批协议再补。
+
+**这个结论的前提是错的**，它只找"声明式设置"（像 MusePi 的 `tools.approvalMode`），漏了 pi 提供的是**命令式钩子**。逐条证据：
+
+| # | 事实 | 依据 |
+| --- | --- | --- |
+| 1 | pi 官方文档把**「Permission gates（确认 `rm -rf` / `sudo` 等）」列为扩展的首要用例** | `node_modules/@earendil-works/pi-coding-agent/docs/extensions.md:19` |
+| 2 | Quick Start 里就是完整可跑的审批片段：`tool_call` 里 `await ctx.ui.confirm(...)`，拿到布尔值后 `return { block: true, reason: "Blocked by user" }` | `docs/extensions.md:70-74` |
+| 3 | `ctx.ui.confirm()` 被明确归类为**阻塞式、面向用户的扩展 UI 提示**（与 `select/input/editor/custom` 同级） | `docs/extensions.md:585` |
+| 4 | `tool_call` 在工具执行前触发，**明确可阻断**；返回值 `{ block, reason, terminate }` 控制阻断语义 | `docs/extensions.md:778-793` |
+| 5 | **UI 这一半本仓库已经做完**：`ExtensionDialog` 已渲染 `confirm` 分支（含键盘导航、倒计时） | `components/ChatWindow.tsx:1812-1990` |
+| 6 | 回答链也已打通：`respondToExtensionUi` → POST `extension_ui_response`（带 `confirmed: boolean`），`rpc-manager` 端已处理 | `hooks/useAgentSession.ts:805-814`；`lib/types.ts:202-204`；`lib/rpc-manager.ts:973` |
+
+**所以**：审批能力的**引擎侧（工具可阻断 + 可阻塞等待用户）与 UI 侧（弹卡 + 回收答案）都已经在仓库里**。真正要从零写的只是"审批的语义层"——风险档分类、参数摘要、会话白名单（总是允许）、FIFO 队列、刷新恢复——这些全是本仓库的普通应用逻辑，不是引擎能力。
+
+**两条结论要改**：
+
+- `delta.md` §27 的「不做（等引擎）」应改为「**可做，引擎已支持**」；
+- MU-31 的描述「升级可见卡片」低估了工作量，实际应做成本文 PROMA-01 的完整引擎 + PROMA-02 的模式选择器。
+
+> 这个纠正本身不影响 Proma 借鉴项的数量：它只是把一个"被阻塞项"解封了。
 
 ### 3.3 计划模式
 
@@ -498,7 +525,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 
 | Proma 项 | 已有计划 | 处理 |
 | --- | --- | --- |
-| 工具审批卡（G1） | `musepi-borrowing-plan-2026-09-17.md:558` **MU-31** | 本计划的 PROMA-01 是 MU-31 的**超集**（MU-31 只升级卡片；PROMA-01 连引擎、白名单、恢复、风险档一起做）。建议 MU-31 并入 PROMA-01 |
+| MU-31 审批卡 | `musepi-borrowing-plan-2026-09-17.md:558` **MU-31** | 本计划的 PROMA-01 是 MU-31 的**超集**（MU-31 只升级卡片；PROMA-01 连引擎、白名单、恢复、风险档一起做）。且 **MU-31 的「不做（等引擎）」结论已在 §3.2.1 被推翻**——引擎已支持，无阻塞。建议 MU-31 并入 PROMA-01 |
 | 划词工具条 | `musepi-borrowing-plan-2026-09-17.md:531` **MU-04** | Proma 的 `AgentHistorySelectionLayer` 多一个"探索此分支"动作 → 并入 PROMA-05 |
 | Git 面板 | `musepi-borrowing-plan-2026-09-17.md:543` **MU-16** | Proma 的改动面板（G9）是 MU-16 的**只读半边**（不做 stage/commit/PR）。建议先做 PROMA-09，MU-16 的 stage/commit 后置 |
 | 更新对话框 | `omp-web-pr-plan-2026-09-17.md` **PR-13/PR-14** | Proma 的 G19 是这两条的实现参考。PROMA-18 与 PR-13/14 **合并为一个 PR** |
