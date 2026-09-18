@@ -19,6 +19,7 @@ import {
 import { encodeFilePathForApi, getFileName, getRelativeFilePath, sameFilePath } from "@/lib/file-paths";
 import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { clearLocationTextHighlight, LOCATION_HIGHLIGHT_CLASS } from "@/lib/location-highlight";
+import { clampZoom, formatZoomPercent, isZoomed, stepZoom, wheelZoom, withPdfZoom, ZOOM_MAX, ZOOM_MIN } from "@/lib/viewer-zoom";
 import { PathActions } from "./fork/PathActions";
 // fork:perf-highlighter — the markdown stack (react-markdown + rehype/remark plugins +
 // frontmatter) rides along with the preview only; a plain text/image/office file must not
@@ -532,6 +533,12 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
   const [error, setError] = useState<string | null>(null);
   const esRef = useRef<EventSource | null>(null);
   const syncRequestRef = useRef(0);
+  // fork:gap-viewer-zoom — 图片缩放与平移。
+  // 之前只有 maxWidth/maxHeight 自适应，放大细节（截图、设计稿）没有办法看。
+  // 手势沿用常见约定：Ctrl/⌘ + 滚轮缩放、1:1 之外可拖拽平移、双击复位。
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const panRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
 
   const ext = getFileName(filePath).toLowerCase().split(".").pop() ?? "";
 
@@ -541,6 +548,8 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
     setNaturalSize(null);
     setError(null);
     setWatching(false);
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
   }, [filePath, sourceSessionId]);
 
   useEffect(() => {
@@ -645,9 +654,48 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           />
           {watching ? "live" : "static"}
         </span>
+        {/* fork:gap-viewer-zoom — 缩放控件（键盘可达，带 aria-label）。 */}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+          <button
+            type="button"
+            className="file-viewer-icon-button"
+            onClick={() => setZoom((value) => stepZoom(value, -1))}
+            disabled={zoom <= ZOOM_MIN}
+            aria-label={t("i18n.zoomOut")}
+            title={t("i18n.zoomOut")}
+          >
+            −
+          </button>
+          <button
+            type="button"
+            className="file-viewer-icon-button"
+            onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
+            aria-label={t("i18n.zoomReset")}
+            title={t("i18n.zoomReset")}
+            style={{ fontVariantNumeric: "tabular-nums", minWidth: 44 }}
+          >
+            {formatZoomPercent(zoom)}
+          </button>
+          <button
+            type="button"
+            className="file-viewer-icon-button"
+            onClick={() => setZoom((value) => stepZoom(value, 1))}
+            disabled={zoom >= ZOOM_MAX}
+            aria-label={t("i18n.zoomIn")}
+            title={t("i18n.zoomIn")}
+          >
+            +
+          </button>
+        </span>
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
       </div>
       <div
+        onWheel={(event) => {
+          // 只有 Ctrl/⌘ + 滚轮才缩放，否则交给容器滚动（触控板用户不该被劫持）。
+          if (!event.ctrlKey && !event.metaKey) return;
+          event.preventDefault();
+          setZoom((value) => wheelZoom(value, event.deltaY));
+        }}
         style={{
           flex: 1,
           overflow: "auto",
@@ -656,6 +704,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           alignItems: "center",
           justifyContent: "center",
           padding: 16,
+          cursor: isZoomed(zoom) ? "grab" : "default",
           backgroundImage:
             "linear-gradient(45deg, var(--bg) 25%, transparent 25%), linear-gradient(-45deg, var(--bg) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--bg) 75%), linear-gradient(-45deg, transparent 75%, var(--bg) 75%)",
           backgroundSize: "16px 16px",
@@ -669,16 +718,39 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           <img
             src={src}
             alt={filePath}
+            draggable={false}
             onLoad={(e) => {
               const img = e.currentTarget;
               setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight });
             }}
             onError={() => setError("Failed to load image")}
+            onDoubleClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }}
+            onPointerDown={(event) => {
+              // 未放大时不接管指针事件，保留容器的原生滚动。
+              if (!isZoomed(zoom)) return;
+              panRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: offset.x, originY: offset.y };
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              const pan = panRef.current;
+              if (!pan || pan.pointerId !== event.pointerId) return;
+              setOffset({ x: pan.originX + (event.clientX - pan.startX), y: pan.originY + (event.clientY - pan.startY) });
+            }}
+            onPointerUp={(event) => {
+              if (panRef.current?.pointerId !== event.pointerId) return;
+              panRef.current = null;
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }}
             style={{
-              maxWidth: "100%",
-              maxHeight: "100%",
+              maxWidth: isZoomed(zoom) ? "none" : "100%",
+              maxHeight: isZoomed(zoom) ? "none" : "100%",
               objectFit: "contain",
+              transform: `translate(${offset.x}px, ${offset.y}px) scale(${clampZoom(zoom)})`,
+              transformOrigin: "center",
+              transition: panRef.current ? "none" : "transform 120ms ease-out",
               boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+              userSelect: "none",
+              touchAction: "none",
             }}
           />
         )}
@@ -1181,15 +1253,21 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, onMentionLines, onAskI
 
   const ext = getFileExt(filePath);
   const isPdf = ext === "pdf";
-  const previewUrl = isPdf
+  // fork:gap-viewer-zoom — PDF 缩放。
+  // 这里仍然是浏览器内置的 PDF 阅读器（不引 pdfjs），但通过 `#zoom=<percent>`
+  // fragment 给它一个缩放档位，于是至少有了和图片一致的 −/+/100% 控件。
+  const [pdfZoom, setPdfZoom] = useState(1);
+  const rawPreviewUrl = isPdf
     ? getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined)
     : getFileApiUrl(filePath, "preview", sourceSessionId, bust ? { v: bust } : undefined);
+  const previewUrl = isPdf ? withPdfZoom(rawPreviewUrl, pdfZoom) : rawPreviewUrl;
 
   useEffect(() => {
     setBust(0);
     setSize(null);
     setError(null);
     setWatching(false);
+    setPdfZoom(1);
 
     let active = true;
     const requestId = ++syncRequestRef.current;
@@ -1410,6 +1488,42 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, onMentionLines, onAskI
         </span>
         <span style={{ marginLeft: "auto" }}>{ext === "docx" ? "docx preview" : "pdf"}</span>
         {size != null && <span>{formatSize(size)}</span>}
+        {/* fork:gap-viewer-zoom — 只给 PDF 加缩放：DOCX 走的是自己排版的 HTML，不需要。
+            通过 fragment 驱动内置阅读器，按钮步进避免每次滚轮都重载文档。 */}
+        {isPdf && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+            <button
+              type="button"
+              className="file-viewer-icon-button"
+              onClick={() => setPdfZoom((value) => stepZoom(value, -1))}
+              disabled={pdfZoom <= ZOOM_MIN}
+              aria-label={t("i18n.zoomOut")}
+              title={t("i18n.zoomOut")}
+            >
+              −
+            </button>
+            <button
+              type="button"
+              className="file-viewer-icon-button"
+              onClick={() => setPdfZoom(1)}
+              aria-label={t("i18n.zoomReset")}
+              title={t("i18n.zoomReset")}
+              style={{ fontVariantNumeric: "tabular-nums", minWidth: 44 }}
+            >
+              {formatZoomPercent(pdfZoom)}
+            </button>
+            <button
+              type="button"
+              className="file-viewer-icon-button"
+              onClick={() => setPdfZoom((value) => stepZoom(value, 1))}
+              disabled={pdfZoom >= ZOOM_MAX}
+              aria-label={t("i18n.zoomIn")}
+              title={t("i18n.zoomIn")}
+            >
+              +
+            </button>
+          </span>
+        )}
         <DownloadLink filePath={filePath} sourceSessionId={sourceSessionId} />
         <span
           title={watching ? t("i18n.liveSync") : t("i18n.notWatching")}
