@@ -1,5 +1,30 @@
 "use client";
 
+/** fork:gap-auto-name — 自动命名尝试标记的持久化键与读写（只保留最近 50 条）。 */
+const AUTO_NAME_ATTEMPTED_KEY = "pi-web:auto-name-attempted";
+function readAutoNameAttempts(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(AUTO_NAME_ATTEMPTED_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+function readAutoNameAttempted(sessionId: string): boolean {
+  return readAutoNameAttempts().includes(sessionId);
+}
+function markAutoNameAttempted(sessionId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    const next = [sessionId, ...readAutoNameAttempts().filter((id) => id !== sessionId)].slice(0, 50);
+    window.localStorage.setItem(AUTO_NAME_ATTEMPTED_KEY, JSON.stringify(next));
+  } catch {
+    // 存储不可用时退化为「本次运行只尝试一次」，不影响命名本身。
+  }
+}
+
 import { useState, useCallback, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -167,6 +192,12 @@ export function AppShell() {
   );
   const hasSubagentSessions = Boolean(activeSessionFamily?.subagents.length);
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
+  // fork:gap-perf-monitor — 仅当 URL 带 ?perf=1 时激活（无 query 时是空操作）。
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    void import("@/lib/perf-monitor").then((mod) => { cleanup = mod.initPerfMonitor(); });
+    return () => cleanup?.();
+  }, []);
   const handleRunningSessionIdsChange = useCallback((ids: Set<string>) => {
     setRunningSessionIds((previous) => {
       if (previous.size === ids.size && [...ids].every((id) => previous.has(id))) return previous;
@@ -343,6 +374,9 @@ export function AppShell() {
   const [sessionStats, setSessionStats] = useState<SessionStatsInfo | null>(null);
   const [autoNameStatus, setAutoNameStatus] = useState<AutoNameStatus>({ kind: "idle" });
   const autoNameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // fork:gap-auto-name — 已尝试自动命名的会话（内存 + localStorage 双保险）。
+  const autoNameAttemptedRef = useRef<Set<string>>(new Set());
+
   const activeSessionIdRef = useRef<string | null>(selectedSession?.id ?? null);
   activeSessionIdRef.current = selectedSession?.id ?? null;
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
@@ -1022,13 +1056,23 @@ export function AppShell() {
     });
   }, [deliverSessionNotification, selectedSession, translate]);
 
-  const handleAutoName = useCallback(async () => {
-    const sessionId = selectedSession?.id;
-    if (!sessionId || autoNameStatus.kind === "naming") return;
-    if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
-    setActiveTopPanel(null);
-    setAutoNameStatus({ kind: "naming" });
-
+  /**
+   * fork:gap-auto-name — 会话自动命名。
+   *
+   * 后端 `/api/sessions/[id]/auto-name` 本来就有，但只挂在工具栏按钮上，
+   * 于是新会话的标题一直是「新会话」直到用户想起来点一下。
+   * 这里把请求体抽成 `requestAutoName`，由两条路径共用：
+   *   - 手动按钮（`handleAutoName`，带状态反馈）；
+   *   - 首个 assistant 回复结束后的静默自动命名（下方 effect）。
+   * 静默路径不写 autoNameStatus，避免自动触发时工具栏文案闪烁。
+   */
+  const requestAutoName = useCallback(async (sessionId: string, options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
+    if (!silent) {
+      if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
+      setActiveTopPanel(null);
+      setAutoNameStatus({ kind: "naming" });
+    }
     try {
       const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/auto-name`, {
         method: "POST",
@@ -1040,23 +1084,57 @@ export function AppShell() {
 
       const title = body.title.trim();
       setRefreshKey((key) => key + 1);
-      if (activeSessionIdRef.current !== sessionId) return;
+      if (activeSessionIdRef.current !== sessionId) return title;
       setSelectedSession((current) => current?.id === sessionId ? { ...current, name: title } : current);
       setSessionStats((current) => current?.sessionId === sessionId ? { ...current, sessionName: title } : current);
-      setAutoNameStatus({ kind: "success" });
-      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 1800);
+      if (!silent) {
+        setAutoNameStatus({ kind: "success" });
+        autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 1800);
+      }
+      return title;
     } catch (error) {
-      if (activeSessionIdRef.current !== sessionId) return;
-      const message = error instanceof Error ? error.message : String(error);
-      setAutoNameStatus({ kind: "error", message });
-      autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 5000);
+      if (!silent && activeSessionIdRef.current === sessionId) {
+        const message = error instanceof Error ? error.message : String(error);
+        setAutoNameStatus({ kind: "error", message });
+        autoNameTimerRef.current = setTimeout(() => setAutoNameStatus({ kind: "idle" }), 5000);
+      }
+      return null;
     }
-  }, [autoNameStatus.kind, selectedSession?.id]);
+  }, []);
+
+  const handleAutoName = useCallback(async () => {
+    const sessionId = selectedSession?.id;
+    if (!sessionId || autoNameStatus.kind === "naming") return;
+    await requestAutoName(sessionId);
+  }, [autoNameStatus.kind, requestAutoName, selectedSession?.id]);
 
   useEffect(() => {
     if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
     setAutoNameStatus({ kind: "idle" });
   }, [selectedSession?.id]);
+
+  useEffect(() => {
+    // fork:gap-auto-name — 首个回复结束后静默命名一次。
+    //
+    // 条件（全部满足才触发）：
+    //   - 会话已落盘（非 transient）且有名字为空——用户手动改过名就不会再动；
+    //   - 已有至少一条消息（否则命名请求拿不到素材，后端也会拒绝）；
+    //   - 当前会话没在跑（`runningSessionIds`）——避免和流式渲染抢同一个 API；
+    //   - 该会话此前没尝试过（localStorage 标记，避免失败时反复重试）。
+    const session = selectedSession;
+    if (!session || session.transient || session.name) return;
+    if (runningSessionIds.has(session.id)) return;
+    const hasMessages = (sessionStats?.userMessages ?? 0) > 0 || session.messageCount > 0;
+    if (!hasMessages) return;
+    if (autoNameAttemptedRef.current.has(session.id)) return;
+    if (readAutoNameAttempted(session.id)) {
+      autoNameAttemptedRef.current.add(session.id);
+      return;
+    }
+    autoNameAttemptedRef.current.add(session.id);
+    markAutoNameAttempted(session.id);
+    void requestAutoName(session.id, { silent: true });
+  }, [requestAutoName, runningSessionIds, selectedSession, sessionStats?.userMessages]);
 
   const handleExplorerRefresh = useCallback(() => {
     setExplorerRefreshKey((k) => k + 1);
@@ -2325,7 +2403,9 @@ export function AppShell() {
         overflow: hidden;
         transform-origin: top right;
         animation: session-info-pop 360ms ease-out both;
-        will-change: transform, opacity, filter, background, box-shadow;
+        /* DSN-06：只提示真正会被动画的属性。原先把 filter/background/box-shadow
+           一起写进 will-change，会常驻提升图层并占用显存，但这段动画只动 transform。 */
+        will-change: transform;
       }
       .session-info-popover::after {
         content: "";
