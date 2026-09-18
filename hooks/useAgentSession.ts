@@ -14,6 +14,7 @@ import type {
 } from "@/lib/types";
 import { isBlockingExtensionUiRequest } from "@/lib/browser-notifications";
 import { normalizeToolCalls } from "@/lib/normalize";
+import { isDuplicateNotice } from "@/lib/notice-dedupe";
 import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { clearDraft, rekeyDraft, restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
@@ -837,6 +838,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const addNotice = useCallback((notice: { id?: string; message: string; type?: NoticeType }) => {
     const message = notice.message.trim();
     if (!message) return;
+    // fork:notice-dedupe — extensions can notify on every session start (pi-memory
+    // does exactly that while qmd is missing), and each session switch mounts a fresh
+    // hook, so the de-duplication has to live above the component. Identical text
+    // within the window carries no new information; the first one already told the user.
+    if (isDuplicateNotice(message, notice.type ?? "info")) return;
     dispatchNotice({
       type: "add",
       notice: {

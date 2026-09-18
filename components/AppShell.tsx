@@ -94,6 +94,9 @@ type AutoNameStatus =
 const TOP_BAR_ICON_BUTTON_SIZE = 28;
 // The tree column beside a document only renders when the panel is this wide
 // (see the container query on .file-panel-body).
+// Widened once when a document opens. Kept at 760 deliberately: on a wide screen the
+// comfortable tree+viewer width is what the user wants, and app/fork-ui.css lowers only
+// the *floor* to 560 so a clamped (narrow-window) panel still shows the tree at all.
 const EXPLORER_COLUMN_MIN_PANEL_WIDTH = 760;
 const AGENT_PANEL_WIDTH = 420;
 /** Below this rendered panel width the tree column is dropped so the document keeps room. */
@@ -1129,8 +1132,14 @@ export function AppShell() {
     options?: { sourceSessionId?: string | null; modeHint?: "preview" | "diff"; locationTarget?: Omit<FileLocationTarget, "filePath"> },
   ) => {
     const sourceSessionId = options?.sourceSessionId;
-    const modeHint = options?.modeHint;
     const tabId = `file:${filePath}`;
+    // fork:md-preview-default — a markdown document is a document, not source code: it
+    // opens on Preview. Only for a tab that is not open yet, so switching the same file
+    // to Source and clicking it again keeps the user's choice (the mode is remembered
+    // per tab in its viewerState). An explicit hint — a message link, a git-status row —
+    // always wins.
+    const modeHint = options?.modeHint
+      ?? (getFileExt(filePath) === "md" && !fileTabs.some((tab) => tab.id === tabId) ? "preview" as const : undefined);
     setPendingFileLocation(options?.locationTarget ? { filePath, ...options.locationTarget } : null);
     setFileTabs((prev) => openFileTab(prev, {
       fileName,
@@ -1160,7 +1169,7 @@ export function AppShell() {
         rightPanelResizer.setWidth(Math.min(EXPLORER_COLUMN_MIN_PANEL_WIDTH + 60, getResponsiveRightPanelMaxWidth()));
       }
     }
-  }, [isMobile, rightPanelResizer, workspaceSwapped, getResponsiveRightPanelMaxWidth]);
+  }, [fileTabs, isMobile, rightPanelResizer, workspaceSwapped, getResponsiveRightPanelMaxWidth]);
 
   const handleOpenLinkedFile = useCallback((filePath: string, locationTarget?: Omit<FileLocationTarget, "filePath">) => {
     const baseCwd = selectedSession?.cwd ?? activeCwd;

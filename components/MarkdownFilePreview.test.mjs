@@ -50,8 +50,9 @@ test("does not wrap fenced code text with source-line spans", () => {
   ));
 
   assert.doesNotMatch(html, /data-source-line=/);
-  // Syntax highlighting splits the source into token spans; the important
-  // contract here is that the source-line wrappers were not injected into it.
+  // fork:perf-highlighter — the source-line wrapper belongs on the block, not on the
+  // code text. The token spans only appear once the lazily imported highlighter has
+  // loaded (see MermaidBlock.test.mjs), so the static render checks the wrapper only.
   assert.match(html, /class="markdown-code-block"/);
-  assert.match(html, /class="token"/);
+  assert.doesNotMatch(html, /class="token"/);
 });

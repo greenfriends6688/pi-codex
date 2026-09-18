@@ -1,15 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
-import {
-  Prism as SyntaxHighlighter,
-  createElement as renderSyntaxNode,
-  type SyntaxHighlighterProps,
-} from "react-syntax-highlighter";
-import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import { FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE } from "@/lib/file-source-styles";
+import { LazyFileSourceView, useHighlighterReady } from "./useLazyHighlighter";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import {
@@ -25,7 +20,15 @@ import { encodeFilePathForApi, getFileName, getRelativeFilePath, sameFilePath } 
 import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { clearLocationTextHighlight, LOCATION_HIGHLIGHT_CLASS } from "@/lib/location-highlight";
 import { PathActions } from "./fork/PathActions";
-import { MarkdownFilePreview } from "./MarkdownFilePreview";
+// fork:perf-highlighter — the markdown stack (react-markdown + rehype/remark plugins +
+// frontmatter) rides along with the preview only; a plain text/image/office file must not
+// download it. Same pattern (and reason) as MarkdownFileEditor below.
+const MarkdownFilePreview = dynamic(() => import("./MarkdownFilePreview").then((mod) => mod.MarkdownFilePreview), {
+  ssr: false,
+  loading: () => (
+    <div className="markdown-body markdown-file-preview markdown-readable-column" style={{ padding: "24px 32px" }} aria-busy="true" />
+  ),
+});
 import { MarkdownEditorBoundary } from "./MarkdownEditorBoundary";
 import type { MarkdownEditorLocationApi, MarkdownEditorSelection } from "./MarkdownFileEditor";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
@@ -97,33 +100,6 @@ const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   diff: "Diff",
 };
 
-const FILE_CODE_STYLE: CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: 13,
-  lineHeight: 1.6,
-};
-
-const FILE_LINE_NUMBER_STYLE: CSSProperties = {
-  width: 48,
-  minWidth: 48,
-  padding: "0 10px",
-  textAlign: "right",
-  color: "var(--text-dim)",
-  background: "var(--bg-panel)",
-  borderRight: "1px solid var(--border)",
-  fontFamily: "var(--font-mono)",
-  fontSize: 11,
-  fontStyle: "normal",
-  fontVariantNumeric: "tabular-nums",
-  lineHeight: "20.8px",
-  userSelect: "none",
-  flexShrink: 0,
-  verticalAlign: "top",
-};
-
-type SourceCodeRendererProps = Parameters<NonNullable<SyntaxHighlighterProps["renderer"]>>[0] & {
-  wrapLines: boolean;
-};
 
 interface SelectedLineRange {
   startLine: number;
@@ -323,49 +299,6 @@ function scrollLocationRangeIntoView(scroller: HTMLElement, range: Range) {
     behavior: "auto",
   });
   return true;
-}
-
-function SourceCodeRenderer({ rows, stylesheet, useInlineStyles, wrapLines }: SourceCodeRendererProps) {
-  return rows.map((row, lineIndex) => {
-    const children = row.children ?? [];
-    const firstChildClasses = children[0]?.properties?.className;
-    const hasLineNumber = Array.isArray(firstChildClasses)
-      && firstChildClasses.includes("react-syntax-highlighter-line-number");
-    const lineNumberNode = hasLineNumber ? children[0] : null;
-    const contentNodes = hasLineNumber ? children.slice(1) : children;
-
-    return (
-      <span
-        className="file-source-line"
-        data-line-number={lineIndex + 1}
-        key={`source-line-${lineIndex}`}
-        style={{ display: "flex", minWidth: "100%" }}
-      >
-        {lineNumberNode && renderSyntaxNode({
-          node: lineNumberNode,
-          stylesheet,
-          useInlineStyles,
-          key: `source-line-number-${lineIndex}`,
-        })}
-        <span
-          className="file-source-line-content"
-          style={{
-            flex: "1 1 auto",
-            minWidth: 0,
-            overflowWrap: wrapLines ? "anywhere" : "normal",
-            whiteSpace: wrapLines ? "pre-wrap" : "pre",
-          }}
-        >
-          {contentNodes.map((node, tokenIndex) => renderSyntaxNode({
-            node,
-            stylesheet,
-            useInlineStyles,
-            key: `source-token-${lineIndex}-${tokenIndex}`,
-          }))}
-        </span>
-      </span>
-    );
-  });
 }
 
 function getFileApiUrl(
@@ -2151,46 +2084,27 @@ function TextFileViewer({
     void saveMarkdown();
   }, [saveMarkdown]);
 
-  const useLightweightSource = sourceLines.length > SOURCE_HIGHLIGHT_MAX_LINES
+  const highlighterReady = useHighlighterReady();
+  // fork:perf-highlighter — `!highlighterReady` reuses the huge-file fallback: same line
+  // numbers and layout, no tokens, and it is replaced by the highlighted view as soon as
+  // the lazily imported Prism chunk arrives.
+  const useLightweightSource = !highlighterReady || sourceLines.length > SOURCE_HIGHLIGHT_MAX_LINES
     && !(effectiveDisplayMode === "diff" && hasGitDiff)
     && !(effectiveDisplayMode === "preview" && hasPreview);
   // react-syntax-highlighter rebuilds every token element on each render, which
   // costs hundreds of milliseconds on large files. Cache the rendered trees so
   // unrelated re-renders (panel open/close, selection changes) reuse them as-is.
+  // fork:perf-highlighter — the Prism chunk is not part of the initial bundle any more,
+  // so a file that is opened before it lands renders through the lightweight line view
+  // below (same styles, no tokens) and is upgraded in place once it arrives.
   const highlightedSource = useMemo(
     () => (
-      <SyntaxHighlighter
-        className={wrapLines ? "file-source-view is-wrapped" : "file-source-view"}
-        language={language === "text" ? "plaintext" : language}
-        style={isDark ? vscDarkPlus : vs}
-        showLineNumbers
-        lineNumberStyle={{
-          ...FILE_LINE_NUMBER_STYLE,
-        }}
-        customStyle={{
-          margin: 0,
-          padding: 0,
-          border: 0,
-          background: "var(--bg)",
-          ...FILE_CODE_STYLE,
-          width: wrapLines ? "100%" : "max-content",
-          minWidth: "100%",
-          minHeight: "100%",
-          overflow: "visible",
-        }}
-        codeTagProps={{
-          style: {
-            fontFamily: "var(--font-mono)",
-            overflowWrap: wrapLines ? "anywhere" : "normal",
-          },
-        }}
-        renderer={(rendererProps) => (
-          <SourceCodeRenderer {...rendererProps} wrapLines={wrapLines} />
-        )}
-        wrapLongLines={wrapLines}
-      >
-        {viewerContent}
-      </SyntaxHighlighter>
+      <LazyFileSourceView
+        code={viewerContent}
+        language={language}
+        isDark={isDark}
+        wrapLines={wrapLines}
+      />
     ),
     [isDark, language, viewerContent, wrapLines],
   );

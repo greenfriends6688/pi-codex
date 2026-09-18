@@ -8,7 +8,9 @@ const source = await readFile(new URL("./FileViewer.tsx", import.meta.url), "utf
 
 test("large source previews bypass the per-line syntax highlighter", () => {
   assert.match(source, /const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;/);
-  assert.match(source, /const useLightweightSource = sourceLines\.length > SOURCE_HIGHLIGHT_MAX_LINES/);
+  // fork:perf-highlighter — the huge-file fallback is also what renders while the
+  // lazily imported Prism chunk is still in flight.
+  assert.match(source, /const useLightweightSource = !highlighterReady \|\| sourceLines\.length > SOURCE_HIGHLIGHT_MAX_LINES/);
 
   // Both source trees are memoized so unrelated re-renders (panel open/close,
   // selection changes) reuse them instead of rebuilding every line element.
@@ -45,6 +47,9 @@ test("lightweight source rows are skipped for highlighted, diff, and preview vie
     return (data, displayMode, hasGitDiff = false, isDeletedDiff = false, wrapLines = false) => {
       const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;
       const FILE_LINE_NUMBER_STYLE = {};
+      // The lazy Prism chunk is assumed loaded here: this harness only exercises the
+      // source-line calculations, not the loading state.
+      const highlighterReady = true;
       ${calculations}
       return lightweightSourceLines;
     };

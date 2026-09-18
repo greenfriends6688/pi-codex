@@ -360,3 +360,28 @@ html.keyboard-open .extension-status-shelf {
 [data-desktop-shell="true"] .sidebar-brand-row a * {
   -webkit-app-region: no-drag;
 }
+
+/* ---------------------------------------------------------------------------
+ * fork:ui-tree-visible — the file tree column must not vanish on a normal window.
+ *
+ * Upstream shows `.explorer-column` only inside `@container (min-width: 760px)`
+ * (globals.css:2411). Do the arithmetic for a 1280×800 window: sidebar 244 + chat
+ * minimum ~420 leaves ~616px for the panel, and 760 is unreachable — so opening a file
+ * hid the tree exactly when the user wanted to pick the next file. The upstream
+ * threshold was sized for "tree + a comfortable viewer", not for "tree + any viewer".
+ *
+ * Show it from 560px (264px tree + ~300px viewer) and give the tree 200px in the
+ * 560–759px band so the preview keeps its room. The expanded-document rule
+ * (`:has(.file-viewer-shell[data-expanded])`, globals.css) still wins, on purpose:
+ * "expand" means "give the document everything".
+ * ------------------------------------------------------------------------- */
+@container (min-width: 560px) {
+  .explorer-column {
+    display: block;
+  }
+}
+@container (min-width: 560px) and (max-width: 759px) {
+  .explorer-column {
+    width: 200px;
+  }
+}

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createJiti } from "jiti";
 
@@ -68,11 +69,28 @@ function renderCode(props) {
   );
 }
 
-test("CodeBlock highlights code when not streaming", () => {
+test("CodeBlock renders code without waiting for the lazy highlighter chunk", () => {
+  // fork:perf-highlighter — Prism (with every language) lives in its own chunk loaded
+  // on demand, so the first render of a code block is plain monospace. This is the
+  // contract the tests can see statically: the code is there, the tokens are not.
   const html = renderCode({ code: "const x = 1;", lang: "javascript" });
 
-  assert.match(html, /class="token/);
-  assert.match(html, /const/);
+  assert.doesNotMatch(html, /class="token/);
+  assert.match(html, /const x = 1;/);
+});
+
+test("CodeBlock loads the highlighter lazily instead of bundling it", () => {
+  const source = readFileSync(new URL("./MermaidBlock.tsx", import.meta.url), "utf8");
+  const lazy = readFileSync(new URL("./useLazyHighlighter.ts", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /^import .*react-syntax-highlighter/m);
+  assert.match(lazy, /dynamic\(\(\) => import\("\.\/AsyncCodeHighlighter"\)/);
+
+  const highlighter = readFileSync(new URL("./AsyncCodeHighlighter.tsx", import.meta.url), "utf8");
+  // Themes one file at a time: the `styles/prism` barrel re-exports ~200 of them.
+  assert.match(highlighter, /styles\/prism\/vs"/);
+  assert.match(highlighter, /styles\/prism\/vsc-dark-plus"/);
+  assert.doesNotMatch(highlighter, /styles\/prism"/);
 });
 
 test("CodeBlock renders plain text without tokenization while streaming", () => {

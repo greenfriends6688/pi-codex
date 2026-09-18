@@ -1,9 +1,7 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vs } from "react-syntax-highlighter/dist/cjs/styles/prism";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import { LazyCodeHighlighter, useHighlighterReady } from "./useLazyHighlighter";
 import { useTheme } from "@/hooks/useTheme";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
@@ -266,9 +264,27 @@ interface CodeBlockProps {
  * monospace text — highlighting a growing block re-tokenizes all of it on
  * every chunk, which is the single most expensive part of streamed rendering.
  */
+function PlainCode({ code }: { code: string }) {
+  return (
+    <pre
+      style={{
+        margin: 0,
+        padding: "11px 13px",
+        fontSize: "calc(12.5px + var(--chat-font-size-offset, 0px))",
+        lineHeight: 1.62,
+        overflowX: "auto",
+        background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
+      }}
+    >
+      <code style={{ fontFamily: "var(--font-mono)" }}>{code}</code>
+    </pre>
+  );
+}
+
 export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isStreaming }: CodeBlockProps) {
   const { isDark } = useTheme();
   const { t } = useI18n();
+  const highlighterReady = useHighlighterReady();
   const [copied, setCopied] = useState(false);
 
   const copy = () => {
@@ -292,23 +308,12 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isS
           </button>
         </div>
       </div>
-      {isStreaming ? (
-        <pre
-          style={{
-            margin: 0,
-            padding: "11px 13px",
-            fontSize: "calc(12.5px + var(--chat-font-size-offset, 0px))",
-            lineHeight: 1.62,
-            overflowX: "auto",
-            background: "color-mix(in srgb, var(--bg) 92%, var(--bg-panel))",
-          }}
-        >
-          <code style={{ fontFamily: "var(--font-mono)" }}>{code}</code>
-        </pre>
+      {isStreaming || !highlighterReady ? (
+        <PlainCode code={code} />
       ) : (
-        <SyntaxHighlighter
+        <LazyCodeHighlighter
           language={lang || "text"}
-          style={isDark ? vscDarkPlus : vs}
+          isDark={isDark}
           showLineNumbers
           lineNumberStyle={{ color: "var(--text-dim)", fontStyle: "normal" }}
           customStyle={{
@@ -322,7 +327,7 @@ export const CodeBlock = memo(function CodeBlock({ code, lang, headerAction, isS
           codeTagProps={{ style: { fontFamily: "var(--font-mono)" } }}
         >
           {code}
-        </SyntaxHighlighter>
+        </LazyCodeHighlighter>
       )}
     </div>
   );
