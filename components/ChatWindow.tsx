@@ -8,6 +8,7 @@ import { splitDialogTitle, splitDialogTitleCode } from "@/lib/dialog-title";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
 import { countToolCallBlocks, getAssistantErrorMessage, getAssistantTruncationNotice, getDisplayableAssistantBlocks, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
+import { useMemoryInvitation } from "@/components/fork/useMemoryInvitation";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
 import { createSelectionContextId, type SelectionContext } from "@/lib/composer-context";
 import type { SessionReference } from "@/lib/composer-context";
@@ -42,6 +43,7 @@ import {
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
+import { TEXT } from "@/lib/typography";
 
 interface Props {
   session: SessionInfo | null;
@@ -199,7 +201,7 @@ function NewSessionUpdateLink({
         background: "transparent",
         borderRadius: "var(--radius-xs)",
         color: "var(--accent)",
-        fontSize: 12,
+        fontSize: TEXT.sm,
         fontWeight: 600,
         lineHeight: 1.2,
         textDecoration: "none",
@@ -287,7 +289,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
           background: "transparent",
           color: "var(--text-muted)",
           cursor: "pointer",
-          fontSize: 12,
+          fontSize: TEXT.sm,
           textAlign: "left",
         }}
         title={expanded ? t("chat.collapseProcess") : t("chat.expandProcess")}
@@ -364,6 +366,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     isCompacting, compactError, compactResult, displayModel: displayModelValue, modelSwitching, sessionStats,
     slashCommands, slashCommandsLoading, queuedMessages,
     notices, extensionDialog, extensionCustomUi, extensionStatuses, extensionWidgets, respondToExtensionUi, sendExtensionCustomInput, setNoticePaused,
+    addNotice,
     isAutoModelSelection,
     agentPhase,
     isNew,
@@ -382,6 +385,19 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     deferInitialScroll: Boolean(pendingScrollRestore),
   });
   const sessionBusy = agentRunning || bashRunning;
+
+  // fork:fix-memory-refresh — 前台会话懒检查记忆周检（FIX-11）：非运行中、
+  // 非子 Agent 会话才触发；每个应用生命周期最多一次，冷却状态在服务端。
+  const memoryInvitationEnabled = Boolean(session) && !sessionBusy && session?.relation?.kind !== "subagent";
+  useMemoryInvitation({
+    enabled: memoryInvitationEnabled,
+    onInvite: useCallback((days: number | null) => {
+      addNotice({
+        type: "warning",
+        message: t("memory.inviteNotice", { days: days ?? "—" }),
+      });
+    }, [addNotice, t]),
+  });
   const locateSelectionContext = useCallback((context: SelectionContext) => {
     const clearConversationLocation = () => {
       scrollContainerRef.current?.querySelectorAll<HTMLElement>(`.${LOCATION_HIGHLIGHT_CLASS}`).forEach((highlight) => {
@@ -1606,7 +1622,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               style={{ width: "100%", minWidth: 0, margin: 0, padding: 0, border: "none", display: "flex", flexDirection: "column", gap: 10 }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600 }}>{t("chat.askInNewChat")}</span>
+                <span style={{ flex: 1, minWidth: 0, fontSize: TEXT.sm, fontWeight: 600 }}>{t("chat.askInNewChat")}</span>
                 <button type="button" className="file-viewer-icon-button" title={t("i18n.close")} aria-label={t("i18n.close")} disabled={quoteSubmitting} onClick={closeQuotedSelection} style={{ border: "none" }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
                 </button>
@@ -1618,7 +1634,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 onAbort={closeQuotedSelection}
                 isStreaming={false}
               />
-              {quoteError && <div role="alert" style={{ color: "var(--danger)", fontSize: 12, overflowWrap: "anywhere" }}>{quoteError}</div>}
+              {quoteError && <div role="alert" style={{ color: "var(--danger)", fontSize: TEXT.sm, overflowWrap: "anywhere" }}>{quoteError}</div>}
             </fieldset>
           ) : <>
           <button
@@ -1628,9 +1644,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             aria-label={t("chat.askInCurrent")}
             onPointerDown={(event) => event.preventDefault()}
             onClick={askSelectionHere}
-            style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
+            style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: TEXT.sm, fontWeight: 500 }}
           >
-            <span aria-hidden="true" style={{ fontSize: 15 }}>@</span>
+            <span aria-hidden="true" style={{ fontSize: TEXT.xl }}>@</span>
             <span>{t("chat.askInCurrent")}</span>
           </button>
           {onAskInNewChat && quotedSelection.sourceEntryId && !sessionBusy && (
@@ -1641,7 +1657,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               aria-label={t("chat.askInNewChat")}
               onPointerDown={(event) => event.preventDefault()}
               onClick={() => { setQuoteInputOpen(true); window.getSelection()?.removeAllRanges(); }}
-              style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
+              style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: TEXT.sm, fontWeight: 500 }}
             >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M6 3v12M18 9a9 9 0 0 1-9 9" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
@@ -1701,7 +1717,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 <ProjectChip targets={newSessionTargets} />
                 {!newSessionTargets.error && <ComposerTipLine />}
                 {newSessionTargets.error && (
-                  <span role="alert" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, color: "var(--danger)" }}>
+                  <span role="alert" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: TEXT.xs, color: "var(--danger)" }}>
                     {newSessionTargets.error}
                   </span>
                 )}
@@ -1794,7 +1810,7 @@ function NoticeShelf({ notices, floating = false, onPauseChange }: { notices: No
               boxShadow: floating
                 ? "0 1px 2px rgba(15,23,42,0.05), 0 10px 28px -14px rgba(15,23,42,0.24)"
                 : "0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.10)",
-              fontSize: 14,
+              fontSize: TEXT.lg,
               lineHeight: 1.5,
               transformOrigin: "top right",
               // Use backwards fill for the entrance animation so height styles return to
@@ -1866,7 +1882,7 @@ function renderDialogTitle(title: string): ReactNode {
             border: "1px solid color-mix(in srgb, var(--danger) 35%, transparent)",
             borderLeft: "3px solid var(--danger)",
             fontFamily: "var(--font-mono)",
-            fontSize: 12.5,
+            fontSize: TEXT.sm,
             lineHeight: 1.5,
             whiteSpace: "pre-wrap",
             wordBreak: "break-all",
@@ -1912,7 +1928,7 @@ function ExtensionDialog({
   }, [request.expiresAt]);
 
   const countdown = remainingSeconds !== null && (
-    <span style={{ fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap", flexShrink: 0 }}>
+    <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", whiteSpace: "nowrap", flexShrink: 0 }}>
       {t("chat.extensionExpiresIn", { seconds: remainingSeconds })}
     </span>
   );
@@ -1966,19 +1982,19 @@ function ExtensionDialog({
             textAlign: "left",
           }}
         >
-          <span style={{ fontSize: 11, fontWeight: 650, color: "var(--accent)", flexShrink: 0 }}>
+          <span style={{ fontSize: TEXT.xs, fontWeight: 650, color: "var(--accent)", flexShrink: 0 }}>
             {t("chat.extensionPending")}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: TEXT.md, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
             {titleHead}
           </span>
           {summary && (
-            <span style={{ fontSize: 12, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%", flexShrink: 1 }}>
+            <span style={{ fontSize: TEXT.sm, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%", flexShrink: 1 }}>
               {summary}
             </span>
           )}
           {countdown}
-          <span style={{ fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}>
+          <span style={{ fontSize: TEXT.sm, color: "var(--text-muted)", flexShrink: 0 }}>
             {t("chat.extensionExpand")}
           </span>
         </button>
@@ -2003,8 +2019,8 @@ function ExtensionDialog({
       >
         <div style={{ flexShrink: 0, display: "flex", alignItems: "flex-start", gap: 8, padding: "12px 14px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: "var(--text)", fontSize: 14, fontWeight: 650, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{titleHead}</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 3, color: "var(--text-dim)", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+            <div style={{ color: "var(--text)", fontSize: TEXT.lg, fontWeight: 650, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{titleHead}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 3, color: "var(--text-dim)", fontSize: TEXT.xs, fontFamily: "var(--font-mono)" }}>
               <span>{t("chat.extensionRequest")}</span>
               {countdown}
             </div>
@@ -2041,7 +2057,7 @@ function ExtensionDialog({
           }}
         >
           {titleRest && (
-            <div style={{ marginBottom: 12, color: "var(--text-muted)", fontSize: 13, lineHeight: 1.55 }}>
+            <div style={{ marginBottom: 12, color: "var(--text-muted)", fontSize: TEXT.md, lineHeight: 1.55 }}>
               {renderDialogTitle(titleRest)}
             </div>
           )}
@@ -2087,7 +2103,7 @@ function ExtensionDialog({
                     color: "var(--text)",
                     cursor: "pointer",
                     textAlign: "left",
-                    fontSize: 13,
+                    fontSize: TEXT.md,
                     overflowWrap: "anywhere",
                   }}
                 >
@@ -2115,7 +2131,7 @@ function ExtensionDialog({
                 background: "var(--bg-panel)",
                 color: "var(--text)",
                 outline: "none",
-                fontSize: 13,
+                fontSize: TEXT.md,
               }}
             />
           )}
@@ -2137,7 +2153,7 @@ function ExtensionDialog({
                 color: "var(--text)",
                 outline: "none",
                 resize: "vertical",
-                fontSize: 13,
+                fontSize: TEXT.md,
                 lineHeight: 1.55,
                 fontFamily: "var(--font-mono)",
               }}
@@ -2251,18 +2267,18 @@ function ExtensionCustomPanel({
             textAlign: "left",
           }}
         >
-          <span style={{ fontSize: 11, fontWeight: 650, color: "var(--accent)", flexShrink: 0 }}>
+          <span style={{ fontSize: TEXT.xs, fontWeight: 650, color: "var(--accent)", flexShrink: 0 }}>
             {t("chat.extensionPending")}
           </span>
-          <span style={{ fontSize: 13, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: TEXT.md, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
             {t("chat.extensionPanel")}
           </span>
           {summary && (
-            <span style={{ fontSize: 12, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%", flexShrink: 1 }}>
+            <span style={{ fontSize: TEXT.sm, color: "var(--text-dim)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "34%", flexShrink: 1 }}>
               {summary}
             </span>
           )}
-          <span style={{ fontSize: 12, color: "var(--text-muted)", flexShrink: 0 }}>
+          <span style={{ fontSize: TEXT.sm, color: "var(--text-muted)", flexShrink: 0 }}>
             {t("chat.extensionExpand")}
           </span>
         </button>
@@ -2336,7 +2352,7 @@ function ExtensionCustomPanel({
           }}
         />
         <div style={{ flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-           <div style={{ color: "var(--text)", fontSize: 13, fontWeight: 650 }}>{t("chat.extensionPanel")}</div>
+           <div style={{ color: "var(--text)", fontSize: TEXT.md, fontWeight: 650 }}>{t("chat.extensionPanel")}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <button
               type="button"
@@ -2370,7 +2386,7 @@ function ExtensionCustomPanel({
                 background: "var(--bg-panel)",
                 color: "var(--text-muted)",
                 cursor: "pointer",
-                fontSize: 12,
+                fontSize: TEXT.sm,
               }}
             >
                {t("chat.close")}
@@ -2386,7 +2402,7 @@ function ExtensionCustomPanel({
             background: "var(--bg-panel)",
             color: "var(--text)",
             fontFamily: "var(--font-mono)",
-            fontSize: 13,
+            fontSize: TEXT.md,
             lineHeight: 1.45,
             whiteSpace: "pre",
           }}

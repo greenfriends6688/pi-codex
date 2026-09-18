@@ -97,7 +97,9 @@ export async function GET(req: Request) {
     const absolute = memoryFilePath(requested);
     if (!absolute) return NextResponse.json({ error: "Path is outside the memory directory" }, { status: 403 });
     if (!existsSync(absolute)) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    return NextResponse.json({ content: readFileSync(absolute, "utf8") });
+    // fork:fix-memory-ui — 面板要拿 mtime 作为冲突基线：agent 和用户可能同时改这个文件，
+    // 保存时带上读时的 mtime，服务器不一致就拒（409），不能盲写覆盖。
+    return NextResponse.json({ content: readFileSync(absolute, "utf8"), mtime: statSync(absolute).mtime.toISOString() });
   }
 
   // Let the main file viewer open these paths (they live outside every session cwd,
@@ -113,7 +115,7 @@ export async function PUT(req: Request) {
   if (!hasJsonContentType(req)) {
     return NextResponse.json({ error: "Content-Type must be application/json" }, { status: 415 });
   }
-  const body = await req.json().catch(() => null) as { path?: unknown; content?: unknown } | null;
+  const body = await req.json().catch(() => null) as { path?: unknown; content?: unknown; expectedMtime?: unknown } | null;
   const relativePath = typeof body?.path === "string" ? body.path : "";
   const content = typeof body?.content === "string" ? body.content : "";
   if (!relativePath) return NextResponse.json({ error: "path is required" }, { status: 400 });
@@ -123,6 +125,22 @@ export async function PUT(req: Request) {
 
   const absolute = memoryFilePath(relativePath);
   if (!absolute) return NextResponse.json({ error: "Path is not a memory file" }, { status: 403 });
+
+  // fork:fix-memory-ui — 乐观锁：面板编辑器自动保存时带上读时的 mtime；
+  // 文件在读取之后被 agent（或另一个窗口）改过就 409，让 UI 提示冲突而不是静默覆盖。
+  // 不带 expectedMtime 的调用（如「新建文件」一键创建）保持原行为，不做检查。
+  if (typeof body?.expectedMtime === "string" && body.expectedMtime) {
+    if (!existsSync(absolute)) {
+      return NextResponse.json({ error: "The file no longer exists on disk", conflict: true }, { status: 409 });
+    }
+    const currentMtime = statSync(absolute).mtime.toISOString();
+    if (currentMtime !== body.expectedMtime) {
+      return NextResponse.json(
+        { error: "The file changed on disk since it was loaded", conflict: true, mtime: currentMtime },
+        { status: 409 },
+      );
+    }
+  }
 
   const directory = dirname(absolute);
   if (!existsSync(directory)) mkdirSync(directory, { recursive: true });
