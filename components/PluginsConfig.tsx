@@ -1226,10 +1226,17 @@ export function PluginsConfig({
 
   const toggleMcp = useCallback(
     async (server: McpServerInfo) => {
-      const next = await runMcpAction(server.disabled ? "enable" : "disable", {
+      let next = await runMcpAction(server.disabled ? "enable" : "disable", {
         name: server.name,
         scope: server.scope,
       });
+      // fork:gap-mcp-handshake — 启用前服务端会做一次真实握手（initialize + tools/list）。
+      // 握手失败说明"现在还用不了"，默认就停在这里；但配好配置、服务稍后才起的场景
+      // 确实存在，所以给一个显式确认的逃生口，而不是让用户去改 JSON。
+      if (!next && server.disabled && typeof window !== "undefined"
+        && window.confirm(t("mcp.handshakeForceConfirm", { name: server.name }))) {
+        next = await runMcpAction("enable", { name: server.name, scope: server.scope, force: true });
+      }
       if (next) {
         setMcpActionMessage(
           server.disabled

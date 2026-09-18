@@ -7,6 +7,7 @@ import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-acces
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getProjectTrustStatus } from "@/lib/project-trust";
 import type { McpResponse, McpScope, McpServerInfo } from "@/lib/api-types";
+import { validateMcpServer, type McpServerConfig } from "@/lib/mcp-validator";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,59 @@ async function readMcp(cwd: string): Promise<McpResponse> {
   const settings = { ...(global.settings ?? {}), ...(project.settings ?? {}) };
   const projectTrust = getProjectTrustStatus(cwd, getAgentDir());
   return { servers, settings, diagnostics, projectResourcesLoaded: projectTrust.trusted };
+}
+
+/**
+ * fork:gap-mcp-handshake — 把 mcp.json 里的定义映射成校验器输入。
+ * 返回 null 表示"这个定义没法握手"（例如只有 `socket`，或字段类型不对），
+ * 此时调用方应跳过校验而不是把用户挡住。
+ */
+function toValidatorConfig(def: Record<string, unknown>): McpServerConfig | null {
+  const command = typeof def.command === "string" && def.command.trim() ? def.command.trim() : undefined;
+  if (command) {
+    return {
+      transport: "stdio",
+      command,
+      args: Array.isArray(def.args) ? def.args.filter((a): a is string => typeof a === "string") : undefined,
+      env: def.env && typeof def.env === "object" ? (def.env as Record<string, string>) : undefined,
+      cwd: typeof def.cwd === "string" && def.cwd ? def.cwd : undefined,
+    };
+  }
+  const url = typeof def.url === "string" && def.url.trim() ? def.url.trim() : undefined;
+  if (url) {
+    return {
+      transport: def.type === "sse" ? "sse" : "http",
+      url,
+      headers: def.headers && typeof def.headers === "object" ? (def.headers as Record<string, string>) : undefined,
+    };
+  }
+  return null;
+}
+
+/**
+ * fork:gap-mcp-handshake — 启用前握手。
+ *
+ * 原先只有手动 `test` 动作会去连一次，`enable` / `add` 一律照写，
+ * 于是一个连不上的 server 也会显示成"已启用"，直到用户下次发消息才发现。
+ * 现在写入前先真实握手（`initialize` + `tools/list`）；失败则不写 enabled，
+ * 并把机器可读的错误码回给客户端。
+ *
+ * 逃生口：`force: true` 会跳过校验（用于"先配好、服务稍后才起"的场景）。
+ */
+async function validateBeforeEnable(
+  def: Record<string, unknown>,
+  options: { force?: boolean; timeoutMs?: number },
+): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+  if (options.force) return { ok: true };
+  const config = toValidatorConfig(def);
+  if (!config) return { ok: true };
+  const result = await validateMcpServer(config, { timeoutMs: options.timeoutMs ?? 10_000 });
+  if (result.ok) return { ok: true };
+  return {
+    ok: false,
+    status: 400,
+    error: `MCP handshake failed (${result.error ?? "unknown"}): ${result.detail ?? ""}`.trim(),
+  };
 }
 
 function testMcpServer(def: Record<string, unknown>): Promise<{ ok: boolean; detail: string }> {
@@ -266,6 +320,8 @@ export async function POST(req: Request) {
       fromScope?: McpScope;
       toScope?: McpScope;
       def?: Record<string, unknown>;
+      /** fork:gap-mcp-handshake — 跳过启用前握手校验（"先配好、服务稍后才起"）。 */
+      force?: boolean;
     };
     if (!body.cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
     if (!body.action) return NextResponse.json({ error: "action required" }, { status: 400 });
@@ -322,8 +378,25 @@ export async function POST(req: Request) {
           { status: 404 },
         );
       }
+      // fork:gap-mcp-handshake — 新增/编辑时只**警告不拦截**。
+      //
+      // 理由：加配置时服务可能还没起（先在浏览器里配好、稍后才启动是很常见的用法），
+      // 这时把写入挡掉会让用户白填一遍。真正的硬门禁放在 `enable`：
+      // 启用意味着"现在就该能用"，那时握手失败必须拦住。
+      let handshakeWarning: string | undefined;
+      if (def.disabled !== true && !body.force) {
+        const check = await validateBeforeEnable(def, {});
+        if (!check.ok) {
+          handshakeWarning = check.error;
+          console.warn(`[pi-web] MCP "${name}" saved without a successful handshake: ${check.error}`);
+        }
+      }
       data.mcpServers[name] = def;
       writeMcpFile(file, data);
+      if (handshakeWarning) {
+        const payload = await readMcp(cwd);
+        return NextResponse.json({ ...payload, warning: handshakeWarning });
+      }
     } else if (body.action === "remove") {
       const scope = readScope(body.scope);
       if (scope === "project" && !projectTrust.trusted) {
@@ -353,6 +426,11 @@ export async function POST(req: Request) {
       const file = mcpFilePath(cwd, scope);
       const data = readMcpFile(file);
       if (data.mcpServers?.[name]) {
+        if (body.action === "enable") {
+          // fork:gap-mcp-handshake — 启用前必须真实握手（initialize + tools/list）。
+          const check = await validateBeforeEnable(data.mcpServers[name], { force: body.force });
+          if (!check.ok) return NextResponse.json({ error: check.error }, { status: check.status });
+        }
         data.mcpServers[name].disabled = body.action === "disable";
         writeMcpFile(file, data);
       }

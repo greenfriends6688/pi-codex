@@ -5,6 +5,7 @@ export const zhCNLocale: LocalePlugin = {
   id: "zh-CN",
   label: "简体中文",
   messages: {
+    "mcp.handshakeForceConfirm": "与 {name} 的握手失败。仍要启用吗？只有在服务可达后工具才会真正可用。",
     "cron.maxRuns": "最多运行次数",
     "cron.maxRunsPlaceholder": "不限次",
     "cron.maxRunsHint": "达到该次数后任务自动停用并标记完成；留空表示不限次。",
