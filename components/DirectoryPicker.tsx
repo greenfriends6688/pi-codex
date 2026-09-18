@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/hooks/useI18n";
+import { useDialogA11y } from "@/hooks/useDialogA11y";
 
 interface DirectoryEntry {
   name: string;
@@ -237,13 +238,18 @@ export function DirectoryPicker({ onCancel, onSelect, initialPath, busy = false,
   const canSelect = Boolean(currentPath) && !hasUncommittedPath && !pickerBusy;
   const canNavigateUp = Boolean(parentDirectory) || isWindowsDriveRoot(currentPath);
 
+  // fork:dsn-dialog-a11y — 补焦点约束。这个弹层走 createPortal（挂在 body 下），
+  // 所以 hook 的"兄弟节点 inert"正好作用到应用根节点上，背景对键盘与读屏同时失效。
+  // hooks 必须在下面的早退之前调用，否则违反 hooks 规则。
+  const { dialogRef, dialogProps } = useDialogA11y({ open: true, onClose: onCancel });
+
   if (!portalTarget) return null;
 
   return createPortal(
     <div
+      ref={dialogRef}
+      {...dialogProps}
       className="directory-picker-backdrop"
-      role="dialog"
-      aria-modal="true"
       aria-label={t("directoryPicker.selectDirectory")}
       onClick={(event) => {
         if (event.target === event.currentTarget && !pickerBusy) onCancel();

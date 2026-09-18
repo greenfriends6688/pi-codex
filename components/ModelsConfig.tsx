@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { useDialogA11y } from "@/hooks/useDialogA11y";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
 import type { DiscoveredModel } from "@/lib/model-discovery";
 import {
@@ -1724,9 +1725,18 @@ function AddProviderPicker({
 
 
 
+  // fork:dsn-dialog-a11y — 这个自绘弹层原先只在容器上听 Escape，而 Escape 只有
+  // 焦点恰好落在容器内部才触发；也没有任何焦点约束（Tab 能走到背景的侧栏/输入框）。
+  // 现在交给共享 hook：打开移焦（优先搜索框）、Tab 循环、Esc 关闭、背景 inert、
+  // 关闭后把焦点还给触发元素。外层的 onKeyDown 保留作为兜底。
+  const { dialogRef, dialogProps } = useDialogA11y({ open: true, onClose, initialFocusRef: inputRef });
+
   return (
     <div
-      style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center" }}
+      ref={dialogRef}
+      {...dialogProps}
+      aria-label={t("models.title")}
+      style={{ position: "fixed", inset: 0, zIndex: 1100, background: "var(--scrim)", display: "flex", alignItems: "center", justifyContent: "center" }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       onKeyDown={(e) => {
         if (e.key !== "Escape") return;

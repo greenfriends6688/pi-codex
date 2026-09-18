@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useDialogA11y } from "@/hooks/useDialogA11y";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 import { THEME_OPTIONS } from "@/lib/theme";
@@ -587,10 +588,16 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
     </div>
   ) : null;
 
+  // fork:dsn-dialog-a11y — 这个弹层原先声明了 role/aria-modal 与 Esc（见上方 effect），
+  // 但没有焦点约束：Tab 会走到背后的侧栏与输入框，关闭后焦点也不回到触发按钮。
+  // 这里补上共享 hook（移焦 / Tab 循环 / inert 背景 / 还原焦点）；
+  // Esc 仍由上面的 effect 处理，hook 也接管一份，两者幂等。
+  const { dialogRef, dialogProps } = useDialogA11y({ open: true, onClose });
+
   return (
     <div
-      role="dialog"
-      aria-modal="true"
+      ref={dialogRef}
+      {...dialogProps}
       aria-label={t("settings.title")}
       onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
       className="settings-dialog-backdrop"

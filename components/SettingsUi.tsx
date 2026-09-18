@@ -1,6 +1,7 @@
 "use client";
 
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, ReactNode } from "react";
+import { useDialogA11y } from "@/hooks/useDialogA11y";
 
 type ConfigButtonVariant = "primary" | "secondary" | "danger" | "ghost";
 type ConfigButtonSize = "small" | "default";
@@ -33,10 +34,16 @@ export function ConfigPanelShell({
         "--config-panel-height": height,
       } as CSSProperties);
 
+  // fork:dsn-dialog-a11y — 只有 modal 形态需要焦点约束；embedded 是页面内面板。
+  // 补齐：打开移焦进弹层、Tab 在弹层内循环、Esc 关闭、兄弟节点 inert、关闭还原焦点。
+  // 原先只有 role/aria-modal 两个属性，键盘用户 Tab 会走到弹层背后的侧栏。
+  const { dialogRef, dialogProps } = useDialogA11y({ open: !embedded, onClose });
+
   return (
     <div
-      role={embedded ? undefined : "dialog"}
-      aria-modal={embedded ? undefined : "true"}
+      ref={embedded ? undefined : dialogRef}
+      role={embedded ? undefined : dialogProps.role}
+      aria-modal={embedded ? undefined : dialogProps["aria-modal"]}
       aria-label={title}
       className={`config-panel-root ${embedded ? "is-embedded" : "is-modal"}`}
       onClick={(event) => {
