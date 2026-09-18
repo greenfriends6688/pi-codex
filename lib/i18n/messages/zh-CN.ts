@@ -5,6 +5,12 @@ export const zhCNLocale: LocalePlugin = {
   id: "zh-CN",
   label: "简体中文",
   messages: {
+    "i18n.unsupportedBinary": "这是二进制文件，无法在应用内预览。",
+    "i18n.unsupportedUnknown": "暂不支持在应用内预览这个文件类型。",
+    "i18n.unsupportedType": "类型：{type}",
+    "i18n.openWithDefaultApp": "用默认应用打开",
+    "i18n.showInFolder": "在文件夹中显示",
+    "i18n.opening": "打开中…",
     "cron.notify": "完成通知",
     "cron.notifyHint": "什么时候发完成通知（桌面通知或手机推送）。",
     "cron.notifyError": "仅失败时",

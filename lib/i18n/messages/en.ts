@@ -5,6 +5,12 @@ export const enLocale: LocalePlugin = {
   id: "en",
   label: "English",
   messages: {
+    "i18n.unsupportedBinary": "This file is binary and cannot be previewed here.",
+    "i18n.unsupportedUnknown": "This file type is not supported for in-app preview.",
+    "i18n.unsupportedType": "Type: {type}",
+    "i18n.openWithDefaultApp": "Open with default app",
+    "i18n.showInFolder": "Show in folder",
+    "i18n.opening": "Opening…",
     "cron.notify": "Notify",
     "cron.notifyHint": "When to send a completion notification (desktop notification or phone push).",
     "cron.notifyError": "Only on failure",

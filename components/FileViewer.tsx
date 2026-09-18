@@ -20,6 +20,8 @@ import { encodeFilePathForApi, getFileName, getRelativeFilePath, sameFilePath } 
 import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { clearLocationTextHighlight, LOCATION_HIGHLIGHT_CLASS } from "@/lib/location-highlight";
 import { clampZoom, formatZoomPercent, isZoomed, stepZoom, wheelZoom, withPdfZoom, ZOOM_MAX, ZOOM_MIN } from "@/lib/viewer-zoom";
+import { shouldShowUnsupportedCard } from "@/lib/file-preview-support";
+import { UnsupportedFilePreview } from "./fork/UnsupportedFilePreview";
 import { PathActions } from "./fork/PathActions";
 // fork:perf-highlighter — the markdown stack (react-markdown + rehype/remark plugins +
 // frontmatter) rides along with the preview only; a plain text/image/office file must not
@@ -2752,6 +2754,15 @@ function TextFileViewer({
               sourceSessionId={sourceSessionId} onOpenFile={onOpenFile}
               sourceLines={Boolean(locationTarget)} />
           </div>
+        ) : shouldShowUnsupportedCard(filePath) ? (
+          // fork:gap-unsupported-preview — 二进制/未知类型不再以文本呈现（那是乱码），
+          // 改为带元数据与"用默认应用打开"的卡片。
+          <UnsupportedFilePreview
+            filePath={filePath}
+            cwd={cwd}
+            size={typeof data?.size === "number" ? data.size : null}
+            sourceSessionId={sourceSessionId}
+          />
         ) : useLightweightSource ? (
           <div
             className="file-source-view is-lightweight"

@@ -5,6 +5,12 @@ export const zhTWLocale: LocalePlugin = {
   id: "zh-TW",
   label: "繁體中文",
   messages: {
+    "i18n.unsupportedBinary": "這是二進位檔案，無法在應用內預覽。",
+    "i18n.unsupportedUnknown": "暫不支援在應用內預覽這個檔案類型。",
+    "i18n.unsupportedType": "類型：{type}",
+    "i18n.openWithDefaultApp": "用預設應用開啟",
+    "i18n.showInFolder": "在資料夾中顯示",
+    "i18n.opening": "開啟中…",
     "cron.notify": "完成通知",
     "cron.notifyHint": "什麼時候發完成通知（桌面通知或手機推送）。",
     "cron.notifyError": "僅失敗時",
