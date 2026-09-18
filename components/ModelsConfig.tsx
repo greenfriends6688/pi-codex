@@ -599,7 +599,7 @@ function ThinkingLevelMapEditor({
         };
         const btnActiveDisabled: React.CSSProperties = {
           background: "var(--danger)",
-          color: "#fff",
+          color: "var(--danger-contrast)",
           fontWeight: 600,
         };
 
@@ -1034,10 +1034,11 @@ function ModelDetail({
                 maxWidth: 260,
                 height: 28,
                 padding: "0 8px",
-                border: `1px solid ${testState.phase === "error" ? "#fecaca" : testState.phase === "success" ? "#bbf7d0" : "var(--border)"}`,
+                // fork:dsn-08 — 测试状态胶囊原本用写死的浅色主题色，深色主题下刺眼；改走语义 token。
+                border: `1px solid ${testState.phase === "error" ? "var(--danger)" : testState.phase === "success" ? "var(--success)" : "var(--border)"}`,
                 borderRadius: "var(--radius-xs)",
-                background: testState.phase === "error" ? "#fee2e2" : testState.phase === "success" ? "#dcfce7" : "#e5e7eb",
-                color: "#111827",
+                background: testState.phase === "error" ? "var(--danger-soft)" : testState.phase === "success" ? "var(--success-soft)" : "var(--bg-panel)",
+                color: testState.phase === "error" ? "var(--danger)" : testState.phase === "success" ? "var(--success)" : "var(--text)",
                 fontSize: 11,
                 display: "inline-flex",
                 alignItems: "center",
@@ -1658,7 +1659,7 @@ function ApiKeyDetail({ provider, onRefresh }: { provider: ApiKeyProvider; onRef
             padding: "6px 12px",
             background: savedOk ? "var(--success)" : apiKey.trim() ? "var(--accent)" : "var(--bg-panel)",
             border: "none", borderRadius: "var(--radius-xs)",
-            color: savedOk ? "#fff" : apiKey.trim() ? "var(--accent-contrast)" : "var(--text-dim)",
+            color: savedOk ? "var(--success-contrast)" : apiKey.trim() ? "var(--accent-contrast)" : "var(--text-dim)",
             cursor: (saving || !apiKey.trim() || savedOk) ? "not-allowed" : "pointer",
             fontSize: 12, fontWeight: 600, flexShrink: 0,
             display: "flex", alignItems: "center", gap: 5,
@@ -1745,7 +1746,7 @@ function AddProviderPicker({
         onClose();
       }}
     >
-      <div style={{ width: 820, maxWidth: "calc(100vw - 32px)", maxHeight: "min(72vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", display: "flex", flexDirection: "column", boxShadow: "0 8px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
+      <div style={{ width: 820, maxWidth: "calc(100vw - 32px)", maxHeight: "min(72vh, calc(100vh - 32px))", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-lg)", overflow: "hidden" }}>
         {/* Search */}
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", flexShrink: 0, display: "flex", alignItems: "center", gap: 8 }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--text-dim)", flexShrink: 0 }}>
@@ -2114,7 +2115,7 @@ export function ModelsConfig({ onClose, embedded = false }: { onClose: () => voi
                              {m.id || t("i18n.newModel")}
                           </ConfigSidebarText>
                           {m.reasoning && (
-                            <span style={{ fontSize: 9, padding: "1px 4px", background: "rgba(99,102,241,0.12)", color: "rgba(99,102,241,0.8)", borderRadius: 3, flexShrink: 0 }}>T</span>
+                            <span style={{ fontSize: 9, padding: "1px 4px", background: "var(--accent-soft)", color: "var(--accent-text)", borderRadius: 3, flexShrink: 0 }}>T</span>
                           )}
                         </ConfigSidebarItem>
                       );
