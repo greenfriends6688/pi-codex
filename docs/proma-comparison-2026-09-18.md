@@ -11,9 +11,9 @@
 > **一句话结论**：Proma 与本仓库是**同一个 pi SDK 0.85.1 上的两种架构**——
 > 它把 agent loop、provider、权限、存储全部换成自己的一套（桌面优先的独立产品），
 > 我只做 pi 的 UI（Web 优先，与 pi CLI 共享同一份真相）。
-> 因此它的能力分三类：**能直接搬的交互与工具设计（22 项，§2.1）**、
-> **必须换掉 pi 引擎才能做的（7 项，§2.3）**、**桌面平台绑定的（6 项，§2.3）**。
-> 真正的「我完全没有且值得做」是 **22 项**，其中 6 项已有既有计划（§10 去重）。
+> 因此它的能力分三类：**能直接搬的交互与工具设计（28 项，§2.1）**、
+> **必须换掉 pi 引擎才能做的（7 项，§2.3）**、**桌面平台绑定的（5 项，§2.3）**。
+> 真正的「我完全没有且值得做」是 **28 项**，其中 6 项已有既有计划（§10 去重）。
 
 ---
 
@@ -47,7 +47,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 
 ## 2. 结论摘要
 
-### 2.1 真正的独立能力：我完全没有、值得做（22 项）
+### 2.1 真正的独立能力：我完全没有、值得做（28 项）
 
 | # | 能力 | Proma 做到什么程度 | 可搬性 | 归属 |
 | --- | --- | --- | --- | --- |
@@ -73,6 +73,12 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | G20 | **自动更新（完整版）** | `electron-updater`（autoDownload=false 自控时机）、启动后 10s 首查 / 每 4h、**空闲安装**（等所有 agent 结束再退出安装）、安装包缓存清理、GitHub Release 更新日志（30 分钟缓存 + 403/429 冷却） | ★★★☆☆ 我有 `/api/app-update` 版本检查 | P4 |
 | G21 | **内嵌真实浏览器 + Agent CDP 工具** | Electron `WebContentsView` + CDP：`observe/find/click/hover/drag/fill/press/waitFor/act/domAction/scroll/extract/selectOption/upload/evaluate/screenshot/...`，AX 快照带 ref + 失效语义，观察预算 240 元素，profile 按工作区隔离，本地 HTML 预览用 token 化 `proma-file://` | ★★☆☆☆ 需要 Electron 原生视图 + 大改造（先把现有 iframe 面板升级为可选 CDP 后端） | P5 spike |
 | G22 | **会话恢复降级（context replay）** | 续接失败时不报错就死：回退到“重放上下文”——注入最近 20 条消息 + 会话元信息 + 完整历史文件路径，并要求 agent 自己 Read 完整历史；另备一个 `buildRecoveryPrompt`。触发面覆盖 session-not-found / prompt-too-long / thinking-signature 三类错误 | ★★★★★ 纯应用层，无引擎依赖 | P2 |
+| G23 | **IM 桥接核心 + Slack**（原列不搬，已改口径） | 出站 Socket Mode；chat↔session 绑定、斜杠命令、无人值守执行、只取终态回复、并发保护、附件、日志脱敏 | ★★★★★ 全部是出站连接（不需公网 IP）；载体换成 server 进程（`instrumentation.ts`），跑 agent 直接用现成的 `startRpcSession`。**Slack 不用引依赖**（Node 内置 WebSocket）。详见 §7.6 | P6 |
+| G24 | **飞书桥接** | 长连接 + 双向卡片**流式**回复 + **Session 镜像**（每个 Agent Session 建一个用户+Bot 的群） | ★★★★☆ 同 G23；长连接帧格式非公开，需引官方 SDK | P6 |
+| G25 | **钉钉桥接** | `dingtalk-stream` 出站 WS；多 Bot；消息先 ack 再处理 | ★★★★☆ 同 G24 | P6 |
+| G26 | **微信桥接（待验证）** | HTTP 长轮询到 `ilinkai.weixin.qq.com` + 扫码绑定 bot | ★★☆☆☆ **可行性未证实**：无法从源码判定该接口的对外可用性与 ToS 状态。建议放最后、默认不启用；备选是走**企业微信**官方 bot API | P6（可能不做） |
+| G27 | **打包与发布链路** | `hardenedRuntime` + entitlements + 公证环境变量 + `target:[dmg,zip]` + GitHub publish + **跨架构 `latest-mac.yml` 合并**；`dist.ts` 编排（宿主断言 / `--current-arch` / `--no-sign` / 计时） | ★★★★★ 它的 entitlements 里已经有 `network.server`（内嵌 `next start` 正需要）与 `disable-library-validation`（unpacked `.node` 正需要）。**这一项直接解开 D2 并解锁 G20** | P4 |
+| G28 | **启动白屏与打包正确性** | 静态启动闪屏（renderer 起来前 show、首帧 dismiss）；dev/prod `userData` 隔离；单实例失败有提示；把 node-pty 执行位/ABI 与外部依赖闭包校验变成**构建期硬错误** | ★★★★★ 我现在最坏要等 `waitReady` **90 秒**且期间是空窗口；闪屏是性价比最高的一项 | P4 |
 
 ### 2.2 我有等价物、只是叫法/位置不同的（不再做）
 
@@ -109,7 +115,6 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | N3 | 自管会话存储（`~/.proma/agent-sessions/`） | 会同时失去 `pi` CLI、会话导出、`/api/sessions/[id]/context`、分支导航的全部既有能力 |
 | N4 | macOS EventKit 双向同步（N-API addon） | 原生 addon + TCC 权限 + outbox/冲突表；Web 形态无法承载。Calendar 本身也不在我的 scope |
 | N5 | Agent Island（macOS 刘海 / Windows 托盘） | 原生 surface，且需要自绘窗口 |
-| N6 | IM 渠道（微信 iLink 扫码 / 飞书 / 钉钉 / Slack） | 是另一条产品线（远程访问），且需要各平台 App 审核与凭据。我的远程访问走 Web + 密码 + PWA |
 | N7 | Vision Relay（视觉助手降级转发） | 需要第二条模型链路；本仓库模型层面已支持 image input，按需在 `ModelsConfig` 里选视觉模型即可 |
 | N8 | 语音听写（豆包流式 ASR） | 需要第三方付费 ASR + 麦克风权限链路；Web 端可行但价值密度低（浏览器自带听写已覆盖一部分） |
 | N9 | 多窗口（独立预览 / 记忆窗口 / 听写浮窗 / 快速任务） | Web 形态无多窗口；快速任务可用"新标签页 + 全局快捷键"退化，见 P5 |
@@ -448,7 +453,7 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | prompts | 提示词 CRUD | 部分 |
 | proxy | 代理 | 无（走环境变量） |
 | voice-input | 豆包 ASR | 无（N8） |
-| bots | 飞书/Slack/微信/钉钉 + 用法 + 品牌素材 | 无（N6） |
+| bots | 飞书/Slack/微信/钉钉 + 用法 + 品牌素材 | **无 → 改为要做**：见 §7.4（原列入不搬，已改口径） |
 | **shortcuts** | 快捷键总表 + 录制 + 冲突 + 禁用 + 恢复默认 | **无**（G19） |
 | migration | 迁移压缩包/恢复 prompt | 无 |
 | **storage** | 用量统计 + 清理策略 | **无**（G18） |
@@ -481,6 +486,150 @@ Proma 自己也是走这两条路（`agent-session-manager.ts:832-930` 用 `crea
 | 自我约束 | 每次改动必须递增版本号（含默认 skill 的 frontmatter version） | 无（版本号按 release 手改） |
 | i18n | **无** | 3 语言 996 key + 三语同步测试 |
 | Web 部署 | 无 | 自托管 + 密码 + PWA + Web Push + Docker（omp 计划 PR-15） |
+
+### 7.4 打包与发布链路（逐项，已核到 `file:line`）
+
+> 这是「外壳与发布」一面的深挖。它直接决定了 §9 的 **D2（mac 打包 target）**能不能拍下来，也是 G20（自动更新）的前提。
+
+| 项 | 它的做法（`file:line`） | 我的状态 | 可搬性 |
+| --- | --- | --- | --- |
+| **签名 / 公证 / 权利文件** | `hardenedRuntime: true` + `entitlements(.mac).plist` + `gatekeeperAssess: false`（`electron-builder.yml:111-114`）；未钉 `identity`（靠 keychain 自动发现）；未写 `notarize:`（依赖 electron-builder 25 在 `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` 存在时自动公证，`release.yml:6-11` 把它们标为可选） | **全无**。mac 只有 `dir`，未签名 | ★★★★★ **必搬**。而且它的 `entitlements.mac.plist` 里已有 `network.server`（`resources/entitlements.mac.plist:5-45`）——那正是内嵌 `next start` 需要的；另有 `disable-library-validation` 让未签名的 unpacked `.node` 能在 hardened runtime 下加载 |
+| **发布 target** | `mac.target: [dmg, zip]`（`yml:122-124`）；dmg 给人（窗口布局 `yml:127-138`），zip 给 `electron-updater`（产出 `latest-mac.yml` + blockmap） | `mac.target: ["dir"]`（`package.json:158`） | ★★★★★ 必搬：**没有 zip 就没有自动更新源**，G20 就落不了地 |
+| **跨架构 `latest-mac.yml` 合并** | 两个 runner 各建一个架构（`macos-latest` arm64 / `macos-15-intel` x64，不用 `--universal`），各自也会生成同名 `latest-mac.yml` 互相覆盖 → 专门的 `merge-mac-yml` job 把两个 zip 的 `sha512`/`size` 合写成一个 yml 再传（`release.yml:187-321`） | 无 | ★★★★★ 必搬。**不合并就会出现“另一个架构静默收不到更新”** |
+| **发布渠道** | `publish: {provider: github, owner, repo}` + 每个平台 job `--publish always`（`yml:205-212`）；带 3 次重试的发布循环（`release.yml:88-103`） | 无（只手动 `npx electron-builder`） | ★★★★☆ |
+| **CI 触发与签名导入** | tag `v*` 触发，`contents: write`；临时 keychain + `security import cert.p12` + `set-key-partition-list`（`release.yml:51-70`） | 只有 `ci.yml`（lint/tsc/test/playwright） | ★★★★☆ |
+| **打包编排脚本** | `scripts/dist.ts`：8 步带计时汇总、**宿主平台断言**（`dist.ts:159-167`）、`--current-arch`/`--dmg`/`--zip`/`--dir`/`--no-sign`/`--verbose` | 无（只有 `npm run desktop`） | ★★★★☆ 模式可搬（它有个坑：`dist.ts` **不**跑 `sync:runtime-deps`/`rebuild:node-pty`，假设你先跑过——搬的时候要把它改成硬门禁） |
+| **`asar` + 精细 `asarUnpack`** | `asar: true` + 按**原因**分组的 unpack 清单（native `.node` / spawn 的可执行 / 运行时才加载的 esbuild / libvips `@img`）（`yml:19-33`） | `asar: false` | ★★★☆☆ 对我而言 `asar:false` 是**刻意的**（`.next` + `next start` 需要真实文件）；但“按原因列 unpack 清单”的组织方式值得记下 |
+| **Native `.node` / spawn-helper** | `@electron/rebuild -f -w node-pty`（`package.json:38`）+ chmod 执行位（`scripts/ensure-node-pty-helper-executable.ts:4-20`）+ `asarUnpack` + Bun patch 里把 `100644→100755` 烘进去 + `(?!\.unpacked)` 防二次改写 | 只有 `bin/prepare-terminal.js`（**仅 postinstall、仅 darwin**） | ★★★★☆ 我的缺口：`electron-builder` 重建 `node_modules` 后执行位会丢（CI 下必现）；无 `@electron/rebuild`，Electron Node ABI 一变就会报 `NODE_MODULE_VERSION` |
+| **外部二进制准备** | `prepare-officecli.ts`：钉版本 + **每平台 sha256** + 白名单跳转域 + 流式边下边验 + 双重大小校验 + `chmod 0755` + 临时名 `rename()` 原子发布 + 宿主平台断言 + 幂等复用（`:16-157`） | 无 | ★★★☆☆ 目前没有要带的外部二进制；若将来带 node/bun/ffmpeg/OCR 就照这个模板（**sha256 白名单 + 原子发布**是关键） |
+| **产物清单契约** | `release-notes/v<ver>.md` 里写**确切的产物文件名**（`Proma-0.19.53-arm64.dmg` / `proma_0.19.53_amd64.deb` …），同时充当命名契约；要求每次改动递增版本号 | `docs/release.md` 只覆盖 npm 包，无桌面产物 | ★★★★☆ |
+| **启动闪屏** | 帧式静态 `startup-splash`（纯 CSS 进度动画 + `prefers-reduced-motion`），在 renderer 起来前 show、`ready-to-show` 时 dismiss（`main/index.ts:332-367, 605-606`；`resources/startup-splash/index.html:1-45`） | **没有**：`electron/main.js` 最坏情况要等 `waitReady` **90 秒**，期间是一个空窗口 | ★★★★★ **性价比最高**：直接消除 90s 白屏。且因为未用 `asar` 是 `false`，改造极小 |
+| **dev / prod `userData` 隔离** | 分开 + 多 worktree 实例名 | 只有一次性的 `pi-web`→`Pi Codex` 迁移；dev 与 prod 共享 `SingletonLock` | ★★★★☆ |
+| **单实例失败有提示** | 拿到不明显提示而不是静默 | 静默 `app.quit()`（`electron/main.js:381-383`）→ “双击没反应”那类 bug | ★★★★☆ |
+| **Linux 沙箱** | 不全局关沙箱：AppImage 用 `--no-sandbox`，deb 的 `afterInstall` 把 `chrome-sandbox` 改 `4755`（`yml:176-181`；`resources/linux/deb-after-install.sh:1-20`），并在 `docs/linux.md:41-48` 写清楚验收边界 | 无 linux target | ★★★☆☆ |
+| **Windows NSIS** | `oneClick: false` + `allowToChangeInstallationDirectory: true` + 快捷方式（`yml:142-155`）；**per-user 安装**（未写 `perMachine`）；未签名 | 无 win target | ★★★☆☆ |
+| **dev 期 TCC / entitlement 对齐** | 用 `plutil` 给 `node_modules/electron/dist/Electron.app` 注入 usage description，`xattr -cr` 去 Finder 加的 xattr（否则 `codesign` 会拒绝），再 ad-hoc 重签（`scripts/build-eventkit-native.ts:36-46`） | 无 | ★★☆☆☆ 只在将来用 TCC 类 API（麦克风/相机/日历）时才需要 |
+| **依赖闭包同步** | `sync-runtime-deps.ts` 把 esbuild 的 external 闭包实体拷进 `apps/electron/node_modules`（`dereference:true`），完事后**硬失败如果发现绝对 symlink**（`:217`） | 无；靠 `files` 排除规则 + `after-pack.mjs` 补 `.next/node_modules` | ★★☆☆☆ 代码不可搬（Bun workspace 专属），但**“把外部依赖闭包校验变成构建期硬错误”这个不变量应该搬** |
+
+**包装链路的三个关键判断**：
+
+1. **它把一切都放在 `extraResources`（asar 外）+ `mac.binaries` 里**，所以每个 Mach-O 都会被签名。
+   对本仓而言，`next start` 需要的 `.next/**` 与 `node_modules/**` 也应该走“asar 外”这条路——
+   而我现在正好是 `asar: false`，**方向是对的**，只是缺签名与公证。
+2. **它的 `dist.ts` 不是完整的预检查**（不跑 sync/rebuild）——这是个真坑，**不要照搬**；
+   我的版本应该把“`.next/node_modules` 存在 + 外部依赖齐全 + node-pty 执行位”变成**构建期硬断言**，
+   而不是运行时 `MODULE_NOT_FOUND`。
+3. **它没有 `electronUpdaterCompatibility` / `releaseType` / `afterSign`** —— 说明它的更新链路完全依赖
+   `electron-updater` 默认行为 + `latest-mac.yml`。这对我是个提醒：G20 能不能落地，
+   **取决于 target 从 `dir` 改成 `dmg+zip`**，而不取决于写多少更新代码。
+
+---
+
+## 7.5 上游合并面（本仓库侧面）
+
+> 这一节不是 Proma 的对比，而是**做上面任何一项改动的前置约束**。
+
+本仓库由上游 tarball 导入，与上游 **没有 merge base**（`aeffa53 upstream v0.9.1 (pristine upstream tarball)`）。
+新增能力一旦改到上游文件而不留 `fork:` 标记，下一次合并就没有地图。
+
+实测（`node docs/upstream-merge-audit.mjs`，基准 main `d4f3f78`）：
+
+| 指标 | 值 |
+| --- | --- |
+| 会冲突的候选面（上游存在且我改过） | **125 个文件** |
+| 其中有 `fork:` 标记（有地图） | 31 |
+| **其中无标记（无地图）** | **91（73%）** |
+| fork-only 新文件（不冲突） | 167 |
+
+所以 **Proma 借鉴计划里的每一个 PR 都必须自报接触面**（T0/T1/T2 + 文件数/处数 + audit leak 前后值），
+详细口径见 [`upstream-merge-policy.md`](./upstream-merge-policy.md)。
+这条纪律对 IM 桥接与打包链路尤其重要——因为它们天然要碰 `instrumentation.ts`、
+`package.json` 的 builder 配置、`electron/main.js` 这三个上游文件。
+
+---
+
+## 7.6 IM 渠道（飞书 / 钉钉 / Slack / 微信）
+
+> **口径变更**：IM 渠道原来被我列在 §2.3 的 N6「不搬」。改成要做，原因有两个：
+> ① 它是 Proma 唯一能把 agent 从“我坐在电脑前”变成“随时可叫”的能力，价值高；
+> ② 四个平台**全部是出站连接**（不要求公网 IP / 回调地址），而我是自托管 Web 应用，
+> 这一点刚好契合——**不需要开入站端口**。
+
+### 7.6.1 它的实现（逐平台）
+
+| 平台 | 连接方式 | 认证 | 关键实现 |
+| --- | --- | --- | --- |
+| **Slack** | Bolt **Socket Mode**（出站 WebSocket） | Bot token + App token | thread 内连续对话（新 root 需 @Bot）；Block Kit 支持**权限确认 / AskUserQuestion / 计划审批**三种卡片（`slack-bridge.ts:87-97, 215-290, 373, 496-521, 615-648, 718-740`） |
+| **飞书** | 长连接（出站 WS） | App ID/Secret，多 Bot | 双向卡片**流式**回复；**Session 镜像**：每个 Agent Session 建一个仅含用户+Bot 的群，输出同步到群卡片（`feishu-bridge.ts:145, 535-608, 1671-1684, 2466-2561`） |
+| **钉钉** | `dingtalk-stream`（出站 WS） | Client ID/Secret（加密存） | 多 Bot；消息先 ack 再处理（`dingtalk-bridge.ts:21, 123-133, 204-224, 416-447`） |
+| **微信** | HTTP **长轮询**到 `ilinkai.weixin.qq.com`（出站） | 扫码绑定 bot | 主进程生成二维码 data URL → 轮询扫码状态 → 凭证持久化（`wechat-bridge.ts:5-6, 36-38, 434-470, 515-565, 626`） |
+
+### 7.6.2 共用的桥接核心（这才是真正要搬的部分）
+
+四个平台共用同一套骨架，**平台适配器很薄**：
+
+| 能力 | 它的实现 | 依据 |
+| --- | --- | --- |
+| 注册与自愈 | `registerBridge/startAllBridges/stopAllBridges`；`powerMonitor` resume/unlock 后延迟 1.5s/10s 强制恢复；60s 健康检查 | `bridge-registry.ts:1-20, 54-63, 69-160` |
+| 聊天 ↔ 会话绑定 | chatId ↔ sessionId 双向映射，可持久化恢复；失效会话/工作区自动清理 | `bridge-command-handler.ts:129-165, 180-215, 260-272`；`bridge-binding-store.ts:1-60` |
+| 斜杠命令 | `/help /new /list /switch /stop /workspace /model /now`（含简写，支持序号或 ID 前缀）；`/now` 输出会话/模型/项目/MCP/Skills/文件树 | `bridge-command-handler.ts:275-341, 433-470, 547-633, 635-720` |
+| 无人值守执行 | `runAgentHeadless` + 订阅事件总线 + **只取 assistant 终态文本** + result 帧后一次性回发 | `bridge-command-handler.ts:722-820` |
+| 并发保护 | 运行中再发消息直接拒“上一条仍在处理中”；先回 `⏳ Agent 处理中…` 确认 | `:753-767` |
+| 附件 | 图片下载转附件；提示词里以 `<attached_files>` 前置 | `:785-793`；`wechat-bridge.ts:732-742` |
+| 日志脱敏 | `redactSensitiveLogText/Value` | `bridge-log-redaction.ts` |
+
+### 7.6.3 搬到本仓库的载体：**server 进程，不是 Electron 主进程**
+
+这是与 Proma 最大的结构差异，也是我的优势：
+
+| 维度 | Proma | 我（应该） |
+| --- | --- | --- |
+| 跑在哪 | Electron 主进程 | **Next.js server 进程** |
+| 启动点 | `main/index.ts:808-870` 的顺序编排 | `instrumentation.ts`，照 `startCronScheduler()` 的样子（**只 1 行 + 标记**） |
+| 跑 agent | 自研 `runAgentHeadless` | 现成的 `startRpcSession()`——`lib/cron-runner.ts:56-84` 就是完整可照抄的范式 |
+| 拿回复 | EventBus | `lib/agent-event-stream.ts`（已有） |
+| Web 自托管 | 不可能（桌面 only） | **可以**：服务器在 VPS 上时，飞书/钉钉/Slack 依然能用 |
+| 桌面壳 | — | 也能用（内嵌的 `next start` 里跑） |
+
+所以这个功能的接触面极小：`instrumentation.ts` 一行 + 全部新文件放 `lib/proma-bridge*`。
+
+### 7.6.4 ⚠️ 必须与 Proma 不同的三点（安全）
+
+它的做法在安全上是**反向的**，不能照搬：
+
+| # | Proma 的做法 | 为什么我不能照搬 | 我的口径 |
+| --- | --- | --- | --- |
+| 1 | 远程消息 → `runAgentHeadless(**bypassPermissions**)` | 等于任何能给 bot 发消息的人，都能无限制地让 agent 执行 bash/写文件 | **桥接会话的工具预设可配，默认 read-only**（复用 `lib/tool-presets.ts`）；要放开必须显式打开并二次确认 |
+| 2 | bot 绑定工作区后可访问该工作区 | 外部 IM 账号 ≠ 本机用户，不应自动获得工作区信任 | **必须配对**：未知 chat 的第一条消息回一个配对码，在应用内确认后才建绑定；工作区必须已存在且在 `lib/file-access.ts` 白名单内 |
+| 3 | 通知/回复直接发往平台 | 回答内容（含代码/路径/数据）出境到第三方 | 首次启用时明确告知**数据出境**；提供“只允许指定 chat / 只允许只读工具”的最保守默认 |
+
+另外两条工程约束：
+
+- **凭据存储**：pi-web 没有 Electron `safeStorage`。与 pi 自己的 `auth.json` 保持一致——
+  写到 `~/.pi/agent/bridges.json`，**权限 0600**，并支持用环境变量覆盖（Docker / 自托管场景更安全）。
+  **不要**自造一个加密层。
+- **速率限制与审计**：每个 chat 一个最小间隔 + 每日上限；每个入站请求记一行审计
+  （谁、什么时候、哪个会话、哪个工具预设），与 `lib/cron-history` 同思路。
+
+### 7.6.5 微信的可行性必须单独验证
+
+`wechat-bridge.ts` 用的是 `https://ilinkai.weixin.qq.com/ilink/bot/...`（`bot_type=3`）+ 扫码绑定，
+文件头自称“官方协议”。但**我无法从源码判定它的对外可用性与 ToS 状态**，它也可能是预览接口、随时变更。
+
+因此：
+
+- 微信排在最后，**默认不启用**，失败当作预期情形（UI 要能优雅报错而不是崩掉）；
+- 若验证不通过，替代方案是**企业微信（WeCom）**——它提供对外公开的 bot / webhook API，稳定性与合规性都更好；
+- 不建议为了“微信”二字去接非官方个人号协议（封号风险 + 持续维护成本）。
+
+### 7.6.6 依赖成本
+
+| 平台 | 它用的库 | 我的选择 |
+| --- | --- | --- |
+| Slack | `@slack/bolt` + `@slack/web-api` | **不引依赖**：Node ≥22 有内置 `WebSocket`，Socket Mode 用 fetch + WS 自写（~200 行）；若嫌麻烦再引 `@slack/web-api` |
+| 飞书 | `@larksuiteoapi/node-sdk` | 长连接帧格式非公开，**建议引官方 SDK**（自写不现实） |
+| 钉钉 | `dingtalk-stream-sdk-nodejs` | 同上，**建议引官方 SDK** |
+| 微信 | 无（直接 HTTP） | 无需依赖（复用 `undici`，已有） |
 
 ---
 

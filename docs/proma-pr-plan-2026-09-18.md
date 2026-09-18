@@ -2,7 +2,8 @@
 
 日期：2026-09-18
 配套对比：[`proma-comparison-2026-09-18.md`](./proma-comparison-2026-09-18.md)
-基准：`@agegr/pi-web` 0.9.1 fork（HEAD `05af204`）
+基准：`@agegr/pi-web` 0.9.1 fork
+上游合并纪律：[`upstream-merge-policy.md`](./upstream-merge-policy.md)（**必读**）
 
 ***
 
@@ -12,20 +13,49 @@
 | --- | --- |
 | **单一意图** | 一个 PR 只做一件事；皮肤/CSS 与功能**绝不**混在一个 PR |
 | **可独立回滚** | 每个 PR revert 后系统仍可用；新文件新路由优先于改老文件 |
-| **不引入第二个 agent loop** | 所有"工具执行前拦截"走 pi 扩展的 `tool_call` 事件（`docs/extensions.md:778-817`），不新建 orchestrator |
+| **⭐ 不丢上游合并能力** | **新增能力一律放 fork-only 新文件；碰上游文件就打 `fork:<slug>` 标记并自报接触面**（见 §0.2） |
+| **不引入第二个 agent loop** | 所有“工具执行前拦截”走 pi 扩展的 `tool_call` 事件（`docs/extensions.md:778-817`），不新建 orchestrator |
 | **不引入第二套配置根** | 新能力的数据进 `~/.pi/agent/` 或 localStorage，且 pi CLI 忽略后不报错 |
-| **不做桌面绑定** | EventKit / Agent Island / 多窗口 / 强依赖全局热键的能力不做；Web 端有等价退化才做 |
+| **不做桌面绑定** | EventKit / Agent Island / 多窗口不做；Web 端有等价退化才做 |
 | **自带测试** | 新增 `lib/` 逻辑必须带 `.test.mjs`；纯 UI PR 至少一个源码断言测试（本仓库惯例） |
 | **i18n 三语同步** | 新增文案必须同时进 `lib/i18n/messages/{en,zh-CN,zh-TW}.ts`（`lib/i18n/registry.test.mjs` 会卡住） |
 | **搬运带证据** | 每个 PR 的「依据」列到 Proma 的 `file:line`，实施时对照，不凭记忆 |
-| **合并既有计划** | 与 MU-/PR-/UI- 编号重叠的，在对应 PR 里注明"并入"，不另开条目 |
+| **合并既有计划** | 与 MU-/PR-/UI- 编号重叠的，在对应 PR 里注明“并入”，不另开条目 |
 
-### 统一 DoD
+### 0.1 ⭐ 上游合并能力的硬指标
+
+本仓库与上游**没有 merge base**（由 tarball 导入），“不改上游文件”不是一个风格建议，而是**功能约束**：
+leak 一涨，下一次合并就没地图。实测（`node docs/upstream-merge-audit.mjs`，main `d4f3f78`）：
+
+| 指标 | 值 | 含义 |
+| --- | --- | --- |
+| merge surface | **125 个文件** | 会冲突的候选面 |
+| 有 `fork:` 标记 | 31 | 有地图 |
+| **无标记（leak）** | **91（73%）** | **无地图——这就是历史欠账，不能再涨** |
+| fork-only 新文件 | 167 | 不冲突，健康 |
+
+**所以本计划的每一个 PR 必须遵守下面两条**：
+
+1. **落点优先 T0**：新增逻辑放 `lib/proma-<name>.ts` / `components/fork/<Name>.tsx` / 新 api 路由；
+   上游文件只允许“挂载一行”。
+2. **每个 PR 描述必须带这一行**（没有不合并）：
+
+```
+接触面：T1 · 3 个上游文件 / 5 处改动 · slug=fork:proma-01 · audit leak 91 → 91
+```
+
+> `slug` 跟 PR 编号走（`fork:proma-01`……），同一个功能多处接线用**同一个 slug**，
+> 这样合并时 `grep -rn "fork:proma-01"` 一次拿全。
+
+### 0.2 统一 DoD
 
 ```bash
 node_modules/.bin/tsc --noEmit     # 必过
 npm run lint                       # 0 error
 npm test                           # 除 README 已登记的两条环境性用例外全过
+# ⭐ 上游合并面门禁（新增能力必跑，leak 只允许降）
+node docs/upstream-merge-audit.mjs --check
+node docs/upstream-merge-audit.mjs --list=slugs    # 确认自己那个 slug 在里面
 # 改动 app/globals.css 时追加：
 node docs/codex-skin/audit-tokens.mjs
 mv .next $(mktemp -d)/next && npm run prod   # 干净重建
@@ -36,6 +66,20 @@ npm run desktop                    # 起桌面壳冒烟
 
 **子代理红线的复用**：给子代理的扩展不能暴露保留工具名（`Agent`/`get_subagent_result`/`steer_subagent`），见 ADR-0003。PROMA-02/03 的工具拦截实现必须遵守同一条。
 
+### 0.3 本计划的接触面预算（预估）
+
+| 阶段 | 预估接触面 | 说明 |
+| --- | --- | --- |
+| P1（审批/权限/计划） | **T1，最多 3 处** | 全部逻辑进 `lib/proma-*-extension.ts`；上游只在 `ChatWindow` 加挂载点 |
+| P2 | **T1，最多 4 处** | `agent-event-stream.ts` 追加**可选**字段（不改既有语义） |
+| P3 | **T0 为主** | 新组件 + 新路由；只有 `MarkdownBody.tsx` 一处接线（PROMA-20a） |
+| P4 | **T1，最多 3 处** | `package.json` builder 段 + `electron/main.js`；打包逻辑全部抽到 `scripts/`（T0） |
+| P5 | **T1，1 处** | 浏览器面板升级会碰 `BrowserPanel.tsx` |
+| P6（IM） | **T1，仅 1 处** | `instrumentation.ts` 加一行 `startBridges()` |
+
+**合计预期**：新增 leak = **0**（新文件不计入 leak），T1 处数 **≤ 12**。
+任何 PR 若预测会新增 leak，必须在 PR 描述里说明为何无法避免。
+
 ***
 
 ## 1. 阶段总览
@@ -45,15 +89,20 @@ npm run desktop                    # 起桌面壳冒烟
 | **P1** | Agent 编排与权限 | 4 | — | 中高（碰工具执行链） | ★★★★★ |
 | **P2** | 上下文与协作 | 5 | PROMA-01（阻塞冒泡复用审批通道） | 中 | ★★★★☆ |
 | **P3** | 右栏与文件 | 5 | — | 低 | ★★★☆☆ |
-| **P4** | 平台能力 | 7 | — | 低-中 | ★★★☆☆ |
+| **P4** | 平台能力（含打包链路） | 9 | PROMA-19 依赖 PROMA-29 | 低-中 | ★★★☆☆ |
 | **P5** | 评估型（先 spike） | 3 | 视 spike 结论 | 高 | ★★☆☆☆ |
+| **P6** | IM 桥接 | 4 | PROMA-25（框架） | 中高（首个外部集成） | ★★★★☆ |
 
-**推荐节奏**：`P1 → (P2 ∥ P3) → P4 → P5`。
+**推荐节奏**：`P1 → (P2 ∥ P3) → P4 → P6 → P5`。
 
 - **P1 必须最先做**：它是 Proma 与本仓库差距最大的一面，也是 P2 里"子会话阻塞冒泡"等条目的前置（要有个能等用户回答的通道）。
 - **P2 与 P3 无代码依赖**，可双线并行。
-- **P4 全部独立**，任何一条都能单独插队。
+- **P4 内部已拆出前置关系**：`PROMA-29（打包）→ PROMA-19（自动更新）`；其余独立。
+- **P6 盯住 PROMA-25**：框架一旦跑通，后续三个平台各自独立。
 - **P5 一律先 spike 再决定做不做**，spike 不合并。
+
+> **P4 里先做哪一项？** 如果优先“用户可感知”：**PROMA-30（闪屏）** 成本最低、效果最直接；
+> 如果优先“解锁其他计划”：**PROMA-29（打包）**——它排掉了唯一的阻塞项。
 
 ---
 
@@ -424,7 +473,7 @@ npm run desktop                    # 起桌面壳冒烟
 
 ---
 
-## 5. P4 — 平台能力（7 个 PR）
+## 5. P4 — 平台能力（9 个 PR）
 
 ### PROMA-14 · 定时任务生命周期语义
 
@@ -596,12 +645,86 @@ npm run desktop                    # 起桌面壳冒烟
   - 复用 `/api/app-update` 的 release URL 解析
 
 - **注意**：
-  - **mac target 现在只有 `dir`**（`package.json:158`），`dir` 产物装不了更新。要走更新必须先改成可发布的 target（dmg/zip）并接受签名/Gatekeeper 提示。这是本 PR 的前置条件，**先决策再开工**（见 §9 的 D2）。
+  - **前置条件（D2）已可拍**：需先做 PROMA-29（target `dir` → `dmg+zip` + entitlements + 公证）。**PROMA-29 是这一项的前置**。
   - 空闲安装的"所有 agent 结束"判定要看到后台任务（subagent、cron 运行中的任务），不能只看前台。
   - 缓存清理只在打包生产环境启用（对齐 Proma）。
 - **工作量**：M–L（~550 行 + 测试）
 - **风险**：中高（打包链路 + 签名）。
 - **关系**：**并入** omp-web 计划的 PR-13（更新对话框）+ PR-14（一键自更新），见 `omp-web-pr-plan-2026-09-17.md`。
+- **依赖**：PROMA-29
+
+### PROMA-29 · mac 打包与发布链路（解开 D2，解锁 PROMA-19）
+
+> 没有这一项，PROMA-19（自动更新）**写多少代码都没用**：`dir` 产物没有更新源。
+> 依据全部来自 Proma 的实测配置，其中 entitlements 的具体条目已经验证过适合“内嵌 HTTP server”的场景。
+
+- **目标**：mac 从 `dir` 改成可发布的 `dmg` + `zip`；启用 hardened runtime + entitlements；接上公证环境变量；GitHub publish；**跨架构 `latest-mac.yml` 合并**；一个带宿主断言的打包编排脚本。
+
+- **依据（Proma）**：
+  - `hardenedRuntime: true` + `entitlements(.Inherit)` + `gatekeeperAssess: false`：`electron-builder.yml:111-114`
+  - entitlements 实际内容（含 **`network.server`**、`disable-library-validation`、`allow-jit`、`allow-unsigned-executable-memory`、`device.audio-input`、`files.user-selected.read-write`）：`resources/entitlements.mac.plist:5-45`
+  - target `[dmg, zip]` + 无 `arch` 键（架构由 CLI 给，每个 runner 只建宿主架构）：`electron-builder.yml:119-124`
+  - dmg 窗口布局：`yml:127-138`
+  - 公证：**不写 `notarize:`**，依赖 electron-builder 25 在 `APPLE_ID`/`APPLE_APP_SPECIFIC_PASSWORD`/`APPLE_TEAM_ID` 存在时自动公证；secrets 缺失时不报错、继续产出未签名件（`release.yml:6-11`）
+  - publish GitHub provider + 每平台 `--publish always` + 3 次重试：`yml:205-212`；`release.yml:88-103`
+  - **跨架构 `latest-mac.yml` 合并**（否则后建的覆盖先建的 → 另一个架构静默收不到更新）：`release.yml:187-321`
+  - `dist.ts` 编排：宿主断言 `:159-167`，`--current-arch` `:251-253`，`--no-sign`（`CSC_IDENTITY_AUTO_DISCOVERY=false`）`:266-268`，逐步计时汇总 `:281-311`
+  - CI 签名导入（临时 keychain + `set-key-partition-list`）：`release.yml:51-70`
+
+- **接入点**：
+  - `package.json` 的 `build.mac`：`target: ["dir"]` → `["dmg", "zip"]` + `hardenedRuntime`/`entitlements`/`gatekeeperAssess`/`extendInfo`；`publish: {provider:"github", owner, repo}`
+  - 新增 `build/entitlements.mac.plist`（T0；**必须先看 `resources/entitlements.mac.plist:5-45` 的实际条目，不要凭空写**）
+  - 新增 `scripts/dist.mjs`（T0；与仓库现有的 `scripts/next-mode.mjs` / `after-pack.mjs` 同风格，**不要引依赖**）
+  - 新增 `.github/workflows/release.yml`（T0）——两个 mac runner + 一个 `merge-mac-yml` job
+
+- **注意**：
+  - **不要照搬 Proma `dist.ts` 的坑**：它的 8 步里**不包含** `sync:runtime-deps` 与 `rebuild:node-pty`，假设你先跑过。我的 `dist.mjs` 必须把
+    「`.next/node_modules` 存在 + 外部依赖齐全 + node-pty 执行位 + 架构匹配」做成**构建期硬断言**，
+    否则换来的就是运行时的 `MODULE_NOT_FOUND` / `NODE_MODULE_VERSION`（那比构建失败难查得多）。
+  - `after-pack.mjs` 现在做的是「把 `.next/node_modules` 注进 `.app`」——**开 `hardenedRuntime` 后这步必须在签名之前完成**，否则签完再改文件会破坏签名。先确认 hooks 顺序。
+  - 本机没有开发者证书时，`--no-sign` 路径要能用（对齐 `yml:112` 的 `gatekeeperAssess:false`）；不要因为签不了就无法本地打包。
+  - **公证是可选但必须可配**：不要把本地构建搞成必须联网。
+  - 本次不引入 Windows / Linux target（保持 mac-only，避免 PR 体积失控）；win/linux 另开。
+
+- **工作量**：M–L（~450 行配置 + 脚本 + CI；无应用逻辑）
+- **风险**：中（打包链路；但错了也只在打包时暴露，不影响现有功能）
+- **接触面预估**：**T1** · 1 个上游文件（`package.json`）· 3 处 · `slug=fork:proma-29`
+- **解锁**：**PROMA-19**（自动更新）、**D2 待决策项关闭**
+
+### PROMA-30 · 启动白屏与打包正确性
+
+- **目标**：① 静态启动闪屏（消除最坏 90s 空窗）② dev/prod `userData` 隔离 ③ 单实例失败有可见提示 ④ node-pty 执行位 / ABI 与外部依赖闭包变成构建期硬错误。
+
+- **依据（Proma）**：
+  - 启动闪屏：帧式静态页（纯 CSS 进度动画 + `prefers-reduced-motion`），renderer 就绪前 show、`ready-to-show` 时 dismiss：`main/index.ts:332-367, 605-606`；`resources/startup-splash/index.html:1-45`
+  - dev/prod `userData` 隔离 + 多实例名：`main/index.ts:6-12`
+  - 单实例失败给提示而非静默退出：`main/index.ts:19-32`
+  - node-pty 执行位修复（**跑在打包流程里，不只是 `postinstall`**）：`scripts/ensure-node-pty-helper-executable.ts:4-20`——注释记录了真实故障：缺执行位只会报 `posix_spawnp failed`，**所有终端都启不来**
+  - Electron ABI 重建：`package.json:38`（`electron-rebuild -f -w node-pty`）
+  - 绝对 symlink 硬失败：`scripts/sync-runtime-deps.ts:217`
+
+- **我的现状**：
+  - `electron/main.js` 启动时要 `waitReady(port, 90_000)`（`:404`），期间是空白窗口；**无闪屏**
+  - `bin/prepare-terminal.js` 只在 `postinstall` 跑，且只处理 `darwin-*`；`electron-builder` 重建 `node_modules` 后执行位会丢（**CI 下必现**）
+  - 无 `@electron/rebuild`：Electron 的 Node ABI 一升级就会报 `NODE_MODULE_VERSION`
+  - 单实例拿不到锁时静默 `app.quit()`（`:381-383`）→ “双击没反应”
+  - dev 与 prod 共享 `userData` / `SingletonLock`
+
+- **接入点**：
+  - 新 `electron/splash.html`（或复用 `public/`）+ `electron/main.js` 的 show/dismiss 两处接线（T1）
+  - 新 `scripts/verify-pack.mjs`（T0）：断言 `.next/node_modules`、关键 external、`spawn-helper` 执行位、`pty.node` 架构
+  - 新 `scripts/ensure-pty-helper.mjs`（T0，从 `bin/prepare-terminal.js` 抽出来，改成可在打包流程里调）
+  - `package.json`：加 `@electron/rebuild` 与 `pack` 前置步骤（T1）
+
+- **注意**：
+  - 闪屏要**纯静态、无外部请求**（它出现在 server 就绪之前，任何网络依赖都会适得其反）。
+  - 闪屏时长不可控：既可能是 1 秒也可能是 90 秒；所以必须是**真正能看的信息量**，不能只放一个 logo 然后卡住不动。
+  - `spawn-helper` 的 chmod 要在**打包流程内**做（对齐 Proma），不要只在 `postinstall`——后者在 CI 里跑不到点上。
+  - `userData` 隔离会改变现有用户的目录位置，**必须**保留一次性的迁移逻辑（仓库已有 `migrateLegacyUserData` 可参考）。
+
+- **工作量**：S–M（~350 行 + 脚本）
+- **风险**：中（改启动路径；`userData` 隔离有数据迁移风险）
+- **接触面预估**：**T1** · 2 个上游文件（`electron/main.js`、`package.json`）· 4 处 · `slug=fork:proma-30`
 
 ---
 
@@ -680,6 +803,110 @@ npm run desktop                    # 起桌面壳冒烟
 
 ---
 
+## 6.5 P6 — IM 桥接（4 个 PR）
+
+> **口径变更**：IM 渠道原在对比文档 §2.3 的"不搬"里，现已改为要做。
+> 理由：四个平台**全部是出站连接**（不需公网 IP / 回调地址），而本仓是自托管 Web 应用——刚好契合；
+> 且它能让 agent 从“我坐在电脑前”变成“随时可叫”，价值高。
+> 详细对照与逐平台机制见对比文档 **§7.6**。
+
+### 共同约束（四个 PR 都适用）
+
+| 约束 | 说明 |
+| --- | --- |
+| **跑在 server 进程** | 不是 Electron 主进程。启动点 = `instrumentation.ts`，**照 `startCronScheduler()` 的样子**（只 1 行 + `fork:proma-25`） |
+| **跑 agent 用现成路径** | `startRpcSession()`——`lib/cron-runner.ts:56-84` 就是可照抄的完整范式（含 `allowFileRoot` 记账） |
+| **拿回复用现成总线** | `lib/agent-event-stream.ts`；**只取 assistant 终态文本**（对齐 `bridge-command-handler.ts:722-820`），不要把流式中间帧发到 IM |
+| **不引第二套配置根** | 数据进 `~/.pi/agent/pi-web-bridges.json`，权限 **0600**；支持环境变量覆盖（Docker 场景）。**不自造加密层**（与 pi 的 `auth.json` 一致） |
+| **三语 i18n** | 设置面板文案必须三语同步 |
+
+### ⚠️ 与 Proma 刻意不同的三点（安全，四 PR 共同遵守）
+
+| # | Proma | 我 |
+| --- | --- | --- |
+| 1 | `runAgentHeadless(**bypassPermissions**)` | **默认 read-only 工具预设**（复用 `lib/tool-presets.ts`）；放开必须显式打开 + 二次确认 |
+| 2 | bot 绑定工作区即可访问 | **必须配对**：未知 chat 首条消息回配对码，在应用内确认后才建绑定；工作区必须在 `lib/file-access.ts` 白名单内 |
+| 3 | 无出境告知 | 首次启用明确告知**数据出境**；提供“只允许指定 chat / 只允许只读工具”的最保守默认 |
+
+额外的工程约束：**每 chat 速率限制**（最小间隔 + 每日上限）+ **审计日志**（谁/何时/哪个会话/哪个预设）。
+
+### PROMA-25 · 桥接核心 + Slack（首个实现）
+
+- **为什么把框架和 Slack 放一个 PR**：框架单独提出来就是死代码，无法验证；
+  Slack 是最简单的传输层（Node ≥22 内置 `WebSocket`，Socket Mode 用 fetch + WS 自写就够了），
+  **而且不用引依赖**。用它是为了让框架被真实跑通。
+
+- **目标**：出站 Socket Mode 接入；chat ↔ session 绑定；斜杠命令；无人值守执行与终态回复；并发保护；附件；日志脱敏；配对 + 白名单 + 速率限制 + 审计。
+
+- **依据（Proma）**：
+  - Slack 桥（Socket Mode / thread 内连续 / 新 root 需 @Bot / Block Kit 三种卡片）：`slack-bridge.ts:87-97, 215-290, 373, 496-521, 615-648, 718-740`
+  - 注册与自愈：`bridge-registry.ts:1-20, 54-63, 69-160`
+  - 绑定存储：`bridge-binding-store.ts:1-60`；`bridge-command-handler.ts:129-165, 180-215, 260-272`
+  - 命令：`bridge-command-handler.ts:275-341, 433-470, 547-633, 635-720`
+  - 执行与回复：`:722-820`（含并发保护 `:753-767`、附件 `:785-793`）
+  - 日志脱敏：`bridge-log-redaction.ts`
+
+- **接入点**：
+  - 新 `lib/proma-bridge/types.ts`（transport 无关的接口：`start/stop/send/inbound`）
+  - 新 `lib/proma-bridge/core.ts`（绑定、路由、命令分发、审计）
+  - 新 `lib/proma-bridge/pairing.ts`（配对码）
+  - 新 `lib/proma-bridge/slack.ts`（Socket Mode，自写）
+  - 新 `app/api/bridges/route.ts`（状态/启停/配对确认）
+  - 新 `components/fork/BridgesConfig.tsx`（设置面板分区）
+  - `instrumentation.ts`：**一行** `startBridges()` + 标记（T1）
+
+- **注意**：
+  - **先做“失败也不崩”**：网络抖/令牌失效/平台改协议都是常态，必须自动重连 + 退避，且不能把 server 拖垮。
+  - 绑定存储要能被“工作区被删/会话失效”清理（对齐 `:260-272` 的清理逻辑），否则会积垃圾。
+  - 审计日志**不要记消息正文**（只记元数据），避免把聊天内容再写一份到磁盘。
+
+- **工作量**：L（~900 行 + 测试 + i18n ~35 key）
+- **风险**：中高（第一个外部集成 + 新增对外凭证）
+- **接触面预估**：**T1** · 1 个上游文件（`instrumentation.ts`）· 1 处 · `slug=fork:proma-25`
+
+### PROMA-26 · 飞书桥接
+
+- **目标**：长连接接入；双向卡片**流式**回复；多 Bot；Session 镜像（可选，见注意）。
+
+- **依据（Proma）**：`feishu-bridge.ts:145, 535-608, 1671-1684, 2466-2561`；命令实现 `:1019-1067`；镜射模式的额外权限要求 `FeishuSettings.tsx:1155-1183`；飞书 cardAction **不走长连接**所以不依赖按钮回调 `:281, 1676`
+
+- **接入点**：新 `lib/proma-bridge/feishu.ts` + `components/fork/BridgesConfig.tsx` 加一个分区。**新增依赖**：`@larksuiteoapi/node-sdk`（长连接帧格式非公开，自写不现实）
+
+- **注意**：
+  - **Session 镜像建议分成第二个 PR 或默认关闭**：它为每个会话建一个群，权限要求高（需 `im:message.group_msg` / `im:chat`），且会创建大量飞书群。
+  - 先把“单 chat 绑定”跑通；镜像是有价值但高副作用的进阶能力。
+  - 卡片流式更新要**节流**（飞书有频控），不能每 token 一次更新。
+
+- **工作量**：M–L（~600 行 + 测试 + i18n ~20 key）；引入 1 个依赖
+- **风险**：中（新依赖 + 平台频控）
+- **接触面预估**：**T0**（全部落在 `lib/proma-bridge/` + 已有 fork 组件）
+- **依赖**：PROMA-25（框架）
+
+### PROMA-27 · 钉钉桥接
+
+- **依据（Proma）**：`dingtalk-bridge.ts:21, 123-133, 204-224, 416-447`——**消息先 ack 再处理**（`dingtalk-stream` 有 ack 超时）
+
+- **接入点**：新 `lib/proma-bridge/dingtalk.ts`；**新增依赖**：`dingtalk-stream`
+- **注意**：ack 超时是钉钉最容易踩的坑（处理慢就必须先 ack）；Client Secret 按 §共同约束的 0600 存。
+- **工作量**：S–M（~350 行 + 测试 + i18n ~16 key）
+- **风险**：中（新依赖）
+- **接触面预估**：**T0**
+- **依赖**：PROMA-25
+
+### PROMA-28 · 微信桥接（**先验证可行性再开工**）
+
+- **前置：可行性 spike（不合并代码）**。必须回答：
+  1. `ilinkai.weixin.qq.com/ilink/bot/*`（`bot_type=3`）是**对外开放且长期可用**的接口吗？
+  2. 它的 ToS 允许这种接入吗？
+  3. 扫码绑定的凭证有效期多久？失效后是重扫还是静默失败？
+- **如果答案是否**：改为**企业微信（WeCom）**官方 bot API（对外公开、稳定、合规），或干脆不做。
+- **不建议接非官方个人号协议**（封号风险 + 持续维护成本）。
+- **如果做**：默认不启用，失败当预期情形；实现路径同 25（`lib/proma-bridge/wechat.ts`，无新依赖，用 `undici` 长轮询）。
+- **接触面预估**：**T0**
+- **依赖**：PROMA-25
+
+---
+
 ## 7. 明确不做（与对比文档 §9 一致）
 
 | 不做 | 理由 |
@@ -688,7 +915,7 @@ npm run desktop                    # 起桌面壳冒烟
 | 自研 agent orchestrator | 同上；且搬它等于重写 `lib/rpc-manager.ts` |
 | 自管会话存储 | 会失去 pi CLI / 导出 / 分支导航的全部既有能力 |
 | macOS EventKit 同步、Agent Island | 原生绑定，Web 形态无法承载 |
-| IM 渠道（微信/飞书/钉钉/Slack） | 另一条产品线；远程访问走 Web + 密码 + PWA |
+| ~~IM 渠道（微信/飞书/钉钉/Slack）~~ | **已从本表移除**：口径改为**要做**，见 §6.5 P6（PROMA-25..28）。理由：四个平台均为出站连接，与自托管 Web 形态契合 |
 | Vision Relay、语音听写 | 需要第二条链路 / 第三方付费服务；价值密度低 |
 | 多窗口（独立预览 / 记忆窗 / 听写窗） | Web 形态无多窗口 |
 | 右栏双 pane 分屏 | 与已规划的 UI-06（底部面板）/ MU-12（右栏瘦身）方向相反 |
@@ -722,19 +949,27 @@ P3 (全独立，可与 P2 并行)
   PROMA-12 Markdown 三件套 (独立)
   PROMA-13 会话内搜索      (独立)
 
-P4 (全独立，可任意插队)
-  PROMA-14 定时任务增强
+P4 (除自动更新外全独立)
+  PROMA-14 定时任务增强 ──┐
+                          ├─→ 同改 lib/cron-*，建议同批次
+  PROMA-24 定时任务 Agent 工具 ──┘
   PROMA-15 终端 Agent 工具
   PROMA-16 提醒条 + 规划页
   PROMA-17 存储管理 + 自动归档
   PROMA-18 快捷键系统
-  PROMA-19 自动更新（并入 omp PR-13/14）
-  PROMA-24 定时任务 Agent 工具（与 PROMA-14 同改 cron-*，建议同批次）
+  PROMA-29 打包与发布链路（解开 D2）─→ PROMA-19 自动更新（并入 omp PR-13/14）
+  PROMA-30 启动白屏与打包正确性（与 29 无依赖，但建议紧接）
 
 P5 (spike 不合并，结论出来再决定)
   PROMA-20 浏览器 CDP（预期：只桌面端）
+    PROMA-20a 外链路由（不依赖 spike，可单独先做）
   PROMA-21 会话工作台文件（预期：退化或不做）
   PROMA-22 快速任务浮窗（预期：不做）
+
+P6 (IM 桥接；盯住 25)
+  PROMA-25 桥接核心 + Slack ──┬──► PROMA-26 飞书
+                              ├──► PROMA-27 钉钉
+                              └──► PROMA-28 微信（先 spike 可行性）
 ```
 
 **批次建议**：
@@ -745,19 +980,23 @@ P5 (spike 不合并，结论出来再决定)
 | 批 2 | PROMA-04 + PROMA-05 | 都是"会话文件操作"，共用 wrapper destroy 纪律 |
 | 批 3 | PROMA-07 + 08 + 13 + 23 | 四个小 PR 一起清掉聊天面与健壮性细节；PROMA-23 最简单，可作热身 |
 | 批 4 | PROMA-09 + 10 + 11 + 12 | 右栏/文件一整批，全部可独立验证 |
-| 批 5 | PROMA-14 + 24 → 15..19 | 平台能力；PROMA-14 与 24 同改 `lib/cron-*.ts`，放同一批次以免冲突 |
-| 批 6 | PROMA-06 | 依赖审批通道，放最后做风险最低 |
-| 批 7 | PROMA-20..22 spike | 只在有余力时做 |
+| 批 5 | PROMA-14 + 24 → 15..18 | 平台能力；PROMA-14 与 24 同改 `lib/cron-*.ts`，放同一批次以免冲突 |
+| 批 6 | PROMA-29 → PROMA-19；PROMA-30 | 打包链路：先拿到可发布的 dmg/zip，再写自动更新；PROMA-30 可紧接也可先行 |
+| 批 7 | PROMA-06 | 依赖审批通道，放最后做风险最低 |
+| 批 8 | PROMA-25 → 26/27/28 | IM 桥接；框架跑通后三个平台可并行；微信先看 spike |
+| 批 9 | PROMA-20..22 spike | 只在有余力时做；PROMA-20a 可单独提前 |
 
 ---
 
-## 9. 三个待决策（开工前必须定）
+## 9. 待决策
 
-| # | 决策 | 选项 | 建议 |
+| # | 决策 | 状态 | 建议 |
 | --- | --- | --- | --- |
-| D1 | **权限默认档** | (a) 默认全自动（对齐 Proma）(b) 默认"危险工具需确认"(c) 首次进入时让用户选 | **(a)**。默认拦截会让所有现有用户以为工具坏了；把选择权放在 PROMA-02 的切换器 + 首次提示里 |
-| D2 | **mac 打包 target** | (a) 保持 `dir`（PROMA-19 无法落地）(b) 改成 dmg/zip + ad-hoc 签名（能做更新但会有 Gatekeeper 提示） | **(b)**，但这是独立决策；若不做，PROMA-19 降级为"只做更新日志展示 + 复制安装命令"（即 omp PR-13 的范围） |
-| D3 | **PROMA-20 的形态边界** | (a) 只做桌面端 (b) 桌面端 + Web 端 iframe 保留（两套代码）(c) 不做 | **(a)**。Web 端不引入第二套浏览器实现；iframe 面板保持现状 |
+| D1 | **权限默认档** | 待定 | **(a) 默认全自动**（对齐 Proma）。默认拦截会让所有现有用户以为工具坏了；选择权放在 PROMA-02 的切换器 + 首次提示里 |
+| ~~D2~~ | ~~mac 打包 target~~ | **已解决 → 变成 PROMA-29** | Proma 的实证已足够拍下：`hardenedRuntime` + entitlements（含 **`network.server`**，正是内嵌 `next start` 需要的）+ `target:[dmg,zip]` + 公证环境变量 + 跨架构 `latest-mac.yml` 合并。**推荐做**，因为不做则 PROMA-19（自动更新）无法落地 |
+| D3 | **PROMA-20 的形态边界** | 待定 | **(a) 只做桌面端**。Web 端不引入第二套浏览器实现；iframe 面板保持现状 |
+| **D4** | **IM 桥接的默认安全档** | **新增，开工前必须定** | **默认只读工具 + 强制配对**（见 §6.5）。远程消息来自外部平台（不是本机用户），不应自动继承本机的工作区信任与全工具权限 |
+| **D5** | **微信是否做** | **新增，取决于 PROMA-28 的 spike** | 先验证 `ilinkai.weixin.qq.com` 的对外可用性与 ToS；不通过则走**企业微信**或不做。**不建议**接非官方个人号协议 |
 
 ---
 
@@ -778,10 +1017,21 @@ P5 (spike 不合并，结论出来再决定)
 
 ## 附：本计划自身对应的 PR
 
-本文与 [`proma-comparison-2026-09-18.md`](./proma-comparison-2026-09-18.md) 作为一个纯文档 PR 提交，不包含任何代码改动。
+本文、[`proma-comparison-2026-09-18.md`](./proma-comparison-2026-09-18.md) 与
+上游合并纪律三件套作为一个纯文档/工具 PR 提交，不包含任何应用代码改动。
 
 分支：`docs/proma-comparison`
-包含：两个新文件（本文件 + 对比文档）
+包含：
+
+| 文件 | 说明 |
+| --- | --- |
+| `docs/proma-comparison-2026-09-18.md` | 逐功能对比（含 §7.4 打包深挖、§7.5 合并面、§7.6 IM 桥接） |
+| `docs/proma-pr-plan-2026-09-18.md` | 本文件（30 个 PR 的拆分计划） |
+| `docs/upstream-merge-policy.md` | **新增**：上游合并纪律（T0/T1/T2 + 自报格式 + 实测基线） |
+| `docs/upstream-merge-audit.mjs` | **新增**：可执行的合并面审计（无依赖，`node docs/…`） |
+| `docs/upstream-merge-baseline.json` | **新增**：leak 预算基线（91） |
+
+本 PR 自己是 **T0**（5 个新文档/工具文件，不动任何上游文件，leak 不变）。
 
 ### 本 PR 顺带修正的仓库内错误结论
 
@@ -790,5 +1040,11 @@ P5 (spike 不合并，结论出来再决定)
 结论：**PROMA-01 不被上游阻塞，可以立即开工**；原判断低估了工作量（MU-31 描述的"升级可见卡片"其实只是这个功能的一小半）。
 
 > 本次只改文档，**没有**直接改 `delta.md`——那份台账有自己的编号与更新纪律，替它做决定不合适。建议在 PROMA-01 落地时一并更新 §27 的结论。
+
+### 本 PR 新增的一类东西：让纪律可执行
+
+`docs/patches/README.md` §3 与 `docs/ui-layout-pr-plan-2026-09-17.md` §5.1 早已写明「要打 `fork:` 标记」，
+但**没有一个办法知道现在实际欠了多少**。本 PR 补上这个数字（91/125 = 73% 无标记）并把审计变成可跑的命令，
+让下一次合并前能先看一眼，而不是碰到冲突才发现没地图。
 
 > 后续每个 PROMA-xx 按 §0 的拆分原则单独开分支与 PR，并在 `docs/patches/` 台账里按需登记（涉及上游文件的改动用 `fork:` 标记）。
