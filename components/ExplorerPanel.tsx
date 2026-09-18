@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { useI18n } from "@/hooks/useI18n";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
+import { TEXT } from "@/lib/typography";
 
 function ToolbarIconButton({
   onClick,
@@ -143,7 +144,7 @@ export function ExplorerPanel({
             border: "none",
             color: "var(--text-muted)",
             cursor: "pointer",
-            fontSize: 11,
+            fontSize: TEXT.xs,
             fontWeight: 600,
             letterSpacing: "0.05em",
             textTransform: "uppercase",

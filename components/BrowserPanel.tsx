@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { normalizeBrowserUrl, type BrowserTab } from "./browser-tab-state";
+import { TEXT } from "@/lib/typography";
 
 interface Props {
   tab: BrowserTab;
@@ -135,7 +136,7 @@ export function BrowserPanel({ tab, onChangeUrl }: Props) {
             background: "var(--bg)",
             color: "var(--text)",
             fontFamily: "var(--font-mono)",
-            fontSize: 12,
+            fontSize: TEXT.sm,
             outline: "none",
           }}
         />
@@ -167,7 +168,7 @@ export function BrowserPanel({ tab, onChangeUrl }: Props) {
             borderRadius: "var(--radius-md)",
             background: "var(--bg)",
             color: "var(--text-muted)",
-            fontSize: 11,
+            fontSize: TEXT.xs,
             flexShrink: 0,
           }}
         >
@@ -218,11 +219,11 @@ export function BrowserPanel({ tab, onChangeUrl }: Props) {
             gap: 8,
             padding: 24,
             color: "var(--text-dim)",
-            fontSize: 12,
+            fontSize: TEXT.sm,
             textAlign: "center",
           }}
         >
-          <div style={{ color: "var(--text-muted)", fontSize: 13 }}>{t("browser.emptyTitle")}</div>
+          <div style={{ color: "var(--text-muted)", fontSize: TEXT.md }}>{t("browser.emptyTitle")}</div>
           <div style={{ maxWidth: 420, lineHeight: 1.6 }}>{t("browser.emptyHint")}</div>
         </div>
       )}

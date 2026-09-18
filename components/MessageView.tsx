@@ -31,6 +31,7 @@ import type {
   ToolCallContent,
   ThinkingContent,
 } from "@/lib/types";
+import { TEXT } from "@/lib/typography";
 
 // CJK chars ~1 token each (GLM/DeepSeek/GPT-o200k); other chars ~4 chars/token.
 const CJK_PATTERN = /[\u3000-\u30ff\u3400-\u9fff\uf900-\ufaff\u{20000}-\u{2fa1f}\uac00-\ud7af]/u;
@@ -135,7 +136,7 @@ function SafeMarkdownBody({ children, className, ...props }: React.ComponentProp
           background: "var(--bg-panel)",
           color: "var(--text-muted)",
           cursor: "pointer",
-          fontSize: 12,
+          fontSize: TEXT.sm,
           textAlign: "left",
         }}
       >
@@ -528,7 +529,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
               borderRadius: "var(--radius-xs)",
               color: copied ? "var(--accent)" : "var(--text-dim)",
               cursor: "pointer",
-              fontSize: 11, fontWeight: 400,
+              fontSize: TEXT.xs, fontWeight: 400,
               whiteSpace: "nowrap",
               transition: "color 0.12s",
             }}
@@ -556,7 +557,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   borderRadius: "var(--radius-xs)",
                   color: "var(--text-dim)",
                   cursor: "pointer",
-                  fontSize: 11, fontWeight: 400,
+                  fontSize: TEXT.xs, fontWeight: 400,
                   whiteSpace: "nowrap",
                   transition: "color 0.12s",
                 }}
@@ -582,7 +583,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   borderRadius: "var(--radius-xs)",
                   color: forking ? "var(--accent)" : "var(--text-dim)",
                   cursor: forking ? "not-allowed" : "pointer",
-                  fontSize: 11, fontWeight: 400,
+                  fontSize: TEXT.xs, fontWeight: 400,
                   whiteSpace: "nowrap",
                   transition: "color 0.12s",
                 }}
@@ -600,7 +601,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             )}
           </div>
         )}
-        {time && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{time}</span>}
+        {time && <span style={{ fontSize: TEXT["2xs"], color: "var(--text-dim)" }}>{time}</span>}
       </div>
     </div>
   );
@@ -779,7 +780,7 @@ function AssistantMessageView({
       {isStreaming && (
         <div
           style={{
-            fontSize: 11,
+            fontSize: TEXT.xs,
             color: "var(--text-dim)",
             marginBottom: 4,
             display: "flex",
@@ -797,7 +798,7 @@ function AssistantMessageView({
 
                 {est > 0 && (
                   <span style={{ display: "flex", alignItems: "center", gap: 4, color: "var(--text)" }} title={t("i18n.estimatedTokens")}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 11, fontWeight: 400 }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 2, fontSize: TEXT.xs, fontWeight: 400 }}>
                       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round">
                         <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
                       </svg>
@@ -806,7 +807,7 @@ function AssistantMessageView({
                     {tps !== null && (() => {
                       const bg = tps >= 50 ? "#53b3cb" : tps >= 30 ? "#9bc53d" : tps >= 15 ? "#f9c22e" : "#e01a4f";
                       return (
-                        <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: "var(--radius-xs)", background: bg, color: "#fff", fontSize: 11, fontWeight: 400 }}>
+                        <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: "var(--radius-xs)", background: bg, color: "#fff", fontSize: TEXT.xs, fontWeight: 400 }}>
                           {tps.toFixed(1)} t/s
                         </span>
                       );
@@ -836,7 +837,7 @@ function AssistantMessageView({
             background: "var(--danger-soft)",
             color: "var(--danger)",
             fontFamily: "var(--font-mono)",
-            fontSize: 12,
+            fontSize: TEXT.sm,
             lineHeight: 1.5,
             whiteSpace: "pre-wrap",
             overflowWrap: "anywhere",
@@ -867,7 +868,7 @@ function AssistantMessageView({
             background: "var(--warning-soft)",
             color: "var(--warning)",
             fontFamily: "var(--font-mono)",
-            fontSize: 12,
+            fontSize: TEXT.sm,
             lineHeight: 1.5,
             whiteSpace: "pre-wrap",
             overflowWrap: "anywhere",
@@ -888,7 +889,7 @@ function AssistantMessageView({
         display: "flex", alignItems: "center", gap: 8, marginTop: 4,
       }}>
         {message.usage && !isStreaming && (
-          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
+          <div style={{ fontSize: TEXT.xs, color: "var(--text-dim)" }}>
             {formatUsage(message.usage)}
           </div>
         )}
@@ -903,7 +904,7 @@ function AssistantMessageView({
               borderRadius: "var(--radius-xs)",
               color: copied ? "var(--accent)" : "var(--text-dim)",
               cursor: "pointer",
-              fontSize: 11, fontWeight: 400,
+              fontSize: TEXT.xs, fontWeight: 400,
               whiteSpace: "nowrap",
               transition: "color var(--motion-fast) ease",
             }}
@@ -915,7 +916,7 @@ function AssistantMessageView({
           </button>
         )}
         {time && !isStreaming && (
-          <span style={{ fontSize: 11, color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>
+          <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", marginLeft: "auto" }}>{time}</span>
         )}
       </div>
     </div>
@@ -1205,7 +1206,7 @@ export function ToolCallBlock({ block, result, duration, onOpenSession, expanded
       style={{
         borderRadius: "var(--radius-lg)",
         overflow: "hidden",
-        fontSize: 12,
+        fontSize: TEXT.sm,
         border: `1px solid ${isError
           ? "color-mix(in srgb, var(--danger) 38%, var(--border))"
           : showExpandedSurface ? "var(--border)" : "transparent"}`,
@@ -1228,7 +1229,7 @@ export function ToolCallBlock({ block, result, duration, onOpenSession, expanded
             border: "none",
             color: "var(--text-muted)",
             cursor: "pointer",
-            fontSize: 12,
+            fontSize: TEXT.sm,
             textAlign: "left",
             borderRadius: "var(--radius-md)",
           }}
@@ -1242,14 +1243,14 @@ export function ToolCallBlock({ block, result, duration, onOpenSession, expanded
           <span style={{ display: "inline-flex", alignItems: "center", color: isError ? "var(--danger)" : "var(--text-muted)", flexShrink: 0 }}>
             <ToolCallIcon toolName={block.toolName} />
           </span>
-          <span style={{ color: isError ? "var(--danger)" : "var(--text-muted)", fontWeight: 500, fontSize: 12, flexShrink: 0 }}>
+          <span style={{ color: isError ? "var(--danger)" : "var(--text-muted)", fontWeight: 500, fontSize: TEXT.sm, flexShrink: 0 }}>
             {block.toolName}
           </span>
-          <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+          <span style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)", fontSize: TEXT.xs, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
             {isStreamingInput ? t("chat.generatingToolInput") : (patchLabel ?? getToolPreview(block))}
           </span>
           {duration !== undefined && (
-            <span style={{ fontSize: 11, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
+            <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
           )}
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--text-dim)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }}>
             <polyline points="2 3.5 5 6.5 8 3.5" />
@@ -1697,10 +1698,10 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
             color: "var(--text-muted)",
           }}
         >
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 650 }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.xs, fontWeight: 650 }}>
             compaction
           </span>
-          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>{time}</span>}
+          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: TEXT["2xs"] }}>{time}</span>}
         </div>
 
         <div style={{ padding: "11px 13px 12px" }}>
@@ -1713,7 +1714,7 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
           {parsedSummary.body ? (
             <MarkdownBody className="markdown-compaction-message">{parsedSummary.body}</MarkdownBody>
           ) : (
-             <span style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("i18n.noSummary")}</span>
+             <span style={{ color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("i18n.noSummary")}</span>
           )}
           <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
         </div>
@@ -1793,14 +1794,14 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
             borderBottom: "1px solid var(--border)",
             background: "var(--bg-panel)",
             color: "var(--text-muted)",
-            fontSize: 12,
+            fontSize: TEXT.sm,
           }}
         >
-          <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 650 }}>
+          <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", fontSize: TEXT.xs, fontWeight: 650 }}>
             {title}
           </span>
-           {isHiddenDisplay && <span style={{ color: "var(--text-dim)", fontSize: 11 }}>{t("i18n.hiddenExtensionMessage")}</span>}
-          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: 10 }}>{time}</span>}
+           {isHiddenDisplay && <span style={{ color: "var(--text-dim)", fontSize: TEXT.xs }}>{t("i18n.hiddenExtensionMessage")}</span>}
+          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: TEXT["2xs"] }}>{time}</span>}
         </div>
 
         {contentExpanded ? (
@@ -1823,7 +1824,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                 })}
               </div>
             )}
-             {text ? <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{text}</MarkdownBody> : <span style={{ color: "var(--text-dim)", fontSize: 12 }}>{t("i18n.noMessage")}</span>}
+             {text ? <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{text}</MarkdownBody> : <span style={{ color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("i18n.noMessage")}</span>}
           </div>
         ) : (
           <button
@@ -1836,7 +1837,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
               background: "transparent",
               color: "var(--text-dim)",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: TEXT.sm,
               textAlign: "left",
             }}
           >
@@ -1863,7 +1864,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                 background: "none",
                 color: copied ? "var(--accent)" : "var(--text-dim)",
                 cursor: "pointer",
-                fontSize: 11,
+                fontSize: TEXT.xs,
               }}
             >
                {copied ? t("i18n.copied") : t("i18n.copy")}
@@ -1882,7 +1883,7 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
                 background: "none",
                 color: "var(--text-dim)",
                 cursor: "pointer",
-                fontSize: 11,
+                fontSize: TEXT.xs,
               }}
             >
               {isHiddenDisplay
@@ -2053,23 +2054,23 @@ function BashExecutionView({ message, sessionId }: { message: BashExecutionMessa
     <div style={{ margin: "6px 0" }}>
       <ToolCallBlock block={block} result={result} />
       {message.truncated && fullOutputUrl && (
-        <div style={{ padding: "4px 10px", fontSize: 11, marginTop: -1 }}>
+        <div style={{ padding: "4px 10px", fontSize: TEXT.xs, marginTop: -1 }}>
           {showFullButton && (
             <button
               onClick={loadFullOutput}
               disabled={loadingFull}
-              style={{ background: "none", border: "none", color: "var(--accent)", cursor: loadingFull ? "default" : "pointer", fontSize: 11, padding: 0, textDecoration: "underline" }}
+              style={{ background: "none", border: "none", color: "var(--accent)", cursor: loadingFull ? "default" : "pointer", fontSize: TEXT.xs, padding: 0, textDecoration: "underline" }}
             >
               {loadingFull ? "loading…" : "view full output"}
             </button>
           )}
           <a
             href={`${fullOutputUrl}&download=1`}
-            style={{ marginLeft: showFullButton ? 10 : 0, color: "var(--accent)", fontSize: 11, textDecoration: "underline" }}
+            style={{ marginLeft: showFullButton ? 10 : 0, color: "var(--accent)", fontSize: TEXT.xs, textDecoration: "underline" }}
           >
             download full output
           </a>
-          {fullError && <span style={{ marginLeft: 6, color: "var(--text-dim)", fontSize: 11 }}>({fullError})</span>}
+          {fullError && <span style={{ marginLeft: 6, color: "var(--text-dim)", fontSize: TEXT.xs }}>({fullError})</span>}
         </div>
       )}
     </div>

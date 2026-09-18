@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { isProviderUsageId } from "@/lib/provider-usage-ids";
+import { TEXT } from "@/lib/typography";
 
 type UsageBucket = {
   id: string;
@@ -89,7 +90,7 @@ function ProviderUsageContent({ providerId, enabled }: { providerId: string; ena
   return (
     <section style={{ paddingTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <span style={{ fontSize: 13, color: "var(--text)", fontWeight: 600, lineHeight: 1.35 }}>{t("providerUsage.usage")}</span>
+        <span style={{ fontSize: TEXT.md, color: "var(--text)", fontWeight: 600, lineHeight: 1.35 }}>{t("providerUsage.usage")}</span>
         <button
           type="button"
           onClick={query}
@@ -109,13 +110,13 @@ function ProviderUsageContent({ providerId, enabled }: { providerId: string; ena
             </svg>
           )}
         </button>
-        {report && <span style={{ fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>{t("providerUsage.updated", { time: formatUpdated(report.capturedAt) })}</span>}
+        {report && <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", whiteSpace: "nowrap" }}>{t("providerUsage.updated", { time: formatUpdated(report.capturedAt) })}</span>}
       </div>
 
-      {!report && !error && <span style={{ fontSize: 12, color: "var(--text-dim)" }}>{t("providerUsage.notQueried")}</span>}
-      {error && <span style={{ fontSize: 12, color: "#f87171" }}>{error}</span>}
+      {!report && !error && <span style={{ fontSize: TEXT.sm, color: "var(--text-dim)" }}>{t("providerUsage.notQueried")}</span>}
+      {error && <span style={{ fontSize: TEXT.sm, color: "#f87171" }}>{error}</span>}
       {report && (
-        <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", columnGap: 14, rowGap: 8, alignItems: "baseline", minWidth: 0, width: "min(100%, 420px)", maxWidth: "100%", fontSize: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "180px minmax(0, 1fr)", columnGap: 14, rowGap: 8, alignItems: "baseline", minWidth: 0, width: "min(100%, 420px)", maxWidth: "100%", fontSize: TEXT.sm }}>
           {report.buckets.map((bucket) => (
             <div key={bucket.id} style={{ display: "contents" }}>
               <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{bucket.groupLabel ? `${bucket.groupLabel} / ${bucket.label}` : bucket.label}</span>

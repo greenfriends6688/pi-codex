@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { TEXT } from "@/lib/typography";
 
 /**
  * Workspace picker for the 新建任务 row (fork feature:
@@ -104,7 +105,7 @@ export function NewTaskPicker({
           }}
         >
           {projects.length > 0 && (
-            <div style={{ padding: "4px 12px 2px", fontSize: 11, color: "var(--text-dim)", fontWeight: 500 }}>
+            <div style={{ padding: "4px 12px 2px", fontSize: TEXT.xs, color: "var(--text-dim)", fontWeight: 500 }}>
               {t("sidebar.newTaskChooseProject")}
             </div>
           )}

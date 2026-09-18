@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { TEXT } from "@/lib/typography";
 
 /**
  * 聊天 分区标题行（fork feature: `docs/patches/0001-chat-workspace.md`）。
@@ -94,7 +95,7 @@ export function ChatWorkspaceRow({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            fontSize: 12.5,
+            fontSize: TEXT.sm,
             fontWeight: 500,
             color: selected || hovered ? "var(--text)" : "var(--text-dim)",
             transition: "color 0.12s",
@@ -103,7 +104,7 @@ export function ChatWorkspaceRow({
           {label}
         </span>
         {activity && (activity.running > 0 || activity.unread > 0) && (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0, color: "var(--accent)", fontSize: 10, fontFamily: "var(--font-mono)" }}>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexShrink: 0, color: "var(--accent)", fontSize: TEXT["2xs"], fontFamily: "var(--font-mono)" }}>
             {activity.running > 0 && <span title={t("sidebar.agentRunning")}>{activity.running}</span>}
             {activity.unread > 0 && <span title={t("sidebar.newSessionActivity")}>{activity.unread}</span>}
           </span>

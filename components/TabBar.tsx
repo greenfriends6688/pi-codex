@@ -5,6 +5,7 @@ import { getFileIcon } from "./FileIcons";
 import { useI18n } from "@/hooks/useI18n";
 import type { FileViewerDisplayMode, FileViewerState } from "@/lib/file-viewer-state";
 import { splitVisibleTabs } from "@/lib/tab-overflow";
+import { TEXT } from "@/lib/typography";
 
 export interface Tab {
   id: string;
@@ -167,7 +168,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               borderRadius: "var(--radius-md)",
               background: isActive ? "var(--bg-selected)" : "transparent",
               cursor: "pointer",
-              fontSize: 12,
+              fontSize: TEXT.sm,
               color: isActive ? "var(--text)" : "var(--text-muted)",
               whiteSpace: "nowrap",
               maxWidth: 180,
@@ -250,7 +251,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             height: 28, width: TAB_OVERFLOW_BUTTON_WIDTH, flexShrink: 0,
             background: overflowOpen ? "var(--bg-selected)" : "transparent",
             border: "none", borderRadius: "var(--radius-md)",
-            color: "var(--text-muted)", cursor: "pointer", fontSize: 11,
+            color: "var(--text-muted)", cursor: "pointer", fontSize: TEXT.xs,
           }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -292,7 +293,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
                   display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, height: 30,
                   padding: "0 8px", background: "none", border: "none",
                   borderRadius: "var(--radius-md)", color: "var(--text)",
-                  cursor: "pointer", fontSize: 12, textAlign: "left",
+                  cursor: "pointer", fontSize: TEXT.sm, textAlign: "left",
                 }}
                 onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
                 onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}

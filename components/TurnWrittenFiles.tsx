@@ -4,6 +4,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { getFileName } from "@/lib/file-paths";
 import type { WrittenFile } from "@/lib/turn-written-files";
 import { getFileIcon } from "./FileIcons";
+import { TEXT } from "@/lib/typography";
 
 /**
  * Lists the files a turn actually wrote, as buttons that open each one in the
@@ -33,7 +34,7 @@ export function TurnWrittenFiles({ files, onOpenFile }: {
               alignItems: "center",
               gap: 4,
               padding: "2px 8px",
-              fontSize: 12,
+              fontSize: TEXT.sm,
               fontFamily: "var(--font-mono)",
               color: "var(--text)",
               background: "var(--bg-subtle)",

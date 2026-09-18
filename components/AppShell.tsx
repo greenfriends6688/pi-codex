@@ -108,6 +108,7 @@ import type { FileViewerState } from "@/lib/file-viewer-state";
 import type { ToolEntry } from "@/lib/tool-presets";
 import { getSessionFamily } from "@/lib/session-family";
 import { getLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
+import { TEXT } from "@/lib/typography";
 
 type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 type AutoNameStatus =
@@ -1598,7 +1599,7 @@ export function AppShell() {
                 flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
                 height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: "none", border: "none",
                 borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
-                fontSize: 12, opacity: disabled ? 0.35 : 1,
+                fontSize: TEXT.sm, opacity: disabled ? 0.35 : 1,
                 transition: "background 0.12s, color 0.12s",
               }}
               onMouseEnter={(event) => { if (!disabled) { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; } }}
@@ -1617,7 +1618,7 @@ export function AppShell() {
             flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
             height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: "none", border: "none",
             borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: "pointer",
-            fontSize: 12, transition: "background 0.12s, color 0.12s",
+            fontSize: TEXT.sm, transition: "background 0.12s, color 0.12s",
           }}
           onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
           onMouseLeave={(event) => { event.currentTarget.style.background = "none"; event.currentTarget.style.color = "var(--text-muted)"; }}
@@ -1658,7 +1659,7 @@ export function AppShell() {
           color: "var(--warning)",
           cursor: "pointer",
           flexShrink: 0,
-          fontSize: 11,
+          fontSize: TEXT.xs,
           lineHeight: 1.35,
           textAlign: "left",
         }}
@@ -1714,7 +1715,7 @@ export function AppShell() {
             cursor: selectedSession ? "pointer" : "not-allowed",
             opacity: selectedSession ? 1 : 0.45,
             flexShrink: 0,
-            fontSize: 11,
+            fontSize: TEXT.xs,
             whiteSpace: "nowrap",
             transition: "color 0.1s, background 0.1s, opacity 0.1s",
           }}
@@ -1793,7 +1794,7 @@ export function AppShell() {
                 color: isError ? "var(--danger)" : isSuccess ? "var(--accent)" : disabled ? "var(--text-dim)" : "var(--text-muted)",
                 cursor: disabled ? "not-allowed" : "pointer",
                 opacity: disabled && autoNameStatus.kind !== "naming" ? 0.45 : 1,
-                flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
+                flexShrink: 0, fontSize: TEXT.xs, whiteSpace: "nowrap",
                 transition: "color 0.1s, background 0.1s, opacity 0.1s",
               }}
               onMouseEnter={(event) => {
@@ -1843,7 +1844,7 @@ export function AppShell() {
               border: "none",
 
               color: activeTopPanel === "agents" ? "var(--text)" : "var(--text-muted)",
-              cursor: "pointer", flexShrink: 0, fontSize: 11, whiteSpace: "nowrap",
+              cursor: "pointer", flexShrink: 0, fontSize: TEXT.xs, whiteSpace: "nowrap",
               transition: "color 0.1s, background 0.1s",
             }}
             data-mobile-toolbar-action={mobile ? "agents" : undefined}
@@ -1857,8 +1858,8 @@ export function AppShell() {
               style={{
                 minWidth: 15, height: 15, padding: "0 4px", display: "grid", placeItems: "center",
                 borderRadius: "var(--radius-sm)", background: "var(--bg-selected)", color: "var(--accent)",
-                fontSize: 10, lineHeight: 1, fontVariantNumeric: "tabular-nums",
-                ...(mobile ? { position: "absolute", top: 2, right: 2, minWidth: 13, height: 13, padding: "0 3px", fontSize: 9 } : {}),
+                fontSize: TEXT["2xs"], lineHeight: 1, fontVariantNumeric: "tabular-nums",
+                ...(mobile ? { position: "absolute", top: 2, right: 2, minWidth: 13, height: 13, padding: "0 3px", fontSize: TEXT["2xs"] } : {}),
               }}
             >
               {activeSessionFamily!.subagents.length}
@@ -1923,7 +1924,7 @@ export function AppShell() {
             cursor: mobile && !showChat ? "not-allowed" : "pointer",
             color: activeTopPanel === "system" ? "var(--text)" : "var(--text-muted)",
             opacity: mobile && !showChat ? 0.45 : 1,
-            fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
+            fontSize: TEXT.xs, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
           }}
           onMouseEnter={(event) => {
             if (mobile && !showChat) return;
@@ -1959,7 +1960,7 @@ export function AppShell() {
             cursor: mobile && !showChat ? "not-allowed" : "pointer",
             color: activeTopPanel === "tools" ? "var(--text)" : "var(--text-muted)",
             opacity: mobile && !showChat ? 0.45 : 1,
-            fontSize: 11, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
+            fontSize: TEXT.xs, whiteSpace: "nowrap", transition: "color 0.1s, background 0.1s",
           }}
           onMouseEnter={(event) => {
             if (mobile && !showChat) return;
@@ -1991,7 +1992,7 @@ export function AppShell() {
               background: activeTopPanel === "more" ? "var(--bg-selected)" : "none",
               border: "none",
               color: activeTopPanel === "more" ? "var(--text)" : "var(--text-muted)",
-              cursor: "pointer", fontSize: 11, whiteSpace: "nowrap",
+              cursor: "pointer", fontSize: TEXT.xs, whiteSpace: "nowrap",
               transition: "color 0.1s, background 0.1s",
             }}
             onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
@@ -2087,7 +2088,7 @@ export function AppShell() {
           pointerEvents: covered ? "none" : "auto",
           background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
           border: "none",
-          fontSize: 11, color: "var(--text-muted)",
+          fontSize: TEXT.xs, color: "var(--text-muted)",
           whiteSpace: "nowrap", cursor: showChat ? "pointer" : "default",
           fontVariantNumeric: "tabular-nums",
           transition: "color 0.1s, background 0.1s",
@@ -2619,7 +2620,7 @@ export function AppShell() {
                   background: activeTopPanel === "sessions" ? "var(--bg-selected)" : "none",
                   border: "none",
                   borderRadius: "var(--radius-sm)",
-                  fontSize: 13,
+                  fontSize: TEXT.md,
                   fontWeight: 500,
                   letterSpacing: 0,
                   color: "var(--text)",
@@ -2795,7 +2796,7 @@ export function AppShell() {
                             padding: "0 10px", background: isCurrent ? "var(--bg-selected)" : "none",
                             border: "none", borderRadius: "var(--radius-md)",
                             color: isCurrent ? "var(--text)" : "var(--text-muted)",
-                            cursor: "pointer", fontSize: 12.5, textAlign: "left",
+                            cursor: "pointer", fontSize: TEXT.sm, textAlign: "left",
                           }}
                           onMouseEnter={(event) => { if (!isCurrent) event.currentTarget.style.background = "var(--bg-hover)"; }}
                           onMouseLeave={(event) => { if (!isCurrent) event.currentTarget.style.background = "none"; }}
@@ -2819,7 +2820,7 @@ export function AppShell() {
                       display: "flex", alignItems: "center", width: "100%", height: 30,
                       padding: "0 10px", background: "none", border: "none",
                       borderRadius: "var(--radius-md)", color: "var(--text)",
-                      cursor: "pointer", fontSize: 12.5, textAlign: "left",
+                      cursor: "pointer", fontSize: TEXT.sm, textAlign: "left",
                     }}
                     onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
                     onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
@@ -2853,7 +2854,7 @@ export function AppShell() {
                         display: "flex", alignItems: "center", width: "100%", height: 30,
                         padding: "0 10px", background: "none", border: "none",
                         borderRadius: "var(--radius-md)", color: "var(--text)",
-                        cursor: "pointer", fontSize: 13, textAlign: "left",
+                        cursor: "pointer", fontSize: TEXT.md, textAlign: "left",
                       }}
                       onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
                       onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
@@ -2870,7 +2871,7 @@ export function AppShell() {
                         display: "flex", alignItems: "center", width: "100%", height: 30,
                         padding: "0 10px", background: "none", border: "none",
                         borderRadius: "var(--radius-md)", color: "var(--text)",
-                        cursor: "pointer", fontSize: 13, textAlign: "left",
+                        cursor: "pointer", fontSize: TEXT.md, textAlign: "left",
                         transition: "background 0.12s",
                       }}
                       onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
@@ -2943,7 +2944,7 @@ export function AppShell() {
                       compact = false,
                     ) => (
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
+                          <div style={{ fontSize: TEXT.xs, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
                           <div style={{
                             display: "grid",
                             gridTemplateColumns: compact ? "max-content max-content" : "auto minmax(0, 1fr)",
@@ -3022,7 +3023,7 @@ export function AppShell() {
                     };
                     const sessionInfoSection = (
                       <div style={{ minWidth: 0 }}>
-                         <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{translate("session.infoSection")}</div>
+                         <div style={{ fontSize: TEXT.xs, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{translate("session.infoSection")}</div>
                         <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
                           {sessionRows.map((row) => (
                             <div key={`session-info:${row.label}`} style={{ display: "contents" }}>
@@ -3042,7 +3043,7 @@ export function AppShell() {
                     );
                     const projectInfoSection = projectRows.length > 0 ? (
                       <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{translate("session.projectSection")}</div>
+                        <div style={{ fontSize: TEXT.xs, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{translate("session.projectSection")}</div>
                         <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
                           {projectRows.map((row) => (
                             <div key={`project-info:${row.label}`} style={{ display: "contents" }}>
@@ -3068,7 +3069,7 @@ export function AppShell() {
                           ? "1fr"
                           : "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
                         gap: isMobile ? 16 : 24,
-                        fontSize: 12,
+                        fontSize: TEXT.sm,
                         lineHeight: 1.5,
                         fontFamily: "var(--font-mono)",
                       }}>
@@ -3081,7 +3082,7 @@ export function AppShell() {
                       </div>
                     );
                   })() : (
-                    <div style={{ fontSize: 12, color: "var(--text-muted)", fontStyle: "italic" }}>
+                    <div style={{ fontSize: TEXT.sm, color: "var(--text-muted)", fontStyle: "italic" }}>
                        {translate("session.load")}
                     </div>
                   )}
@@ -3141,8 +3142,8 @@ export function AppShell() {
               role="status"
               style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
             >
-               <div style={{ fontSize: 14, color: "var(--text)" }}>{translate("workspace.opening")}</div>
-              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+               <div style={{ fontSize: TEXT.lg, color: "var(--text)" }}>{translate("workspace.opening")}</div>
+              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: TEXT.sm }}>
                 {initialNavigation.requestedCwd}
               </div>
             </div>
@@ -3151,15 +3152,15 @@ export function AppShell() {
               role="alert"
               style={{ height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: 24, color: "var(--text-muted)", textAlign: "center" }}
             >
-               <div style={{ fontSize: 14, color: "var(--danger)" }}>{translate("workspace.unable")}</div>
-              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: 12 }}>
+               <div style={{ fontSize: TEXT.lg, color: "var(--danger)" }}>{translate("workspace.unable")}</div>
+              <div style={{ maxWidth: "min(720px, 100%)", overflowWrap: "anywhere", fontFamily: "var(--font-mono)", fontSize: TEXT.sm }}>
                 {initialNavigation.requestedCwd}
               </div>
-              <div style={{ maxWidth: 720, fontSize: 12 }}>{initialCwdError}</div>
+              <div style={{ maxWidth: 720, fontSize: TEXT.sm }}>{initialCwdError}</div>
             </div>
           ) : showPlaceholder ? (
             activeCwd ? (
-              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 15 }}>
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: TEXT.xl }}>
                  {translate("workspace.selectSession")}
               </div>
             ) : (
@@ -3168,8 +3169,8 @@ export function AppShell() {
                   <line x1="20" y1="12" x2="4" y2="12" /><polyline points="10 6 4 12 10 18" />
                 </svg>
                 <div>
-                   <div style={{ fontSize: 18, fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>{translate("workspace.getStarted")}</div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)", lineHeight: 1.8 }}>
+                   <div style={{ fontSize: TEXT["2xl"], fontWeight: 600, color: "var(--text)", marginBottom: 8 }}>{translate("workspace.getStarted")}</div>
+                  <div style={{ fontSize: TEXT.sm, color: "var(--text-muted)", lineHeight: 1.8 }}>
                      <span style={{ color: "var(--text-dim)", marginRight: 6 }}>1.</span>{translate("workspace.selectProject")}<br />
                      <span style={{ color: "var(--text-dim)", marginRight: 6 }}>2.</span>{translate("workspace.addModels")}
                   </div>
@@ -3296,7 +3297,7 @@ export function AppShell() {
             activeCwd ? (
               explorerPanel
             ) : (
-              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: 12 }}>
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontSize: TEXT.sm }}>
                  {translate("files.noneOpen")}
               </div>
             )

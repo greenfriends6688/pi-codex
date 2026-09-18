@@ -32,6 +32,7 @@ import {
   ConfigStatusDot,
   ConfigSwitch,
 } from "./SettingsUi";
+import { TEXT } from "@/lib/typography";
 
 type PluginScope = PluginPackageInfo["scope"];
 type PluginAction = "install" | "remove" | "update" | "disable" | "enable";
@@ -113,7 +114,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
 
   if (groups.length === 0) {
     return (
-      <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
+      <div style={{ fontSize: TEXT.sm, color: "var(--text-dim)" }}>
         {pkg.disabled ? t("i18n.packageDisabled") : t("i18n.noResolvedResources")}
       </div>
     );
@@ -137,7 +138,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
         >
           <div
             style={{
-              fontSize: 10,
+              fontSize: TEXT["2xs"],
               fontWeight: 700,
               color: "var(--text-dim)",
               textTransform: "uppercase",
@@ -151,7 +152,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
               <div key={`${resource.kind}:${resource.path}`} style={{ minWidth: 0 }}>
                 <div
                   style={{
-                    fontSize: 12,
+                    fontSize: TEXT.sm,
                     color: "var(--text)",
                     fontFamily: "var(--font-mono)",
                     overflow: "hidden",
@@ -164,7 +165,7 @@ function ResourceList({ pkg }: { pkg: PluginPackageInfo }) {
                 </div>
                 <div
                   style={{
-                    fontSize: 10,
+                    fontSize: TEXT["2xs"],
                     color: "var(--text-dim)",
                     fontFamily: "var(--font-mono)",
                     overflow: "hidden",
@@ -189,7 +190,7 @@ function ScopeTag({ scope }: { scope: PluginScope }) {
   return (
     <span
       style={{
-        fontSize: 10,
+        fontSize: TEXT["2xs"],
         padding: "1px 5px",
         borderRadius: 3,
         flexShrink: 0,
@@ -241,7 +242,7 @@ function SegmentedScope({
               color: active ? "var(--text)" : "var(--text-muted)",
               cursor: disabled ? "not-allowed" : "pointer",
               opacity: disabled ? 0.45 : 1,
-              fontSize: 12,
+              fontSize: TEXT.sm,
             }}
           >
             {scope}
@@ -295,7 +296,7 @@ function AddPluginPanel({
               alignItems: "center",
               gap: 5,
               color: "var(--accent)",
-              fontSize: 12,
+              fontSize: TEXT.sm,
               textDecoration: "none",
               whiteSpace: "nowrap",
             }}
@@ -311,7 +312,7 @@ function AddPluginPanel({
             pi.dev/packages
           </a>
         </div>
-        <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+        <div style={{ fontSize: TEXT.sm, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
           {installLocation(scope, cwd)}
         </div>
       </div>
@@ -340,7 +341,7 @@ function AddPluginPanel({
             background: "var(--bg-panel)",
             color: "var(--text)",
             fontFamily: "var(--font-mono)",
-            fontSize: 12,
+            fontSize: TEXT.sm,
             outline: "none",
           }}
           onKeyDown={(e) => {
@@ -366,7 +367,7 @@ function AddPluginPanel({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-muted)" }}>
+        <div style={{ fontSize: TEXT.sm, fontWeight: 600, color: "var(--text-muted)" }}>
           Examples
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -386,7 +387,7 @@ function AddPluginPanel({
                 color: "var(--text-dim)",
                 cursor: "pointer",
                 fontFamily: "var(--font-mono)",
-                fontSize: 11,
+                fontSize: TEXT.xs,
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = "var(--bg-hover)";
@@ -404,7 +405,7 @@ function AddPluginPanel({
       </div>
 
       {actionError && (
-        <div style={{ fontSize: 12, color: "var(--danger)", whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: TEXT.sm, color: "var(--danger)", whiteSpace: "pre-wrap" }}>
           {actionError}
         </div>
       )}
@@ -455,7 +456,7 @@ function PackageDetail({
           {pkg.disabled ? (
             <span
               style={{
-                fontSize: 10,
+                fontSize: TEXT["2xs"],
                 padding: "1px 5px",
                 borderRadius: 3,
                 background: "rgba(120,120,120,0.12)",
@@ -467,7 +468,7 @@ function PackageDetail({
           ) : pkg.filtered && (
             <span
               style={{
-                fontSize: 10,
+                fontSize: TEXT["2xs"],
                 padding: "1px 5px",
                 borderRadius: 3,
                 background: "rgba(245,158,11,0.12)",
@@ -480,7 +481,7 @@ function PackageDetail({
           <span
             style={{
               fontFamily: "var(--font-mono)",
-              fontSize: 12,
+              fontSize: TEXT.sm,
               color: "var(--text)",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -539,7 +540,7 @@ function PackageDetail({
           display: "grid",
           gridTemplateColumns: "minmax(96px, 130px) minmax(0, 1fr)",
           gap: "9px 14px",
-          fontSize: 12,
+          fontSize: TEXT.sm,
           lineHeight: 1.45,
         }}
       >
@@ -575,7 +576,7 @@ function PackageDetail({
             )}
           </div>
           {updateError && (
-            <span style={{ fontSize: 12, color: "var(--danger)" }}>{updateError}</span>
+            <span style={{ fontSize: TEXT.sm, color: "var(--danger)" }}>{updateError}</span>
           )}
         </div>
         <div style={{ color: "var(--text-dim)" }}>{t("i18n.package")}</div>
@@ -606,12 +607,12 @@ function PackageDetail({
       </div>
 
       {actionMessage && (
-        <div style={{ fontSize: 12, color: "var(--success)" }}>
+        <div style={{ fontSize: TEXT.sm, color: "var(--success)" }}>
           {actionMessage}
         </div>
       )}
       {actionError && (
-        <div style={{ fontSize: 12, color: "var(--danger)", whiteSpace: "pre-wrap" }}>
+        <div style={{ fontSize: TEXT.sm, color: "var(--danger)", whiteSpace: "pre-wrap" }}>
           {actionError}
         </div>
       )}
@@ -636,7 +637,7 @@ function StandaloneExtensionDetail({ extension }: { extension: PluginStandaloneE
           display: "grid",
           gridTemplateColumns: "minmax(96px, 130px) minmax(0, 1fr)",
           gap: "9px 14px",
-          fontSize: 12,
+          fontSize: TEXT.sm,
           lineHeight: 1.45,
         }}
       >
@@ -694,7 +695,7 @@ function McpServerDetail({
           {server.disabled && (
             <span
               style={{
-                fontSize: 10,
+                fontSize: TEXT["2xs"],
                 padding: "1px 5px",
                 borderRadius: 3,
                 background: "rgba(120,120,120,0.12)",
@@ -707,7 +708,7 @@ function McpServerDetail({
           <span
             style={{
               fontFamily: "var(--font-mono)",
-              fontSize: 12,
+              fontSize: TEXT.sm,
               color: "var(--text)",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -745,7 +746,7 @@ function McpServerDetail({
           display: "grid",
           gridTemplateColumns: "minmax(96px, 130px) minmax(0, 1fr)",
           gap: "9px 14px",
-          fontSize: 12,
+          fontSize: TEXT.sm,
           lineHeight: 1.45,
         }}
       >
@@ -780,10 +781,10 @@ function McpServerDetail({
       </div>
 
       {actionMessage && (
-        <div style={{ fontSize: 12, color: "var(--success)" }}>{actionMessage}</div>
+        <div style={{ fontSize: TEXT.sm, color: "var(--success)" }}>{actionMessage}</div>
       )}
       {actionError && (
-        <div style={{ fontSize: 12, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{actionError}</div>
+        <div style={{ fontSize: TEXT.sm, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{actionError}</div>
       )}
     </ConfigDetailStack>
   );
@@ -835,7 +836,7 @@ function AddMcpServer({
     background: "var(--bg-panel)",
     color: "var(--text)",
     fontFamily: "var(--font-mono)",
-    fontSize: 12,
+    fontSize: TEXT.sm,
     outline: "none",
   };
   const jsonEditorStyle: React.CSSProperties = {
@@ -847,7 +848,7 @@ function AddMcpServer({
     background: "var(--bg-panel)",
     color: "var(--text)",
     fontFamily: "var(--font-mono)",
-    fontSize: 12,
+    fontSize: TEXT.sm,
     lineHeight: 1.5,
     outline: "none",
     resize: "vertical",
@@ -935,7 +936,7 @@ function AddMcpServer({
         <ConfigDetailTitle>
           {isEdit ? t("mcp.editTitle", { name: initial?.name ?? "" }) : t("mcp.addTitle")}
         </ConfigDetailTitle>
-        <div style={{ fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+        <div style={{ fontSize: TEXT.sm, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
           {scope === "project" ? `${shortenPath(cwd)}/.pi/mcp.json` : "~/.pi/agent/mcp.json"}
         </div>
       </div>
@@ -965,7 +966,7 @@ function AddMcpServer({
       {mode === "json" ? (
         <ConfigField label={t("mcp.jsonLabel")}>
           {loadingJson ? (
-            <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{t("mcp.loadingDef")}</div>
+            <div style={{ fontSize: TEXT.sm, color: "var(--text-muted)" }}>{t("mcp.loadingDef")}</div>
           ) : (
             <textarea
               value={jsonText ?? ""}
@@ -998,7 +999,7 @@ function AddMcpServer({
       )}
 
       {jsonError && (
-        <div style={{ fontSize: 12, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{jsonError}</div>
+        <div style={{ fontSize: TEXT.sm, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{jsonError}</div>
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
@@ -1014,7 +1015,7 @@ function AddMcpServer({
       </div>
 
       {actionError && (
-        <div style={{ fontSize: 12, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{actionError}</div>
+        <div style={{ fontSize: TEXT.sm, color: "var(--danger)", whiteSpace: "pre-wrap" }}>{actionError}</div>
       )}
     </ConfigDetailStack>
   );
@@ -1619,15 +1620,15 @@ export function PluginsConfig({
                       {t("mcp.sectionTitle")}
                     </ConfigSidebarGroupLabel>
                     {mcpLoading ? (
-                      <div style={{ padding: "4px 8px", fontSize: 12, color: "var(--text-dim)" }}>
+                      <div style={{ padding: "4px 8px", fontSize: TEXT.sm, color: "var(--text-dim)" }}>
                         {t("i18n.loading")}
                       </div>
                     ) : !mcpData && mcpActionError ? (
-                      <div style={{ padding: "4px 8px", fontSize: 12, color: "var(--danger)" }}>
+                      <div style={{ padding: "4px 8px", fontSize: TEXT.sm, color: "var(--danger)" }}>
                         {mcpActionError}
                       </div>
                     ) : (mcpData?.servers.length ?? 0) === 0 ? (
-                      <div style={{ padding: "4px 8px", fontSize: 12, color: "var(--text-dim)" }}>
+                      <div style={{ padding: "4px 8px", fontSize: TEXT.sm, color: "var(--text-dim)" }}>
                         {t("mcp.emptyList")}
                       </div>
                     ) : (
@@ -1709,7 +1710,7 @@ export function PluginsConfig({
               {view === "mcp" && mcpImportOpen ? (
                 <div style={{ display: "grid", gap: 10, alignContent: "start", padding: "4px 2px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <strong style={{ fontSize: 13 }}>{t("mcp.importTitle")}</strong>
+                    <strong style={{ fontSize: TEXT.md }}>{t("mcp.importTitle")}</strong>
                     <ConfigButton variant="ghost" size="small" onClick={() => setMcpImportOpen(false)}>{t("mcp.cancel")}</ConfigButton>
                   </div>
                   <p className="settings-chat-range-hint" style={{ margin: 0 }}>{t("mcp.importHint")}</p>
@@ -1728,15 +1729,15 @@ export function PluginsConfig({
                         }}
                       >
                         <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
-                          <span style={{ fontSize: 13, color: "var(--text)" }}>
+                          <span style={{ fontSize: TEXT.md, color: "var(--text)" }}>
                             {server.name}
-                            <span style={{ marginLeft: 6, fontSize: 11, color: "var(--text-dim)" }}>
+                            <span style={{ marginLeft: 6, fontSize: TEXT.xs, color: "var(--text-dim)" }}>
                               {server.tool} · {server.scope === "project" ? t("mcp.scopeProject") : t("mcp.scopeGlobal")}
                               {server.disabled ? ` · ${t("mcp.itemDisabled")}` : ""}
                               {server.shadowed ? ` · ${t("mcp.importShadowed")}` : ""}
                             </span>
                           </span>
-                          <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={server.path}>
+                          <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={server.path}>
                             {server.def.command ? `${server.def.command} ${(server.def.args as string[] | undefined)?.join(" ") ?? ""}`.trim() : String(server.def.url ?? server.def.socket ?? "")}
                           </span>
                         </div>
@@ -1836,7 +1837,7 @@ export function PluginsConfig({
 
         <ConfigFooter status={
             availableUpdateCount > 0 ? (
-              <span style={{ fontSize: 12, color: "var(--accent)" }}>
+              <span style={{ fontSize: TEXT.sm, color: "var(--accent)" }}>
                 {availableUpdateCount}{" "}
                 {availableUpdateCount === 1 ? t("i18n.update") : t("i18n.updates")}
               </span>

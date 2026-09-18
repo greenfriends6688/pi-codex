@@ -43,6 +43,7 @@ import {
   type FileViewerDisplayMode as DisplayMode,
   type FileViewerState,
 } from "@/lib/file-viewer-state";
+import { TEXT } from "@/lib/typography";
 
 export type { FileViewerState } from "@/lib/file-viewer-state";
 
@@ -398,7 +399,7 @@ function DiffView({ patch }: { patch: string }) {
   const hasChanges = diff.some((l) => l.type !== "unchanged");
   if (!hasChanges) {
     return (
-      <div style={{ padding: "12px 16px", fontSize: 12, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+      <div style={{ padding: "12px 16px", fontSize: TEXT.sm, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
         {t("i18n.noChanges")}
       </div>
     );
@@ -452,7 +453,7 @@ function DiffView({ patch }: { patch: string }) {
                 padding: "2px 16px",
                 color: "var(--text-dim)",
                 background: "var(--bg-panel)",
-                fontSize: 11,
+                fontSize: TEXT.xs,
                 borderTop: "1px solid var(--border)",
                 borderBottom: "1px solid var(--border)",
               }}
@@ -628,7 +629,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           gap: 12,
           padding: "4px 16px",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: TEXT.xs,
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -714,7 +715,7 @@ function ImageViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
         }}
       >
         {error ? (
-          <div style={{ color: "var(--danger)", fontSize: 13 }}>{error}</div>
+          <div style={{ color: "var(--danger)", fontSize: TEXT.md }}>{error}</div>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -861,7 +862,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           gap: 12,
           padding: "4px 16px",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: TEXT.xs,
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -903,7 +904,7 @@ function AudioViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
       >
         <div style={{ width: "min(680px, 100%)" }}>
           {error && (
-            <div style={{ color: "var(--danger)", fontSize: 13, marginBottom: 12, textAlign: "center" }}>
+            <div style={{ color: "var(--danger)", fontSize: TEXT.md, marginBottom: 12, textAlign: "center" }}>
               {error}
             </div>
           )}
@@ -1014,7 +1015,7 @@ function VideoViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
           gap: 12,
           padding: "4px 16px",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: TEXT.xs,
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -1057,7 +1058,7 @@ function VideoViewer({ filePath, cwd, sourceSessionId, watchEnabled = true }: Pr
       >
         <div style={{ width: "min(960px, 100%)", height: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 0 }}>
           {error && (
-            <div style={{ color: "var(--danger)", fontSize: 13, marginBottom: 12, textAlign: "center" }}>
+            <div style={{ color: "var(--danger)", fontSize: TEXT.md, marginBottom: 12, textAlign: "center" }}>
               {error}
             </div>
           )}
@@ -1196,13 +1197,13 @@ function FileSelectionQuotePopover({
       {inputOpen ? (
         <fieldset disabled={submitting} aria-busy={submitting} style={{ width: "100%", minWidth: 0, margin: 0, padding: 0, border: "none", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 600 }}>{t("chat.askInNewChat")}</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: TEXT.sm, fontWeight: 600 }}>{t("chat.askInNewChat")}</span>
             <button type="button" className="file-viewer-icon-button" title={t("i18n.close")} aria-label={t("i18n.close")} disabled={submitting} onClick={closeInput} style={{ border: "none" }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
             </button>
           </div>
           <ChatInput ref={chatInputRef} compact onSend={askInNewChat} onAbort={closeInput} isStreaming={false} />
-          {error && <div role="alert" style={{ color: "#dc2626", fontSize: 12, overflowWrap: "anywhere" }}>{error}</div>}
+          {error && <div role="alert" style={{ color: "#dc2626", fontSize: TEXT.sm, overflowWrap: "anywhere" }}>{error}</div>}
         </fieldset>
       ) : <>
         <button
@@ -1212,9 +1213,9 @@ function FileSelectionQuotePopover({
           aria-label={t("chat.askInCurrent")}
           onPointerDown={(event) => event.preventDefault()}
           onClick={onAskInCurrent}
-          style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
+          style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: TEXT.sm, fontWeight: 500 }}
         >
-          <span aria-hidden="true" style={{ fontSize: 15 }}>@</span>
+          <span aria-hidden="true" style={{ fontSize: TEXT.xl }}>@</span>
           <span>{t("chat.askInCurrent")}</span>
         </button>
         {onAskInNewChat && (
@@ -1225,7 +1226,7 @@ function FileSelectionQuotePopover({
             aria-label={t("chat.askInNewChat")}
             onPointerDown={(event) => event.preventDefault()}
             onClick={() => toggleInput(true)}
-            style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: 12, fontWeight: 500 }}
+            style={{ width: "auto", height: 35, flex: "0 0 auto", gap: 5, padding: "0 10px", border: "none", fontSize: TEXT.sm, fontWeight: 500 }}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M6 3v12M18 9a9 9 0 0 1-9 9" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
@@ -1479,7 +1480,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, onMentionLines, onAskI
           gap: 12,
           padding: "4px 16px",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: TEXT.xs,
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -1546,7 +1547,7 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, onMentionLines, onAskI
       </div>
       <div style={{ flex: 1, minHeight: 0, background: "var(--bg-panel)" }}>
         {error ? (
-          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, color: "var(--danger)", fontSize: 13, textAlign: "center" }}>
+          <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, color: "var(--danger)", fontSize: TEXT.md, textAlign: "center" }}>
             {error}
           </div>
         ) : (
@@ -2397,7 +2398,7 @@ function TextFileViewer({
 
   if ((loading && !data) || (requestedInitialDisplayMode === "diff" && gitDiffLoading && !data)) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 13 }}>
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: TEXT.md }}>
         {t("i18n.loading")}
       </div>
     );
@@ -2405,7 +2406,7 @@ function TextFileViewer({
 
   if (error && !isDeletedDiff) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--danger)", fontSize: 13 }}>
+      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--danger)", fontSize: TEXT.md }}>
         {error}
       </div>
     );
@@ -2436,7 +2437,7 @@ function TextFileViewer({
           gap: 8,
           padding: "5px 12px",
           borderBottom: "1px solid var(--border)",
-          fontSize: 11,
+          fontSize: TEXT.xs,
           color: "var(--text-dim)",
           background: "var(--bg)",
           flexShrink: 0,
@@ -2610,7 +2611,7 @@ function TextFileViewer({
             border: "1px solid var(--border)",
             borderRadius: 6,
             color: "var(--text-dim)",
-            fontSize: 11,
+            fontSize: TEXT.xs,
           }}
         >
           <span>{formatSize(data.nextOffset)} / {formatSize(data.size)}</span>
@@ -2708,7 +2709,7 @@ function TextFileViewer({
                   borderRadius: "var(--radius-md)",
                   background: "var(--warning-soft)",
                   color: "var(--warning)",
-                  fontSize: 12,
+                  fontSize: TEXT.sm,
                 }}
               >
                 <span>{t("files.editorUnavailable")}</span>

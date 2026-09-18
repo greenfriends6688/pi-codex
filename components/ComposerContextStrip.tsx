@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { SelectionContext, SessionReference } from "@/lib/composer-context";
 import { useI18n } from "@/hooks/useI18n";
+import { TEXT } from "@/lib/typography";
 
 interface Props {
   contexts: SelectionContext[];
@@ -120,7 +121,7 @@ export function ComposerContextStrip({
                 <path d="M14 3h7v7" />
                 <path d="m21 3-9 9" />
               </svg>
-              <span style={{ fontSize: 11.5, lineHeight: 1, fontWeight: 600 }}>
+              <span style={{ fontSize: TEXT.xs, lineHeight: 1, fontWeight: 600 }}>
                 {t("chat.quotedContextLabel", { count: index + 1 })}
               </span>
             </button>
@@ -147,7 +148,7 @@ export function ComposerContextStrip({
               color: "var(--text-muted)",
               boxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)",
               cursor: disabled ? "default" : "pointer",
-              fontSize: 14,
+              fontSize: TEXT.lg,
               lineHeight: 1,
               opacity: activeContextId === itemId ? 1 : 0,
               pointerEvents: activeContextId === itemId ? "auto" : "none",
@@ -219,7 +220,7 @@ export function ComposerContextStrip({
                   <path d="M14 3h7v7" />
                   <path d="m21 3-9 9" />
                 </svg>
-                <span style={{ fontSize: 11.5, lineHeight: 1, fontWeight: 600 }}>
+                <span style={{ fontSize: TEXT.xs, lineHeight: 1, fontWeight: 600 }}>
                   {t("chat.sessionReferenceLabel", { count: index + 1 })}
                 </span>
               </button>
@@ -246,7 +247,7 @@ export function ComposerContextStrip({
                 color: "var(--text-muted)",
                 boxShadow: "0 1px 3px rgba(0, 0, 0, 0.2)",
                 cursor: disabled ? "default" : "pointer",
-                fontSize: 14,
+                fontSize: TEXT.lg,
                 lineHeight: 1,
                 opacity: activeContextId === itemId ? 1 : 0,
                 pointerEvents: activeContextId === itemId ? "auto" : "none",
