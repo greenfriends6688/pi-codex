@@ -464,19 +464,30 @@ function FileChips({
             <span className="process-chip-name">{name}</span>
           </>
         );
+        // fork:fix-nested-button — 这里**不能**用真 `<button>`：`FileChips` 的两个调用点
+        // 都在按钮内部（步骤行 `process-step-row`、紧凑 chip 行），嵌套 button 是非法 HTML，
+        // React 会报 “<button> cannot be a descendant of <button>” 并引发 hydration 报错。
+        // 用 `span[role=button]` + 键盘处理保持原来的点击行为与可达性，同时不违反内容模型。
         return onOpenFile ? (
-          <button
+          <span
             key={target}
-            type="button"
+            role="button"
+            tabIndex={0}
             className="process-file-chip"
             title={target}
             onClick={(event) => {
               event.stopPropagation();
               onOpenFile(target);
             }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenFile(target);
+            }}
           >
             {inner}
-          </button>
+          </span>
         ) : (
           <span key={target} className="process-file-chip" title={target}>{inner}</span>
         );
