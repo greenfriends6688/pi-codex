@@ -144,6 +144,11 @@ interface Props {
   onOpenSessionReference?: (reference: SessionReference) => void;
   /** Session working directory — enables the @ file autocomplete menu */
   cwd?: string | null;
+  /** fork:zn-04 — the composer protrusion strip. Rendered by the caller but
+   *  placed here, immediately above the card, because that adjacency is what the
+   *  weld needs: any model banner between the two would break the joined shape
+   *  (banner → strip → card is the only order that holds). */
+  protrusion?: React.ReactNode;
 }
 
 export interface ChatInputHandle {
@@ -718,6 +723,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onLocateSelectionContext,
   onOpenSessionReference,
   cwd,
+  protrusion,
   compact = false,
 }: Props, ref) {
   const { t } = useI18n();
@@ -2261,8 +2267,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 32,
-        height: 32,
+        // fork:zn-05 — 28px send circle (Zeno send-prompt h-7).
+        width: "var(--zn-send)",
+        height: "var(--zn-send)",
         padding: 0,
         background: (value.trim() || attachedImages.length) ? "var(--primary-bg)" : "var(--bg-subtle)",
         border: "none",
@@ -2287,8 +2294,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        width: 32,
-        height: 32,
+        // fork:zn-05 — 28px stop circle, matches send.
+        width: "var(--zn-send)",
+        height: "var(--zn-send)",
         padding: 0,
         background: "var(--primary-bg)",
         border: "none",
@@ -2412,6 +2420,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }}
       />}
       <div style={{ maxWidth: "var(--composer-max-width, 892px)", margin: "0 auto" }}>
+        {/* fork:zn-04 — banners sit above the strip and the strip stays welded to
+            the card. Banners are transient alerts, the strip is chrome, so an
+            alert must never come between the strip and the card (it would break
+            the joined shape). The strip element itself is placed below, right
+            before the card. */}
         <ModelErrorBanner error={modelError} />
         <ModelScopeWarningBanner warnings={modelScopeWarnings} />
         {showImageUnsupportedWarning && (() => {
@@ -3056,6 +3069,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </button>
             </div>
           )}
+          {/* fork:zn-04 — the protrusion strip's slot: immediately before the
+              card, after every banner. */}
+          {protrusion}
           <div
             className="chat-input-shell"
             style={{

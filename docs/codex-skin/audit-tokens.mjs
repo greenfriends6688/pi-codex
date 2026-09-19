@@ -4,6 +4,8 @@
  *
  * 合并上游后必跑。用途：确认本地自造的 CSS 变量（--primary-bg / --radius-*
  * 等，上游没有这些）在 globals.css + settings.css 里仍有定义，避免主题块被
+ * 覆写后整块丢失；fork-ui.css 同样要算进来——它才是 UI-01 之后新 token 的家，
+ * 不算的话任何新自造 token 都会被误报成「未定义」。
  * 上游覆盖后大面积样式塌掉。
  *
  * 用法：node docs/codex-skin/audit-tokens.mjs
@@ -15,7 +17,7 @@ import { join, extname } from "node:path";
 
 const SCAN_DIRS = ["app", "components", "lib", "hooks"];
 const EXT = new Set([".ts", ".tsx", ".css", ".mjs"]);
-const CSS_FILES = ["app/globals.css", "app/settings.css", "app/wallpaper.css"];
+const CSS_FILES = ["app/globals.css", "app/settings.css", "app/wallpaper.css", "app/fork-ui.css"];
 
 // 由 JS 在运行时写进 inline style / next-font 的变量，不是缺失。
 const RUNTIME_SET = new Set([

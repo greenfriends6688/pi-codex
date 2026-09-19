@@ -1,181 +1,224 @@
-# 视觉规格（暖色 oklch + 玻璃层）
+# 视觉规格（Zeno 中性灰 + 平面材质）
 
-本文件是皮肤细节精修的**唯一依据**：所有色板、玻璃层、圆角、排版刻度、层级都必须先在
-这里定下，再落到 `app/globals.css` / `app/settings.css`。
+本文件是皮肤的精修**唯一依据**：所有色板、材质、圆角、排版刻度、层级都必须先在这里
+定下，再落到 `app/globals.css` / `app/settings.css` / `app/fork-ui.css`。
 
-约束：本次**只改 CSS 文件**（不改 `.tsx`）。因此凡是组件用内联样式写死的属性
-（圆角、阴影、动效时长、焦点环、尺寸），统一由 `globals.css` 末尾的
-`!important` 覆盖层收敛，见「覆盖层与代价」。
+> **fork:zn-11（2026-09-19）**：本节由「暖色 oklch + 玻璃层」改为 **Zeno 中性灰 +
+> 平面材质**。改动的理由、逐项对比与迁移清单见
+> 本地文档 `docs/zeno-comparison-2026-09-19.md`（规划/对比类文档按本仓惯例不入仓）；本文件只写
+> **现状**，因为它才是落代码时的依据。三处必须同步：本文件、`app/globals.css`、
+> `docs/codex-skin/verify-themes.mjs`。
 
-参考对象：`openchamber`（`packages/ui/src/styles/design-system.css`、`typography.css`）。
-借鉴的是它的**视觉语言纪律**，不是它的组件结构：
-暖色 oklch 中性面、玻璃浮层、语义化排版刻度、单一焦点环策略。
+约束：改动以 CSS 为主。组件里内联写死的值（圆角、尺寸、层级）由 `app/fork-ui.css`
+与 `globals.css` 末尾的覆盖层收敛；确需改 `.tsx` 时带 `// fork:zn-xx` 标记。
+
+参考对象：`参考项目/zeno-main`（`apps/desktop/src/renderer/styles.css`）。
 
 ---
 
 ## 1. 色板规则
 
-6 套主题（`light` / `dark` / `mist` / `rose` / `pine` / `auto`，`auto` 解析为明暗两套）共享同一套
-中性面规则，**只有强调色色相与中性色的极淡偏色不同**。
+6 套主题（`light` / `dark` / `mist` / `rose` / `pine` / `auto`，`auto` 解析为明暗两套）
+共享同一套**中性面阶梯**。
 
-| 规则 | 取值 |
-|---|---|
-| 浅色主题（`light`） | **无彩度（chroma 0）纯白面**：`--bg` 用 `oklch(1 0 0)`，侧栏面板 `oklch(0.98 0 0)`，交互层用中性灰 alpha。2026-09-16 根据用户反馈从「暖沙」改回中性——暖色底在浅色下会被读成脏页底 |
-| 深色中性面基准色相 | `60`（暖褐黑） |
-| 深色面 chroma | `0.008` 固定 |
-| 带色偏的浅色主题（`mist` / `rose`） | 保留极淡色偏（用户主动选择才生效，不是默认底） |
-| 交互层（hover/selected/border） | 用带暖色相的 `oklch(L C H / α)`，不用中性灰 |
-| 前景三级 | `--text` 满值 / `-muted` = 72% / `-dim` = 52%（同一色相与亮度） |
-| 实心主操作 | `--primary-bg` 取该主题的墨色（浅色=近黑暖，深色=近白暖），全主题单色，不用强调色 |
+核心变化（fork:zn-11）：
+
+| 项 | 旧（Codex 暖色） | 现（Zeno） |
+|---|---|---|
+| 深色中性面 | 暖褐黑 `oklch(0.22 0.008 60)` | 纯中性 `#191919` |
+| 前景 | 暖白 `oklch(0.94 0.01 85)` | 近纯白 `oklch(0.985 0.004 260)` |
+| 交互层（hover / 选中 / 边框） | 暖白 alpha（0.06 / 0.1 / 0.09） | **实色** `#383838` / `#3f3f3f` / `#3c3c3c` |
+| 次要文字 | 前景 alpha 0.72 / 0.56 | **实色灰** `#a9abb0` / `#83858a` |
+| 代码底 | 比画布更亮（原等于 `--tool-bg`） | **比画布更暗** `#0f0f0f` |
+| 浅色主题 | 纯白 + 近白侧栏 `oklch(0.98 0 0)` | 纯白 + 冷灰侧栏 `#f1f2f4` |
+
+为什么把 alpha 改成实色：alpha 叠加在「画布 / 侧栏 / 浮层」三种底上会各算出一个
+不同的灰，同一个「6% hover」在三处看起来是三种颜色；Zeno 一种意图一个灰值。
+
+### 深色阶梯（`html.dark, [data-theme="dark"]`）
+
+| 用途 | token | 值 |
+|---|---|---|
+| 画布 | `--bg` | `#191919` |
+| 侧栏 / 面板底 | `--bg-panel` | `#151515` |
+| 浮层 / 卡片 | `--bg-elev` | `#2d2d2d` |
+| hover | `--bg-hover` | `#383838` |
+| 选中 | `--bg-selected` | `#3f3f3f` |
+| 极淡底 | `--bg-subtle` | `#242424` |
+| 用户气泡 | `--user-bg` | `#272727` |
+| 输入卡 | `--bg-composer` | `#2b2b2b` |
+| 输入卡上方条 | `--composer-protrusion` | `#1f1f1f` |
+| 工具面 | `--tool-bg` | `#242424` |
+| 代码底 | `--code-bg` | `#0f0f0f` |
+| 边框 | `--border` / `--border-strong` | `#3c3c3c` / `#4a4a4a` |
+| 正文 / 次要 / 淡 | `--text` / `-muted` / `-dim` | `oklch(0.985 0.004 260)` / `#a9abb0` / `#83858a` |
+| 主操作 | `--primary-bg` / `--primary-fg` | `oklch(0.985 0.004 260)` / `#191919` |
+
+### 浅色阶梯（`:root, [data-theme="light"]`）
+
+| 用途 | token | 值 |
+|---|---|---|
+| 画布 / 浮层 | `--bg` / `--bg-elev` | `#ffffff` |
+| 侧栏 / 面板底 | `--bg-panel` | `#f1f2f4` |
+| hover / 选中 | `--bg-hover` / `--bg-selected` | `#f6f6f6` / `#eceef1` |
+| 用户气泡 | `--user-bg` | `#f5f5f5` |
+| 输入卡 | `--bg-composer` | `#ffffff` |
+| 代码底 | `--code-bg` | `#f1f2f4` |
+| 边框 | `--border` / `--border-strong` | `#d7d9e0` / `#b8bac2` |
+| 正文 / 次要 / 淡 | `--text` / `-muted` / `-dim` | `#171717` / `#5f6167` / `#7b7d84` |
+| 主操作 | `--primary-bg` / `--primary-fg` | `#171717` / `#fafafa` |
 
 ### 各主题关键值（`verify-themes.mjs` 断言这 4 个值）
 
+比较走**实际像素**（canvas 取色），所以 hex / oklch 两种写法都能通过。
+
 | theme | 色系 | `--bg` | `--text` | `--accent` | `--primary-bg` |
 |---|---|---|---|---|---|
-| light | 纯白 + 蓝 | `oklch(1 0 0)` | `oklch(0.26 0 0)` | `oklch(0.66 0.16 250)` | `oklch(0.26 0 0)` |
-| dark | 暖褐黑 + 淡蓝 | `oklch(0.22 0.008 60)` | `oklch(0.94 0.01 85)` | `oklch(0.84 0.08 245)` | `oklch(0.94 0.01 85)` |
+| light | 纯白 + 蓝 | `#ffffff` | `#171717` | `oklch(0.61 0.16 250)` | `#171717` |
+| dark | 中性石墨 + 淡蓝 | `#191919` | `oklch(0.985 0.004 260)` | `oklch(0.78 0.12 253)` | `oklch(0.985 0.004 260)` |
 | mist | 暖白 + 青绿 | `oklch(0.985 0.005 165)` | `oklch(0.27 0.02 165)` | `oklch(0.46 0.07 178)` | `oklch(0.27 0.02 165)` |
-| rose | 暖白 + 玫瑰 | `oklch(0.987 0.005 20)` | `oklch(0.28 0.015 12)` | `oklch(0.47 0.10 5)` | `oklch(0.28 0.015 12)` |
-| pine | 暖褐黑 + 淡绿 | `oklch(0.22 0.008 155)` | `oklch(0.94 0.012 155)` | `oklch(0.82 0.05 155)` | `oklch(0.94 0.012 155)` |
+| rose | 暖白 + 玫瑰 | `oklch(0.987 0.005 20)` | `oklch(0.28 0.015 12)` | `oklch(0.47 0.1 5)` | `oklch(0.28 0.015 12)` |
+| pine | 深绿灰 + 淡绿 | `oklch(0.22 0.008 155)` | `oklch(0.95 0.012 155)` | `oklch(0.82 0.05 155)` | `oklch(0.94 0.012 155)` |
 
 > 每套色板仍必须写全 `audit-tokens.mjs` 里的 **34 个 token**；漏写会从 `:root` 泄漏。
-> 自定义属性不会被解析成 rgb，所以 `verify-themes.mjs` 的期望值就是这里的**原文串**。
+> mist / rose / pine 保留各自色相，但交互层同样是实色（不再用 alpha）。
 
 ### 状态色
 
-危险 / 成功 / 警告三组沿用现有语义，只把 hex 换成 oklch 并统一 chroma 阶梯：
-浅色主题 `L≈0.53–0.66`，深色主题 `L≈0.72–0.78`；`-soft` 变体一律是同色相 `α 0.11–0.18`。
+危险 / 成功 / 警告三组沿用现有语义；`-soft` 变体一律是同色相低 alpha。
+`--danger-contrast` / `--success-contrast` 决定实心底上的文字色（浅色主题用白字，
+深色主题用深字）。
 
 ---
 
-## 2. 玻璃浮层
+## 2. 材质：平面，不玻璃
 
-所有浮层共用一套玻璃规则，**只允许存在一个玻璃层**（玻璃叠玻璃会模糊到自身内容）。
+| 项 | 规则 |
+|---|---|
+| 玻璃 | **只保留壁纸层**（`app/wallpaper.css`）。弹层 / 菜单 / 对话框**不进玻璃**：它们坐实色 `--bg-elev` + 发丝边框。 |
+| 输入卡 | `--bg-composer` + `--composer-border`，**无阴影**；焦点只给 3px `--focus-ring`。 |
+| 输入卡上方条 | 独立面 `--composer-protrusion`，只留上圆角、无下边框；同时把卡片上圆角压平（`fork:zn-04` 焊接成 Zeno 的「两段式」）。 |
+| 弹层 | 发丝描边 + 单层柔黑阴影（`--shadow-md`）。 |
+| 代码块 | `--code-bg` 比画布更暗，让代码后退而不是浮起。 |
 
-| 层 | 选择器 | 命中什么 |
-|---|---|---|
-| popover | `.anim-popover` / `.anim-popover-down` | 全部下拉、菜单、模型选择、@/slash 面板 |
-| dialog | `.anim-dialog` | 扩展请求弹窗（浮在聊天之上） |
-| composer | `.chat-content div[style*="--radius-composer"]` | 聊天输入框 |
-
-**全屏模态不进玻璃**：`config-panel-root.is-modal` / `settings-dialog-surface` 坐在 `--scrim` 上，
-后面只有遮罩，模糊买不到任何效果、只多一次合成，所以它们保持不透明。
-（原计划把模态也列入玻璃层，实施时按此判断排除。）
-
-参数：`--glass-blur: 22px`（深色 26px）、`--glass-saturation: 1.24`（深色 1.16）、
-`--glass-opacity: 52%`（popover 50% / tooltip 62%）。
-
-降级必须同时提供：`@supports not (backdrop-filter: blur(1px))` → 回落到不透明 `--bg-elev`；
-`@media (prefers-reduced-transparency: reduce)` → 关掉模糊并回落到不透明面。
+焊接的实现要点：条与卡片必须是**相邻兄弟**，中间不能有横幅。模型告警横幅因此排在
+条的上方（横幅是瞬时告警，条是结构），由 `ChatInput` 的 `protrusion` 插槽保证顺序。
 
 ---
 
 ## 3. 圆角与阴影
 
-圆角尺度不变（`--corner-radius-scale: 1.25` 的 calc 体系，`md` 解析为 `calc(8px * 1.25)`），
-本次只做两件事：把内联写死的数字圆角统一到刻度上；新增玻璃浮层用的 `--radius-2xl`。
+fork:zn-11 用 **Zeno 三档圆角**取代 Codex 的 `×1.25` calc 尺度：
 
-阴影收敛为**四级阶梯**（内联只引用了 `--shadow-sm|md|lg|xl`，名字必须保留）：
-
-| token | 用途 | 形态 |
+| token | 值 | 用途 |
 |---|---|---|
-| `--shadow-sm` | 贴边控件（composer、field） | 单层 1px 浅投影 + 描边 |
-| `--shadow-md` | 下拉、菜单、chip | 描边 + 2 层 |
-| `--shadow-lg` | 弹窗、抽屉 | 描边 + 3 层 |
-| `--shadow-xl` | 浮层里的浮层 | 描边 + 4 层 |
+| `--radius-xs` | 4px | 小 chip、内嵌格 |
+| `--radius-sm` | 6px | 列表行、图标键 |
+| `--radius-md` | 10px | 控件、卡片、输入卡上方条 |
+| `--radius-lg` | 12px | 面板、弹窗、输入卡 |
+| `--radius-xl` | 12px | 与面板对齐 |
+| `--radius-2xl` | 14px | 大面 |
+| `--radius-composer` | `var(--radius-lg)` = 12px | 输入卡（旧值 22px，那是 Codex 的胶囊输入框） |
 
-`--elevation-stroke` 保留（被 sm–xl 引用）；**删除 `--elevation-prominent` 与 `--elevation-sidebar`**
-（全仓未被引用，属于死 token）。
+阴影收敛为四级，但**第一级只是发丝线**（这正是「平面」的来源）：
+
+| token | 形态 |
+|---|---|
+| `--shadow-sm` | 仅 `--elevation-stroke`（无投影） |
+| `--shadow-md` | 发丝 + `0 6px 18px rgb(0 0 0 / .16)` |
+| `--shadow-lg` | 发丝 + `0 14px 38px rgb(0 0 0 / .22)` |
+| `--shadow-xl` | 发丝 + `0 24px 56px rgb(0 0 0 / .28)` |
+
+`--elevation-stroke` 保留（被 sm–xl 引用）。
 
 ---
 
 ## 4. 排版刻度
 
-新增语义字号（`globals.css` 裸 `:root`），取代散落的 `10/11/12/12.5/13/13.5/14/15/18/20/24px`：
+字号阶定义在 `globals.css` 裸 `:root`；**`md` 从 13px 提到 14px**（Zeno 的 `--ui-font-size`）：
 
 | token | 值 | 用途 |
 |---|---|---|
 | `--text-2xs` | 10px | 徽章、极致元信息 |
 | `--text-xs` | 11px | 时间戳、token 计数、辅助标签 |
-| `--text-sm` | 12px | 次要 UI、菜单项 |
-| `--text-md` | 13px | 主要 UI、聊天正文（= `--chat-content-font-size`） |
-| `--text-lg` | 14px | 二级标题 |
-| `--text-xl` | 15px | 面板/弹窗标题 |
-| `--text-2xl` | 18px | 空态标题 |
+| `--text-sm` | 12px | 次要 UI、菜单脚注 |
+| `--text-md` | **14px** | 主要 UI、侧栏行、设置行、聊天正文 |
+| `--text-lg` | 15px | 分区标题 |
+| `--text-xl` | 16px | 面板 / 弹窗标题 |
+| `--text-2xl` | 18px | 品牌字、空态变体 |
 | `--text-3xl` | 24px | 首屏标题 |
 
-映射是 **1:1** 的：代码中出现的每个字号字面量都恰好对应一档（10/11/12/13/14/15/18/24）。
-字重只用 400 / 500 / 600 / 650 四档；行高推荐 1.45（UI）、1.62（正文）。
+`--chat-content-font-size` 默认 **14px**（旧 13px），用户仍可在 设置 → 通用 里调。
+改这个默认值必须同步 `hooks/useChatAppearance.ts` 的 `CHAT_CONTENT_FONT_SIZE_DEFAULT`
+与 `e2e/chat-appearance.mjs` 里的断言。
+
+分区 / 分组标签：`--group-label-size: var(--text-md)` + `--group-label-weight: 500`，
+颜色走 `--text-dim` —— **不用更小的字号做层级**（与 Zeno 一致）。
+
+字重只用 400 / 500 / 600 / 650；行高 1.45（UI）、1.62（正文）。
+
+Zeno 侧长的元素名（会话标题）用**末端渐隐**（`.fork-fade-title` 的 mask）而不是省略号；
+内联的 ellipsis 保留作为 mask 不支持时的回退。
 
 ---
 
 ## 5. 控件尺寸与层级
 
-控件尺寸阶梯（内联写死的 22/24/26/28/30/32/34/36/44 收敛到）：
+控件尺寸阶梯（`--control-xs` … `--control-touch`）不变：22 / 26 / 28 / 32 / 36 / 44。
+新增/使用的 Zeno 度量别名见 `fork-ui.css` 的 `fork:zn-01`：
+`--zn-row: 32px`、`--zn-radius-row: 6px`、`--zn-brand: 18px`、`--zn-thread: 760px`、
+`--zn-send: 28px`、`--zn-header-title: 13px`、`--zn-hero-title: 26px`。
 
-| token | 值 | 用途 |
-|---|---|---|
-| `--control-xs` | 22px | 消息动作行按钮 |
-| `--control-sm` | 26px | 面板工具栏图标键 |
-| `--control-md` | 28px | composer 控件、顶栏图标键 |
-| `--control-lg` | 32px | 主操作按钮、Tab |
-| `--control-xl` | 36px | 侧栏主导航行 |
-| `--control-touch` | 44px | 触摸端最小目标 |
+发送键 28px（`--zn-send`）；侧栏行 32px 通栏（无内缩胶囊、无行间隙）。
 
-z-index 阶梯（当前存在 1→1100 共 22 个散值）：
-
-| token | 值 | 用途 |
-|---|---|---|
-| `--z-base` | 0 | 常规内容 |
-| `--z-raised` | 10 | 卡片内悬浮 |
-| `--z-sticky` | 40 | 吸顶/吸底条 |
-| `--z-panel` | 100 | 面板内浮层 |
-| `--z-popover` | 500 | 全局下拉/菜单 |
-| `--z-drawer` | 250 | 移动端抽屉与副工作区 |
-| `--z-modal` | 1000 | 设置与配置弹窗 |
-| `--z-toast` | 1100 | 通知条 |
-
-> 内联 z-index 无法被 CSS 覆盖，本阶梯只用于**新写的规则**与覆盖层里能用类名命中的层
-> （`.anim-popover*` → `--z-popover`、`.config-panel-root.is-modal` → `--z-modal`）。
+z-index 阶梯（`--z-base` … `--z-toast`）不变：0 / 10 / 40 / 100 / 500 / 250 / 1000 / 1100。
 
 ---
 
 ## 6. 焦点与 hover 约定
 
 - **焦点**：`button` / `a` / `[role="button"]` / `[tabindex]` 的 `:focus-visible` 一律
-  `outline: 2px solid var(--accent)` + `outline-offset: 2px`，用 `!important` 压掉 21 处
-  内联 `outline: "none"`。只允许 `.focus-ring-inset` 这类显式例外。
-- **hover**：新写的 hover 规则**必须**包在 `@media (hover: hover)` 里，并且与 `:focus-visible`
-  成对书写，保证键盘用户拿到同样的提示。
-- **已知限制**：组件里的 `onMouseEnter/Leave` 会直接写内联样式（CSS 无法撤销），
-  触摸端点击后可能残留 hover 态。彻底修需要改 `.tsx`，本次范围外，记录于此。
+  `outline: 2px solid var(--accent)` + `outline-offset: 2px`；输入卡用 `:focus-within`
+  的 3px `--focus-ring`。
+- **hover**：新写的 hover 规则**必须**包在 `@media (hover: hover)` 里，并与
+  `:focus-visible` 或 `:focus-within` 成对书写。
+- **触屏**：没有 hover 可依赖，所以「hover 才显」的元素在触屏必须常显。
+  先例：`.fork-msg-actions`（消息操作行）、`.fork-section-actions`（分区动作组）都在
+  `@media (hover: hover)` 里隐藏，触屏保持可见。
+- **已知限制**：组件的 `onMouseEnter/Leave` 直接写内联样式（CSS 无法撤销），
+  触摸端点击后可能残留 hover 态。彻底修需要改 `.tsx`，属于范围外。
 
 ---
 
-## 7. 覆盖层与代价
+## 7. fork 覆盖层（`app/fork-ui.css`）
 
-`globals.css` 末尾新增一层「皮肤覆盖层」，只做一件事：把内联写死的
-圆角 / 阴影 / 动效时长 / 焦点环 / 层级，用 `!important` 收敛到上面的刻度。
+所有 fork 覆盖写在 `app/fork-ui.css`，每条带 `/* fork:zn-xx */` 与来源说明，
+选择器优先用 `.fork-*` 类名或 `:where()`。
 
-```css
-/* ponytail: 覆盖层用 !important 压内联样式，天花板是内联优先级不可撤销。
-   等允许改 .tsx 时，把这层删掉、在内联处直接写 token。 */
-```
+两条纪律：
 
-判定规则：**新样式不写 `!important`**；只有与内联样式冲突的属性才允许用，且在注释里说明原因。
+1. **只有打到内联样式的属性才用 `!important`**，并在注释里说明原因。
+2. **注意特异性**。`globals.css` 里已存在带 `!important` 的规则（例如聊天气泡节奏
+   `.chat-content [data-entry-id] > div` 是 0-2-1），fork 覆盖必须用够特异性或同样
+   `!important`，否则会**静默失效**。`fork:zn-07` 踩过一次：0-2-0 的
+   `.chat-content [data-message-role="assistant"]` 被 0-2-1 压掉，26px 从未生效。
+   修法是补上 `[data-entry-id]`（0-3-0）赢得同级 `!important` 的比较。
 
 ---
 
 ## 8. 验收
 
 ```bash
-node_modules/.bin/tsc --noEmit          # 仅 CSS 改动，应无变化
+node_modules/.bin/tsc --noEmit          # 仅 CSS/样式改动，应无变化
 npm run lint
 npm test
-node docs/codex-skin/audit-tokens.mjs   # 34 token × 6 套 + 括号配平
+node docs/codex-skin/audit-tokens.mjs   # 34 token × 6 套 + 括号配平 + token 定义齐全
 npm run dev                             # 另开终端
-node docs/codex-skin/verify-themes.mjs  # 期望值须与第 1 节表格一致
+node docs/codex-skin/verify-themes.mjs  # 5 套调色板（像素比较）+ 三档圆角
 ```
 
-改完主题/浮层后需重拍 `skin-v0.9.1-{dark,light,mist,pine,rose}.png` 与
-`skin-v0.9.1-settings-themes.png`，并把变更登记进 `docs/codex-skin/delta.md`。
+改完主题 / 材质后需重拍截图基线，并把变更登记进 `docs/codex-skin/delta.md`。
+
+Zeno 侧对照文件：`参考项目/zeno-main/apps/desktop/src/renderer/styles.css`
+（`:root` 与 `[data-theme]` 块 40–300 行）、`components/Composer.tsx`、
+`components/AppSidebar.tsx`、`components/TimelineRow.tsx`、`components/ThreadHeader.tsx`。

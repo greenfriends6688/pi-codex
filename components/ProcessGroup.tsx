@@ -739,6 +739,9 @@ export function ProcessGroup({
             return (
               <li
                 key={id}
+                // fork:zn-10 — marks the streaming-open step so fork-ui.css can
+                // shimmer its verb (Zeno .shimmer); static rows never animate.
+                data-live={streamingOpen === id || undefined}
                 className={[
                   "process-step",
                   isOpen ? " is-open" : "",

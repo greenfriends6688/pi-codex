@@ -1248,3 +1248,59 @@ SDK 里唯一的 `--approve/--no-approve` 是**项目信任**（是否加载项�
 | 改名 | 产品名散在 4 处 | `package.json` 顶层 `productName`（决定 userData 与单实例锁）+ `build.productName` + `build.appId` → `com.greenfriends6688.picodex`；渲染层 `layout.tsx` 元数据 / `manifest.ts` / `login` / `AppShell` 窗口标题 / 侧栏品牌标题。**另加一次性 userData 迁移**：`~/Library/Application Support/pi-web` → `Pi Codex`，否则老的书签/草稿/布局状态在新名字下全部消失 |
 
 **验证**：`tsc` 0 错 ｜ `lint` 0 错 ｜ `npm test` **1346/1346**（新增 2 例：原生通知优先且不触发渲染层 onClick、桥拒绝时回落 window 通知；并把 header 让位断言更新为含交通灯 inset）｜ 打包后按技能清单验签名 / DMG / 冒烟 / 架构。
+
+### 31. Zeno 皮肤：中性灰 + 平面材质（2026-09-19，分支 `integrate`）
+
+用户点名「喜欢 `参考项目/zeno-main` 的整体样式」，第一轮只改了间距/圆角被判定为
+没做到位；这一轮是把**视觉语言本体**换掉。逐项对比、迁移清单、PR 拆分与验收标准见本地文档
+`docs/zeno-comparison-2026-09-19.md`（规划/对比类文档按本仓惯例不入仓，
+同 [`ui-layout-pr-plan-2026-09-17.md`](./ui-layout-pr-plan-2026-09-17.md) 的处境）。
+
+**改了什么（`fork:zn-01` … `fork:zn-12`）**
+
+| 面 | 改动 | 文件 |
+| --- | --- | --- |
+| 色板 | 暖褐黑 oklch → **Zeno 中性石墨阶梯**（`#191919` 画布 / `#151515` 侧栏 / `#2d2d2d` 面板 / `#383838` hover / `#3f3f3f` 选中 / `#272727` 用户气泡 / `#2b2b2b` 输入卡 / `#1f1f1f` 输入条）；前景暖白 → `oklch(0.985 0.004 260)`；次要文字改**实色灰** `#a9abb0` / `#83858a` | `globals.css` 5 套调色板 |
+| 材质 | 交互层从 alpha 叠层改**实色**；代码底改**比画布更暗** `#0f0f0f`；弹层不进玻璃，坐实色 `--bg-elev` | `globals.css` |
+| 圆角 | Codex `×1.25` calc 尺度 → **Zeno 6/10/12**；`--radius-composer` 22px → `var(--radius-lg)`=12px | `globals.css` `:root` |
+| 阴影 | 四级暖黑堆叠 → 单层；`--shadow-sm` 只剩发丝线（输入卡**完全无阴影**，焦点改 3px 光环） | `globals.css` |
+| 排版 | `--text-md` 13 → **14px**（全局 UI/正文）；`--chat-content-font-size` 默认 13 → 14；`TEXT.lg` 14 → 15 | `globals.css` + `hooks/useChatAppearance.ts` |
+| 侧栏 | `SESSION_LIST_ITEM_HEIGHT` 38 → **32**、去掉内缩胶囊与行间隙；品牌 15 → **18px**；分区标题 14px medium + `--text-dim`；动作组 hover 才显；长标题末端渐隐 | `SessionSidebar.tsx`、`ChatWorkspaceRow.tsx`、`fork-ui.css` |
+| 默认宽 | 侧栏 244 → **272**（Zeno `--sidebar-width`） | `lib/panel-layout.ts` |
+| 空态 | 无消息时**不渲染顶栏**（Zeno `timelineReady && hasActivity`）；hero 标 40 → 48px、标题 → 26px semibold | `AppShell.tsx`、`ChatWindow.tsx`、`NewSessionHome.tsx` |
+| 输入框 | 项目条与输入卡**焊接**（条只留上圆角 + 无下边框，卡片压平上圆角）；条是独立面 `--composer-protrusion`；卡片用 `--bg-composer`；项目 chip 改无铬（透明 + hover 10% 前景）；发送键 32 → **28px**；去掉 68px 不对称右内边距 | `ChatWindow.tsx`、`ChatInput.tsx`、`ProjectChip.tsx`、`fork-ui.css` |
+| 消息 | 用户气泡改实色 `--user-bg` + 无边框；操作行 **hover/focus 才显**（触屏常显）；助手行距 26px | `MessageView.tsx`、`fork-ui.css` |
+| 顶栏 | 「回滚历史 / 生成标题」收进 `⋯`（`fork:zn-08`），桌面只剩 标题 + 分支 + `⋯` + 会话信息 | `AppShell.tsx` |
+| 设置 | 分区改卡片（发丝描边）；搜索框 28px 方框 → **36px 胶囊** | `app/settings.css` |
+| 运行中 | 工具行 verb 扫光（`data-live`），`prefers-reduced-motion` 回落实色 | `ProcessGroup.tsx`、`fork-ui.css` |
+
+**接触面**：T0（`fork-ui.css`、`app/settings.css`、`components/fork/*`）+ T1（
+`globals.css` 主题层、`AppShell.tsx`、`ChatInput.tsx`、`ChatWindow.tsx`、`MessageView.tsx`、
+`ProcessGroup.tsx`、`SessionSidebar.tsx`、`ChatWorkspaceRow.tsx`、`lib/panel-layout.ts`、
+`hooks/useChatAppearance.ts`），每处带 `fork:zn-xx` 标记，`grep -rn "fork:zn-"` 可列全。
+**无 T2**（没有重写任何组件的 DOM/状态结构）。
+
+**顺手修掉的两个真缺陷**
+
+1. `audit-tokens.mjs` 的 `CSS_FILES` 漏了 `app/fork-ui.css` —— UI-01 之后新 token 的
+   家在那里，不漏读的话任何新自造 token 都被误报「未定义」（该检查此前一直是红的）。
+2. `verify-themes.mjs` 按**字面串**比颜色，而构建链会把 `oklch()` 重写成 `lab()`
+   （`--accent-soft` 读回来是 `lab(59.8% -5.25 -53.8 / .12)`），且 CSS Color 4 会
+   保留色彩空间、`color: lab()` 原样回读 `lab()` —— 于是「期望 oklch / 实际 lab」
+   永不相等。改成**把两边都画到 canvas 再读像素**（容差 ±2），口径与色彩空间写法解耦。
+   同时把「`--radius-md` 必须含 `*`（calc 尺度）」的断言换成核对 **10/12/12** 三档。
+
+**已知偏离（有意）**：mist / rose / pine 三套保留自己的色相，只跟随材质变化；它们不是
+默认底，用户主动选才生效。
+
+**验证**：`tsc` 0 错｜`lint` 0 错（warning 基线 245 不变）｜`npm test` 回到改前基线
+（3 个既存失败：2 个 ProjectChip 的 `useContextMenu` 测试夹具 + 1 个 ChatInput 图片
+告警断言；另 2 个 PTY 失败是本机 node-pty 环境）｜`audit-tokens.mjs` 通过（
+122 引用 / 151 定义 / 6 套调色板齐全）｜`verify-themes.mjs` 5 套全绿
+（`dark bg = rgb(25,25,25)` = `#191919`）｜实拍截图对照见
+`test-results/zn{,2,3,4}/`（gitignored）。
+
+**回滚**：整块 revert 本轮 commit 即可；若只想退掉色板而保留材质，把 5 套调色板的
+`--bg/--bg-panel/--bg-elev/--bg-hover/--bg-selected/--border*`/`--text*`/`--code-bg` 换回
+`docs/codex-skin/visual-spec.md` 的上一版表格值（该表在 git history 里），并同步
+`verify-themes.mjs` 的 `EXPECTED`。

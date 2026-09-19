@@ -21,9 +21,11 @@ import { SessionSearch } from "./SessionSearch";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { TEXT } from "@/lib/typography";
 
-// Fixed row height for the session list. SessionItem renders at exactly this
-// height, so the list can be windowed (only the visible slice is mounted).
-export const SESSION_LIST_ITEM_HEIGHT = 38;
+// fork:zn-02 — 32px flat rows (Zeno .sidebar-list-row h-8): each row fills its
+// virtual slot edge to edge, no inset pill, no inter-row gap. Fixed row height
+// for the session list; SessionItem renders at exactly this height so the
+// list can be windowed (only the visible slice is mounted).
+export const SESSION_LIST_ITEM_HEIGHT = 32;
 
 export function getSessionListIndices(count: number, scrollTop: number, viewportHeight: number, focusedIndex = -1): number[] {
   const overscan = 8;
@@ -302,7 +304,8 @@ function PiWebTitle() {
       onClick={handleClick}
       style={{
         background: "none", border: "none", padding: 0, cursor: "default",
-        fontWeight: 600, fontSize: TEXT.md, letterSpacing: "-0.01em",
+        // fork:zn-02 — 18px brand (Zeno sidebar brand), tracking kept.
+        fontWeight: 600, fontSize: TEXT["2xl"], letterSpacing: "-0.01em",
         color: showVersion ? "var(--accent)" : "var(--text)",
         minWidth: "6ch",
       }}
@@ -353,14 +356,15 @@ function SidebarNavButton({
       aria-label={label}
       style={{
         width: "100%",
-        height: 36,
+        // fork:zn-02 — 32px rail row (Zeno .nav-item h-8), 6px radius.
+        height: "var(--zn-row)",
         display: "flex",
         alignItems: "center",
         gap: 10,
-        padding: "0 9px",
+        padding: "0 10px",
         background: active ? "var(--bg-selected)" : "transparent",
         border: "none",
-        borderRadius: "var(--radius-md)",
+        borderRadius: "var(--zn-radius-row)",
         color: disabled ? "var(--text-dim)" : "var(--text)",
         cursor: disabled ? "not-allowed" : "pointer",
         textAlign: "left",
@@ -416,17 +420,15 @@ function ProjectRow({
       onMouseLeave={() => setHovered(false)}
       style={{
         width: "100%",
-        // Same inset as the session rows below, so a project header separates from
-        // its session list by the same gap it uses between sessions.
-        height: SESSION_LIST_ITEM_HEIGHT - 8,
-        marginTop: 4,
+        // fork:zn-02 — full-bleed 32px row (Zeno project card): no inset, no gap.
+        height: SESSION_LIST_ITEM_HEIGHT,
         display: "flex",
         alignItems: "center",
         gap: 8,
-        padding: "0 9px",
+        padding: "0 10px",
         background: selected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
         border: "none",
-        borderRadius: "var(--radius-md)",
+        borderRadius: "var(--zn-radius-row)",
         color: "var(--text)",
         cursor: "pointer",
         textAlign: "left",
@@ -449,7 +451,7 @@ function ProjectRow({
       >
         <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
       </svg>
-      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span className="fork-fade-title" style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {label}
       </span>
       {typeof count === "number" && (
@@ -1888,23 +1890,26 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             );
           })()}
 
+          {/* fork:zn-02 — 14px medium section head (Zeno .sidebar-section-head
+              h-8); actions hide until hover/focus via .fork-section-actions. */}
           <div
+            className="fork-section-head"
             style={{
               marginTop: 18,
               marginBottom: 6,
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              minHeight: 28,
+              minHeight: "var(--zn-row)",
               paddingLeft: 10,
               position: "relative",
             }}
             ref={projectMenuRef}
           >
-            <span style={{ fontSize: TEXT.sm, fontWeight: 500, color: "var(--text-dim)" }}>
+            <span style={{ fontSize: TEXT.lg, fontWeight: 500, color: "var(--text-dim)" }}>
               {t("sidebar.projects")}
             </span>
-            <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <div className="fork-section-actions" style={{ display: "flex", alignItems: "center", gap: 2 }}>
               {/* fork:ui-10 — order of the session lists (updated vs created). */}
               <button
                 type="button"
@@ -2538,18 +2543,17 @@ function SessionItem({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
       style={{
-        // Inset the pill inside its 34px virtual slot so consecutive rows read as
-        // separate chips instead of one continuous block (user feedback
-        // 2026-09-16: the project header and the first session were touching).
-        height: SESSION_LIST_ITEM_HEIGHT - 8,
-        marginTop: 4,
+        // fork:zn-02 — full-bleed 32px row (Zeno .sidebar-list-row): the slot IS
+        // the row. (The 2026-09-16 inset it replaces was for 38px slots; at 32px
+        // the gap read as visual noise, not separation.)
+        height: SESSION_LIST_ITEM_HEIGHT,
         display: "flex",
         alignItems: "center",
         marginLeft: 12,
         marginRight: 0,
         paddingLeft: depth > 0 ? depth * 8 + 8 : 10,
         paddingRight: 4,
-        borderRadius: "var(--radius-md)",
+        borderRadius: "var(--zn-radius-row)",
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
           ? "var(--danger-soft)"
@@ -2644,8 +2648,9 @@ function SessionItem({
               : isUnread ? <UnreadSessionIndicator /> : null}
           <span
             title={`${title} · ${formatRelativeTime(session.modified, locale)}`}
+            className="fork-fade-title"
             style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: TEXT.md, fontWeight: isSelected ? 500 : 400, lineHeight: 1.3, color: "var(--text)" }}
-          >
+         >
             {title}
           </span>
           {session.isWorktree && session.branch && (

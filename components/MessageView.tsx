@@ -427,6 +427,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
+      data-message-role="user"
       style={{ marginBottom: 20, display: "flex", flexDirection: "column", alignItems: "flex-end" }}
     >
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "flex-end", gap: 6, width: "100%", maxWidth: "100%" }}>
@@ -437,8 +438,12 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             // (`max-width: min(70%, 620px)`) so long prompts stay readable.
             // The phone value lives in app/fork-ui.css.
             maxWidth: "var(--fork-user-bubble-max, min(70%, 620px))",
-            background: "var(--bg-subtle)",
-            border: "1px solid var(--border-faint)",
+            // fork:zn-11 — Zeno's user bubble: the `--user-bg` soft surface
+            // (solid, one step above canvas) with NO border, radius 12. The old
+            // `--bg-subtle` + `--border-faint` pair drew a boxed card; Zeno's
+            // reads as a filled bubble.
+            background: "var(--user-bg)",
+            border: "1px solid transparent",
             borderRadius: "var(--radius-xl)",
             padding: "12px 16px",
             fontSize: "calc(14px + var(--chat-font-size-offset, 0px))",
@@ -520,13 +525,17 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
       </div>
 
       {/* Bottom row: action buttons + timestamp.
-          Always visible — this is a deliberate fork change. Upstream gates the
-          row on hover, but copy / edit-from-here / new session should be
-          reachable without first hunting for the message. */}
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "flex-end",
-        gap: 6, marginTop: 4,
-      }}>
+          fork:zn-12 — hidden until the message is hovered or focused (Zeno
+          .timeline-meta-actions). The row keeps its layout box while hidden, so
+          nothing reflows on hover; touch devices keep it visible (the
+          `(hover: hover)` gate in app/fork-ui.css). */}
+      <div
+        className="fork-msg-actions"
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "flex-end",
+          gap: 6, marginTop: 4,
+        }}
+      >
         <div style={{
           display: "flex", gap: 3,
         }}>
@@ -920,12 +929,15 @@ function AssistantMessageView({
         <TurnWrittenFiles files={writtenFiles} onOpenFile={onOpenFile} />
       )}
 
-      {/* Usage / copy / timestamp row — always visible, same rule as the user
-          message's action row. Upstream reveals it on hover, but the fork wants
-          token counts and copy reachable without hovering every message. */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 8, marginTop: 4,
-      }}>
+      {/* Usage / copy / timestamp row — fork:zn-12, same hover gate as the user
+          message's action row. Token counts and copy stay in the same place,
+          they just stop competing with the answer for attention. */}
+      <div
+        className="fork-msg-actions"
+        style={{
+          display: "flex", alignItems: "center", gap: 8, marginTop: 4,
+        }}
+      >
         {message.usage && !isStreaming && (
           <div style={{ fontSize: TEXT.xs, color: "var(--text-dim)" }}>
             {formatUsage(message.usage)}

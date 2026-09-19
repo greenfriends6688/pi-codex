@@ -1,10 +1,11 @@
 export const MOBILE_MAX_WIDTH = 640;
 export const SPLIT_PANEL_MIN_WIDTH = 960;
 
-// Codex sidebar sizing: compact by default, but still user-resizable.
-// 244 matches the reference implementations (upstream pi-web 260, Wegent 244);
-// at 224 the project rows truncated common folder names.
-export const SIDEBAR_DEFAULT_WIDTH = 244;
+// Zeno rail sizing: 272px, matching zeno-main's `--sidebar-width`. The previous
+// 244 left the rail narrower than the reference and made 14px row text wrap in
+// nested session titles; at 272 the rail owns its own column and the chat column
+// still keeps its full 800px beside it on a 1440 display.
+export const SIDEBAR_DEFAULT_WIDTH = 272;
 export const SIDEBAR_MIN_WIDTH = 216;
 export const SIDEBAR_MAX_WIDTH = 520;
 

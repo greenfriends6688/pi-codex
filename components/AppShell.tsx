@@ -1382,6 +1382,11 @@ export function AppShell() {
   }, [runningSessionIds]);
 
   const showChat = selectedSession !== null || effectiveNewSessionCwd !== null;
+  // fork:zn-03 — empty-chat signal reported up by ChatWindow (Zeno hides
+  // ThreadHeader until the timeline has activity). Mobile keeps the bar: the
+  // sidebar drawer toggle lives there and empty state has no other entry.
+  const [chatEmpty, setChatEmpty] = useState(false);
+  const hideTopBar = showChat && chatEmpty && !isMobile;
   // fork:ui-projectchip — the new-session page's workspace selector. Mirrors what the
   // sidebar's NewTaskPicker already offers, minus the two actions it lacks:
   // "open folder" (validate a folder, then start there) and "new blank project".
@@ -1715,6 +1720,10 @@ export function AppShell() {
     if (!mobile && !showChat) return null;
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+        {/* fork:zn-08 — on desktop both of these live in the ⋯ menu below
+            (see activeTopPanel === "more"); the phone keeps them inline because
+            its bar already collapses behind a single ⋯ trigger instead. */}
+        {mobile && (<>
         <button
           type="button"
           onClick={() => {
@@ -1853,6 +1862,7 @@ export function AppShell() {
             </button>
           );
         })()}
+        </>)}
         {hasSubagentSessions && (
           <button
             type="button"
@@ -2566,7 +2576,11 @@ export function AppShell() {
         style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", minWidth: 0 }}
        >
         {/* Top bar with sidebar toggle */}
-        <div ref={topBarRef} style={{ flexShrink: 0, background: "var(--bg)" }}>
+        {/* fork:zn-03 — no bar over an empty chat (desktop only): display:none
+            keeps refs mounted (no unmount/remount churn for the dropdown
+            positioning effect) while removing the bar from layout and the
+            accessibility tree. Mobile keeps the bar (drawer toggle). */}
+        <div ref={topBarRef} style={{ flexShrink: 0, background: "var(--bg)", display: hideTopBar ? "none" : undefined }}>
         <div className="main-workspace-header" style={{ display: "flex", alignItems: "center", position: "relative", borderBottom: "1px solid var(--border)", height: "calc(var(--height-toolbar, 46px) + env(safe-area-inset-top))", paddingTop: "env(safe-area-inset-top)" }}>
           {/* fork:desktop-shell — the drag handle is a real element, not the header box:
               it is inset past the boundary toggles so the drag region never covers them.
@@ -2857,9 +2871,12 @@ export function AppShell() {
                 </div>
               )}
               {activeTopPanel === "more" && (
-                // fork:ui-14 — desktop overflow menu (upstream collapses the
-                // reference panels into a ⋯ in TaskHeader). Same two actions,
-                // one click deeper, so the bar stops carrying five icons.
+                // fork:ui-14 / fork:zn-08 — desktop overflow menu (upstream
+                // collapses the reference panels into a ⋯ in TaskHeader).
+                // fork:zn-08 extends it to the last two inline icons (回滚历史 /
+                // 生成标题) so the desktop bar carries Zeno's sparse chrome:
+                // title + ⋯ + the workspace toggles. Every action stays one
+                // click away — nothing was removed, only relocated.
                 <div style={{
                   margin: 4,
                   padding: 4,
@@ -2868,6 +2885,44 @@ export function AppShell() {
                   borderRadius: "var(--radius-lg)",
                   boxShadow: "var(--shadow-lg)",
                 }}>
+                  {selectedSession && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toggleTopPanel("more", false);
+                        handleViewFullHistory();
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", width: "100%", height: 30,
+                        padding: "0 10px", background: "none", border: "none",
+                        borderRadius: "var(--radius-md)", color: "var(--text)",
+                        cursor: "pointer", fontSize: TEXT.md, textAlign: "left",
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
+                    >
+                      {translate("history.full")}
+                    </button>
+                  )}
+                  {selectedSession && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toggleTopPanel("more", false);
+                        void handleAutoName();
+                      }}
+                      style={{
+                        display: "flex", alignItems: "center", width: "100%", height: 30,
+                        padding: "0 10px", background: "none", border: "none",
+                        borderRadius: "var(--radius-md)", color: "var(--text)",
+                        cursor: "pointer", fontSize: TEXT.md, textAlign: "left",
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
+                    >
+                      {translate("title.generate")}
+                    </button>
+                  )}
                   {selectedSession && (
                     <button
                       type="button"
@@ -3138,6 +3193,9 @@ export function AppShell() {
               onAgentEnd={handleAgentEnd}
               onAttentionNeeded={handleAttentionNeeded}
               onSessionCreated={handleSessionCreated}
+              // fork:zn-03 — empty-chat signal (setChatEmpty is stable, so the
+              // ChatWindow effect only refires when emptiness flips).
+              onEmptyChange={setChatEmpty}
               onSessionForked={handleSessionForked}
               onOpenSessionPane={openBranchTab}
               modelsRefreshKey={modelsRefreshKey}

@@ -416,3 +416,165 @@ html.keyboard-open .extension-status-shelf {
     width: 200px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-01 — Zeno layout metrics (read-only aliases).
+ *
+ * Reference values lifted from zeno-main (apps/desktop/src/renderer/styles.css
+ * + components): sidebar rail 272 / rail row h-8 + radius-6 / brand 18px /
+ * thread column 760 / composer card radius-12 / send 28px / thread title 13px /
+ * empty hero 26px semibold. Defined here so later ZN blocks can reference
+ * them; nothing below may change app geometry by itself. Delete the alias
+ * together with its consumer — never leave a dangling --zn-* behind.
+ * ------------------------------------------------------------------------- */
+:root {
+  --zn-row: 32px;            /* zeno .nav-item / .sidebar-list-row h-8 */
+  --zn-radius-row: 6px;      /* zeno --radius-control (rail rows only) */
+  --zn-brand: 18px;          /* zeno sidebar brand */
+  --zn-thread: 760px;        /* zeno --thread-max */
+  --zn-send: 28px;           /* zeno composer send/abort circle */
+  --zn-header-title: 13px;   /* zeno thread-header h2 */
+  --zn-hero-title: 26px;     /* zeno empty hero h1 */
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-07 — conversation breathing room (Zeno thread rhythm).
+ *
+ * 1. Assistant rows get 26px below (zeno .timeline-assistant-row) instead of
+ *    the inline 20px in MessageView.tsx — hence `!important` (beats inline).
+ *    Specificity matters here: the base sheet's chat-rhythm rule
+ *    (`.chat-content [data-entry-id] > div`, 0-2-1) also carries `!important`
+ *    and would otherwise win over a 0-2-0 selector, silently pinning every row
+ *    back to the 16px gap token. Matching `[data-entry-id]` as well (0-3-0)
+ *    wins that tie without another `!important` and without touching the token
+ *    (the token still spaces process-detail groups).
+ * 2. Tool secondary text brightens half a step on row hover, mirroring how
+ *    .process-step-label already goes dim → text on hover (zeno keeps detail
+ *    quiet until hovered, then readable — never louder than the verb).
+ * ------------------------------------------------------------------------- */
+.chat-content [data-message-role="assistant"][data-entry-id] {
+  margin-bottom: 26px !important;
+}
+@media (hover: hover) {
+  .process-step-row:hover .process-step-detail,
+  .process-step-row:focus-visible .process-step-detail {
+    color: var(--text-muted);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-10 — shimmer for the live step (Zeno .shimmer).
+ *
+ * Only the streaming-open step carries data-live (ProcessGroup.tsx, 1 line),
+ * so static rows never animate. Colors use muted tokens, not currentColor:
+ * the text is transparent while animating, so currentColor would paint an
+ * invisible gradient. Reduced-motion restores a solid color — without that
+ * fallback the text would stay transparent (invisible) when animations are
+ * collapsed globally.
+ * ------------------------------------------------------------------------- */
+@keyframes fork-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+.process-step[data-live="true"] .process-step-label {
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text-muted) 40%, transparent) 0%,
+    var(--text-muted) 45%,
+    var(--text) 50%,
+    var(--text-muted) 55%,
+    color-mix(in srgb, var(--text-muted) 40%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: fork-shimmer 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .process-step[data-live="true"] .process-step-label {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+    color: var(--text-muted);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-04 — composer protrusion bar (Zeno .composer-protrusion).
+ *
+ * The empty-state target chip + tip line ride a full-width strip whose bottom
+ * edge is welded to the top of the input card: top corners only, no bottom
+ * border, flush against the card, and the card gives up its top corners while
+ * the strip exists (`.chat-content:has(...)`). That welded pair is what Zeno's
+ * composer looks like — a small tab sitting on a panel.
+ *
+ * The protrusion is its own surface (`--composer-protrusion`, one step off the
+ * canvas), not a tint of the card, so the seam reads as two materials.
+ * ------------------------------------------------------------------------- */
+.fork-protrusion-bar {
+  min-height: var(--zn-row);
+  margin-bottom: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--composer-border, var(--border));
+  border-bottom: none;
+  border-radius: var(--radius-composer) var(--radius-composer) 0 0;
+  background: var(--composer-protrusion, var(--bg-panel));
+}
+/* The card's top corners flatten only while the strip is mounted. */
+.chat-content:has(.fork-protrusion-bar) div[style*="--radius-composer"] {
+  border-top-left-radius: var(--radius-md) !important;
+  border-top-right-radius: var(--radius-md) !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-12 — message meta rows are hover/focus-only (Zeno .timeline-meta-actions).
+ *
+ * Both rows keep their layout box while hidden (`opacity`, never `display`), so
+ * revealing them cannot reflow the transcript. `pointer-events` goes with them
+ * or an invisible row would still swallow clicks aimed at the text underneath.
+ * Gated on `(hover: hover)`: on touch there is no hover to reveal them, so the
+ * row stays permanently visible there.
+ * ------------------------------------------------------------------------- */
+@media (hover: hover) {
+  .fork-msg-actions {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--motion-fast) var(--ease-out);
+  }
+  /* `:focus-within` keeps keyboard users on parity: tabbing into the row
+     reveals it before focus lands on a button the user cannot see. */
+  [data-message-role]:hover > .fork-msg-actions,
+  [data-message-role]:focus-within > .fork-msg-actions,
+  .fork-msg-actions:hover,
+  .fork-msg-actions:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-02 — rail title fade + section-action hover gate.
+ *
+ * 1. .fork-fade-title: long session/project titles fade at the container edge
+ *    (Zeno .sidebar-title-fade) instead of a hard ellipsis cut. The inline
+ *    ellipsis stays as the fallback (mask unsupported → still truncated).
+ * 2. .fork-section-actions: section-level actions (chat `+`/gear, project
+ *    sort/menu) hide until the header is hovered or focus-within (Zeno
+ *    .sidebar-section-actions). Gated on (hover: hover) so touch keeps them
+ *    visible; keyboard focus reveals them anywhere.
+ * ------------------------------------------------------------------------- */
+.fork-fade-title {
+  -webkit-mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 1.25rem), transparent 100%);
+  mask-image: linear-gradient(to right, #000 0%, #000 calc(100% - 1.25rem), transparent 100%);
+}
+@media (hover: hover) {
+  .fork-section-actions {
+    transition: opacity var(--motion-fast) var(--ease-out);
+  }
+  .fork-section-head:not(:hover):not(:focus-within) .fork-section-actions {
+    opacity: 0;
+    pointer-events: none;
+  }
+}

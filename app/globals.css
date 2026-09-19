@@ -41,25 +41,31 @@
 
 /* Theme-independent: geometry, elevation, layout metrics, motion. */
 :root {
-  /* Geometry —Codex corner-radius scale (base × 1.25) */
-  --corner-radius-scale: 1.25;
-  --radius-xs: calc(4px * var(--corner-radius-scale));
-  --radius-sm: calc(6px * var(--corner-radius-scale));
-  --radius-md: calc(8px * var(--corner-radius-scale));
-  --radius-lg: calc(10px * var(--corner-radius-scale));
-  --radius-xl: calc(12px * var(--corner-radius-scale));
-  --radius-2xl: calc(16px * var(--corner-radius-scale));
+  /* Geometry — Zeno radius scale (6 / 10 / 12 / pill).
+
+     Replaces the Codex ×1.25 scale (5 / 7.5 / 10 / 12.5 / 15 / 20 / 22): Zeno
+     commits to three working radii — list rows 6, controls 10, surfaces 12 —
+     with no 20–22px step at all. The visible consequences are the composer
+     (22 → 12: it stops reading as a pill and starts reading as a panel), the
+     user bubble (15 → 12) and every popover (15 → 12). */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
   --radius-pill: 999px;
 
-  /* Elevation —one ladder, four steps, every step built from the same warm
-     hairline stroke plus stacked warm-black shadows. Names are kept because
-     components reference --shadow-sm|md|lg|xl inline; the ladder itself is what
-     changed. See docs/codex-skin/visual-spec.md §3. */
+  /* Elevation — Zeno leans on the hairline, not on shadow depth. The ladder
+     still exists for menus/dialogs (they float over content), but `sm` is the
+     bare stroke: the composer and the field-chrome surfaces get a border and
+     nothing else, which is what makes Zeno's dark theme read flat rather than
+     glossy. Names are kept because components reference them inline. */
   --elevation-stroke: 0 0 0 0.5px var(--border-strong);
-  --shadow-sm: var(--elevation-stroke), 0 1px 2px -1px oklch(0.2 0.02 60 / 0.1);
-  --shadow-md: var(--elevation-stroke), 0 2px 4px -1px oklch(0.2 0.02 60 / 0.09), 0 6px 12px -4px oklch(0.2 0.02 60 / 0.08);
-  --shadow-lg: var(--elevation-stroke), 0 4px 8px -2px oklch(0.2 0.02 60 / 0.09), 0 12px 24px -6px oklch(0.2 0.02 60 / 0.1);
-  --shadow-xl: var(--elevation-stroke), 0 8px 16px -4px oklch(0.2 0.02 60 / 0.12), 0 24px 48px -12px oklch(0.2 0.02 60 / 0.14);
+  --shadow-sm: var(--elevation-stroke);
+  --shadow-md: var(--elevation-stroke), 0 6px 18px rgb(0 0 0 / 0.16);
+  --shadow-lg: var(--elevation-stroke), 0 14px 38px rgb(0 0 0 / 0.22);
+  --shadow-xl: var(--elevation-stroke), 0 24px 56px rgb(0 0 0 / 0.28);
 
   /* Terminal island —a fixed dark surface in every theme, because the xterm
      palette is constructed in JS (components/TerminalPanel.tsx) and is not
@@ -75,15 +81,26 @@
   --terminal-text-dim: #8b93a1;
 
   /* Type scale —every font-size literal in the app maps to exactly one step:
-     10→2xs  11→xs  12→sm  13→md  14→lg  15→xl  18→2xl  24→3xl */
+     10→2xs  11→xs  12→sm  14→md  15→lg  16→xl  18→2xl  24→3xl
+
+     `md` is the UI/body step and moved 13 → 14 to match Zeno's --ui-font-size:
+     rail rows, settings rows, menus and the transcript all read at 14px there.
+     This is one variable, but it is the difference between "dense tool" and
+     "application". Every inline `TEXT.md` follows automatically. */
   --text-2xs: 10px;
   --text-xs: 11px;
   --text-sm: 12px;
-  --text-md: 13px;
-  --text-lg: 14px;
-  --text-xl: 15px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 16px;
   --text-2xl: 18px;
   --text-3xl: 24px;
+
+  /* Zeno's group/section label: same size as body text, quiet solid grey, and
+     the hierarchy comes from colour + weight rather than a smaller type size.
+     Per-theme value below (light is lighter than dark). */
+  --group-label-size: var(--text-md);
+  --group-label-weight: 500;
 
   /* Control sizes —one ladder for every interactive box. */
   --control-xs: 22px;
@@ -121,14 +138,16 @@
      at ~900px than at the 800px the chat column uses. */
   --readable-content-max-width: 900px;
   --composer-max-width: calc(var(--chat-content-max-width) + 32px);
-  /* 22px: the Codex composer pill, expressed on the radius scale. */
-  --radius-composer: calc(var(--radius-2xl) + 2px);
+  /* 12px: Zeno's panel radius, which is what its composer card uses. */
+  --radius-composer: var(--radius-lg);
   --height-toolbar: 46px;
   --height-toolbar-pane: 40px;
   --spacing-token-button-composer: 28px;
   /* Consumed by the skin override layer's chat rhythm rule. */
   --conversation-item-gap: 16px;
-  --chat-content-font-size: 13px;
+  /* 14px, not 13: Zeno's transcript is body-sized (its `--ui-font-size`), and
+     the chat is the one place where the extra pixel is unmistakable. */
+  --chat-content-font-size: 14px;
 
   /* Motion —四档语义时长（DSN-06）：instant 供退出/提示类短动效，
      fast/base/slow 沿用旧名（别名口径，引用处无需改动）。
@@ -141,42 +160,50 @@
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-/* light —pure white surfaces with neutral grey hairlines and a blue accent.
-   Deliberately achromatic: a warm cast here reads as a dirty page background
-   (user feedback 2026-09-16), so the light theme keeps chroma 0 and lets the
-   accent carry the colour. The tinted palettes (mist, rose) are opt-in. */
+/* light —solid surfaces, Zeno's cool-grey ladder (#ffffff canvas, #f1f2f4 rail,
+   #f6f6f6 hover). Deliberately achromatic: a warm cast here reads as a dirty
+   page background (user feedback 2026-09-16), so the light theme keeps chroma 0
+   and lets the accent carry the colour.
+
+   fork:zn-11 — hover / selected / border are now SOLID greys instead of
+   translucent black. Alpha overlays composite differently on each surface they
+   land on (#ffffff panel vs #f1f2f4 rail vs #ffffff popover), so one "6%"
+   hover produced three different greys; Zeno fixes one grey per intent. */
 :root,
 [data-theme="light"] {
   color-scheme: light;
-  --bg: oklch(1 0 0);
-  --bg-panel: oklch(0.98 0 0);
-  --bg-elev: oklch(1 0 0);
-  --bg-hover: oklch(0.3 0 0 / 0.055);
-  --bg-selected: oklch(0.3 0 0 / 0.095);
-  --bg-subtle: oklch(0.3 0 0 / 0.032);
-  --border: oklch(0.3 0 0 / 0.1);
-  --border-strong: oklch(0.3 0 0 / 0.17);
-  --border-faint: oklch(0.3 0 0 / 0.055);
-  --text: oklch(0.26 0 0);
-  --text-muted: oklch(0.26 0 0 / 0.72);
-  /* DSN-01：浅色主题 --text-dim alpha 0.52→0.68（实测 3.32:1→5.41:1，≥4.5）。 */
-  --text-dim: oklch(0.26 0 0 / 0.68);
-  /* DSN-01：--accent 加深两档供图形用（bg-panel 上 2.93:1→约 3.2:1，≥3.0；
-     含最暗的 bg-selected 也 ≥3.0，见门禁矩阵）；hover 保持深一档的方向。
-     文字一律走 --accent-text（≥4.5），--accent 只作图形/填充色。 */
+  --bg: #ffffff;
+  --bg-panel: #f1f2f4;
+  --bg-elev: #ffffff;
+  --bg-hover: #f6f6f6;
+  --bg-selected: #eceef1;
+  --bg-subtle: #f7f8f9;
+  --border: #d7d9e0;
+  --border-strong: #b8bac2;
+  --border-faint: color-mix(in srgb, #9aa0ab 24%, #ffffff);
+  --text: #171717;
+  /* DSN-01：中性实色替代 alpha，并保持 ≥4.5:1。 */
+  --text-muted: #5f6167;
+  --text-dim: #7b7d84;
   --accent: oklch(0.61 0.16 250);
   --accent-hover: oklch(0.57 0.17 250);
   --accent-text: oklch(0.52 0.16 250);
   --accent-contrast: oklch(1 0 0);
   --accent-soft: oklch(0.66 0.16 250 / 0.12);
   --accent-border: oklch(0.66 0.16 250 / 0.5);
-  --primary-bg: oklch(0.26 0 0);
-  --primary-fg: oklch(1 0 0);
-  --primary-hover: oklch(0.36 0 0);
-  --user-bg: oklch(0.3 0 0 / 0.05);
+  --primary-bg: #171717;
+  --primary-fg: #fafafa;
+  --primary-hover: #2e2e2e;
+  --user-bg: #f5f5f5;
   --assistant-bg: transparent;
-  --tool-bg: oklch(0.98 0 0);
-  --code-bg: oklch(0.98 0 0);
+  --tool-bg: #f7f7f8;
+  --code-bg: #f1f2f4;
+  /* fork:zn-11 —composer surface + its protrusion bar (Zeno --bg-composer /
+     --composer-protrusion). The card is a distinct surface from the canvas in
+     every palette, and the strip above it is one step darker still. */
+  --bg-composer: #ffffff;
+  --composer-border: color-mix(in srgb, #9aa0ab 36%, #ffffff);
+  --composer-protrusion: #f5f5f5;
   --danger: oklch(0.53 0.19 27);
   --danger-soft: oklch(0.53 0.19 27 / 0.11);
   --success: oklch(0.58 0.15 152);
@@ -192,42 +219,50 @@
   --success-contrast: oklch(1 0 0);
 }
 
-/* dark —warm brown-black neutrals, pale blue accent, warm-white action */
+/* dark —neutral graphite, Zeno's ladder (#191919 canvas, #151515 rail,
+   #2d2d2d panel, #383838 hover, #272727 user bubble, #2b2b2b composer).
+
+   fork:zn-11 — this palette used to be warm brown-black (hue 60, chroma .008).
+   Zeno's dark theme is a plain neutral grey ladder with a near-white foreground
+   at L .985 (vs .94 warm), which is why its UI reads crisp where the warm
+   version read sepia. Two further tells are kept here on purpose:
+     - `--code-bg` is DARKER than the canvas (#0f0f0f): code recedes, it does not
+       float. The old value was --tool-bg's lighter surface.
+     - muted/dim text are solid greys (#a9abb0 / #83858a), not alpha-of-cream. */
 html.dark,
 [data-theme="dark"] {
   color-scheme: dark;
-  --bg: oklch(0.22 0.008 60);
-  --bg-panel: oklch(0.17 0.008 60);
-  --bg-elev: oklch(0.27 0.008 58);
-  --bg-hover: oklch(0.96 0.01 85 / 0.06);
-  --bg-selected: oklch(0.96 0.01 85 / 0.1);
-  --bg-subtle: oklch(0.96 0.01 85 / 0.032);
-  --border: oklch(0.96 0.01 85 / 0.09);
-  --border-strong: oklch(0.96 0.01 85 / 0.17);
-  --border-faint: oklch(0.96 0.01 85 / 0.05);
-  --text: oklch(0.94 0.01 85);
-  --text-muted: oklch(0.94 0.01 85 / 0.72);
-  /* DSN-01 偏离说明（需父 Agent 确认）：子任务写“深色不动”，依据是审查报告的
-     bg/bg-panel 两底色表（4.81/4.94 ✅）。但门禁是 7 底色全矩阵，且侧栏选中行里
-     真有 12px text-dim 徽标落在 bg-selected 上（SessionSidebar.tsx:426/455），
-     那里旧值只有 4.20:1。0.52→0.56 是最小修正（selected 上 4.20→4.62，bg 上
-     4.81→约 5.2，视觉仍是 dim）；若坚持不动，门禁需给 text-dim 加 selected/
-     hover 例外，见报告。 */
-  --text-dim: oklch(0.94 0.01 85 / 0.56);
-  --accent: oklch(0.84 0.08 245);
-  --accent-hover: oklch(0.91 0.06 240);
-  /* DSN-01：--accent-text 专供文字；深色主题沿用 --accent 值（11.81:1，≥4.5）。 */
-  --accent-text: oklch(0.84 0.08 245);
-  --accent-contrast: oklch(0.17 0.008 60);
-  --accent-soft: oklch(0.66 0.16 250 / 0.16);
-  --accent-border: oklch(0.66 0.16 250 / 0.5);
-  --primary-bg: oklch(0.94 0.01 85);
-  --primary-fg: oklch(0.17 0.008 60);
-  --primary-hover: oklch(0.86 0.01 85);
-  --user-bg: oklch(0.96 0.01 85 / 0.05);
+  --bg: #191919;
+  --bg-panel: #151515;
+  --bg-elev: #2d2d2d;
+  --bg-hover: #383838;
+  --bg-selected: #3f3f3f;
+  --bg-subtle: #242424;
+  --border: #3c3c3c;
+  --border-strong: #4a4a4a;
+  --border-faint: color-mix(in srgb, #ffffff 8%, transparent);
+  --text: oklch(0.985 0.004 260);
+  --text-muted: #a9abb0;
+  --text-dim: #83858a;
+  --accent: oklch(0.78 0.12 253);
+  --accent-hover: oklch(0.86 0.09 250);
+  /* DSN-01：--accent-text 专供文字（在 #191919 上 ≥7:1）。 */
+  --accent-text: oklch(0.78 0.12 253);
+  --accent-contrast: #191919;
+  --accent-soft: oklch(0.72 0.12 255 / 0.18);
+  --accent-border: oklch(0.72 0.12 255 / 0.5);
+  --primary-bg: oklch(0.985 0.004 260);
+  --primary-fg: #191919;
+  --primary-hover: oklch(0.92 0.004 260);
+  --user-bg: #272727;
   --assistant-bg: transparent;
-  --tool-bg: oklch(0.27 0.008 58);
-  --code-bg: oklch(0.27 0.008 58);
+  --tool-bg: #242424;
+  --code-bg: #0f0f0f;
+  /* fork:zn-11 —composer #2b2b2b (lighter than canvas, darker than panel) and
+     its protrusion #1f1f1f (one step above canvas). */
+  --bg-composer: #2b2b2b;
+  --composer-border: color-mix(in srgb, #ffffff 11%, #2b2b2b);
+  --composer-protrusion: #1f1f1f;
   --danger: oklch(0.72 0.15 28);
   --danger-soft: oklch(0.63 0.2 27 / 0.18);
   --success: oklch(0.74 0.14 152);
@@ -248,16 +283,16 @@ html.dark,
   --bg: oklch(0.985 0.005 165);
   --bg-panel: oklch(0.956 0.008 165);
   --bg-elev: oklch(0.999 0.003 165);
-  --bg-hover: oklch(0.3 0.02 165 / 0.055);
-  --bg-selected: oklch(0.3 0.02 165 / 0.095);
-  --bg-subtle: oklch(0.3 0.02 165 / 0.032);
-  --border: oklch(0.3 0.02 165 / 0.1);
-  --border-strong: oklch(0.3 0.02 165 / 0.17);
-  --border-faint: oklch(0.3 0.02 165 / 0.055);
+  --bg-hover: oklch(0.955 0.012 165);
+  --bg-selected: oklch(0.925 0.018 165);
+  --bg-subtle: oklch(0.972 0.008 165);
+  --border: oklch(0.862 0.02 165);
+  --border-strong: oklch(0.782 0.025 165);
+  --border-faint: oklch(0.9 0.014 165);
   --text: oklch(0.27 0.02 165);
-  --text-muted: oklch(0.27 0.02 165 / 0.72);
-  /* DSN-01：浅色主题 --text-dim alpha 0.52→0.68（实测 3.22:1→5.16:1，≥4.5）。 */
-  --text-dim: oklch(0.27 0.02 165 / 0.68);
+  /* fork:zn-11 —solid tinted greys replace alpha overlays（同 light 块说明）。 */
+  --text-muted: oklch(0.44 0.02 165);
+  --text-dim: oklch(0.535 0.02 165);
   --accent: oklch(0.46 0.07 178);
   --accent-hover: oklch(0.39 0.075 178);
   /* DSN-01：--accent-text 专供文字；mist 沿用 --accent 值（6.05:1，≥4.5）。 */
@@ -268,10 +303,13 @@ html.dark,
   --primary-bg: oklch(0.27 0.02 165);
   --primary-fg: oklch(0.985 0.005 165);
   --primary-hover: oklch(0.37 0.02 165);
-  --user-bg: oklch(0.3 0.02 165 / 0.05);
+  --user-bg: oklch(0.95 0.01 165);
   --assistant-bg: transparent;
-  --tool-bg: oklch(0.956 0.008 165);
+  --tool-bg: oklch(0.972 0.008 165);
   --code-bg: oklch(0.956 0.008 165);
+  --bg-composer: oklch(0.999 0.003 165);
+  --composer-border: color-mix(in srgb, oklch(0.3 0.02 165) 18%, oklch(0.999 0.003 165));
+  --composer-protrusion: oklch(0.95 0.01 165);
   --danger: oklch(0.53 0.19 27);
   --danger-soft: oklch(0.53 0.19 27 / 0.11);
   --success: oklch(0.52 0.11 165);
@@ -292,16 +330,16 @@ html.dark,
   --bg: oklch(0.987 0.005 20);
   --bg-panel: oklch(0.958 0.007 12);
   --bg-elev: oklch(0.999 0.003 20);
-  --bg-hover: oklch(0.3 0.02 12 / 0.055);
-  --bg-selected: oklch(0.3 0.02 12 / 0.095);
-  --bg-subtle: oklch(0.3 0.02 12 / 0.032);
-  --border: oklch(0.3 0.02 12 / 0.1);
-  --border-strong: oklch(0.3 0.02 12 / 0.17);
-  --border-faint: oklch(0.3 0.02 12 / 0.055);
+  --bg-hover: oklch(0.957 0.012 12);
+  --bg-selected: oklch(0.927 0.018 12);
+  --bg-subtle: oklch(0.974 0.008 12);
+  --border: oklch(0.866 0.018 12);
+  --border-strong: oklch(0.786 0.022 12);
+  --border-faint: oklch(0.902 0.013 12);
   --text: oklch(0.28 0.015 12);
-  --text-muted: oklch(0.28 0.015 12 / 0.72);
-  /* DSN-01：浅色主题 --text-dim alpha 0.52→0.68（实测 3.19:1→5.09:1，≥4.5）。 */
-  --text-dim: oklch(0.28 0.015 12 / 0.68);
+  /* fork:zn-11 —solid tinted greys replace alpha overlays（同 light 块说明）。 */
+  --text-muted: oklch(0.45 0.017 12);
+  --text-dim: oklch(0.545 0.017 12);
   --accent: oklch(0.47 0.1 5);
   --accent-hover: oklch(0.4 0.105 5);
   /* DSN-01：--accent-text 专供文字；rose 沿用 --accent 值（6.37:1，≥4.5）。 */
@@ -312,10 +350,13 @@ html.dark,
   --primary-bg: oklch(0.28 0.015 12);
   --primary-fg: oklch(0.987 0.005 20);
   --primary-hover: oklch(0.38 0.015 12);
-  --user-bg: oklch(0.3 0.02 12 / 0.05);
+  --user-bg: oklch(0.952 0.009 12);
   --assistant-bg: transparent;
-  --tool-bg: oklch(0.958 0.007 12);
+  --tool-bg: oklch(0.974 0.008 12);
   --code-bg: oklch(0.958 0.007 12);
+  --bg-composer: oklch(0.999 0.003 20);
+  --composer-border: color-mix(in srgb, oklch(0.3 0.02 12) 18%, oklch(0.999 0.003 20));
+  --composer-protrusion: oklch(0.952 0.009 12);
   --danger: oklch(0.53 0.19 27);
   --danger-soft: oklch(0.53 0.19 27 / 0.11);
   --success: oklch(0.58 0.15 152);
@@ -337,16 +378,16 @@ html[data-theme="pine"],
   --bg: oklch(0.22 0.008 155);
   --bg-panel: oklch(0.17 0.008 155);
   --bg-elev: oklch(0.27 0.008 155);
-  --bg-hover: oklch(0.96 0.012 155 / 0.06);
-  --bg-selected: oklch(0.96 0.012 155 / 0.1);
-  --bg-subtle: oklch(0.96 0.012 155 / 0.032);
-  --border: oklch(0.96 0.012 155 / 0.09);
-  --border-strong: oklch(0.96 0.012 155 / 0.17);
-  --border-faint: oklch(0.96 0.012 155 / 0.05);
-  --text: oklch(0.94 0.012 155);
-  --text-muted: oklch(0.94 0.012 155 / 0.72);
-  /* DSN-01 偏离说明：同 dark（0.52→0.56，selected 上 4.20→4.62），理由见 dark 块注释。 */
-  --text-dim: oklch(0.94 0.012 155 / 0.56);
+  --bg-hover: oklch(0.36 0.014 155);
+  --bg-selected: oklch(0.42 0.016 155);
+  --bg-subtle: oklch(0.26 0.01 155);
+  --border: oklch(0.37 0.012 155);
+  --border-strong: oklch(0.45 0.014 155);
+  --border-faint: color-mix(in srgb, oklch(0.95 0.014 155) 8%, transparent);
+  --text: oklch(0.95 0.012 155);
+  /* fork:zn-11 —solid tinted greys replace alpha overlays（同 dark 块说明）。 */
+  --text-muted: oklch(0.75 0.012 155);
+  --text-dim: oklch(0.63 0.012 155);
   --accent: oklch(0.82 0.05 155);
   --accent-hover: oklch(0.9 0.04 155);
   /* DSN-01：--accent-text 专供文字；深色主题沿用 --accent 值（11.15:1，≥4.5）。 */
@@ -357,10 +398,13 @@ html[data-theme="pine"],
   --primary-bg: oklch(0.94 0.012 155);
   --primary-fg: oklch(0.17 0.008 155);
   --primary-hover: oklch(0.86 0.012 155);
-  --user-bg: oklch(0.96 0.012 155 / 0.05);
+  --user-bg: oklch(0.26 0.01 155);
   --assistant-bg: transparent;
-  --tool-bg: oklch(0.27 0.008 155);
-  --code-bg: oklch(0.27 0.008 155);
+  --tool-bg: oklch(0.2 0.008 155);
+  --code-bg: oklch(0.135 0.006 155);
+  --bg-composer: oklch(0.24 0.01 155);
+  --composer-border: oklch(0.36 0.012 155);
+  --composer-protrusion: oklch(0.19 0.008 155);
   --danger: oklch(0.72 0.15 28);
   --danger-soft: oklch(0.63 0.2 27 / 0.18);
   --success: oklch(0.74 0.14 152);
@@ -2406,15 +2450,23 @@ textarea,
 /* --- Composer: the one floating surface inside the chat column -------------
    Hook: the composer box is the only element carrying the inline
    `--radius-composer`. The compact (quote) variant renders borderRadius 0, so
-   it never matches —if that inline radius is ever changed, retarget this. */
+   it never matches —if that inline radius is ever changed, retarget this.
+
+   fork:zn-11 — the card now paints Zeno's composer surface (`--bg-composer`,
+   its own hairline, no drop shadow at all) instead of sitting on `--bg-elev`
+   with `--shadow-sm`. `--shadow-sm` is a bare hairline now, so the idle card is
+   border-only; focus is still a ring, but a 3px accent ring rather than a
+   shadow+ring stack. */
 .chat-content div[style*="--radius-composer"] {
   border-radius: var(--radius-composer) !important;
-  box-shadow: var(--shadow-sm) !important;
+  background: var(--bg-composer, var(--bg-elev)) !important;
+  border-color: var(--composer-border, var(--border)) !important;
+  box-shadow: none !important;
 }
 
 /* Focus lives on the composer box, not the bare textarea. */
 .chat-content div[style*="--radius-composer"]:focus-within {
-  box-shadow: var(--shadow-md), 0 0 0 3px var(--focus-ring) !important;
+  box-shadow: 0 0 0 3px var(--focus-ring) !important;
 }
 
 /* --- Focus ---------------------------------------------------------------

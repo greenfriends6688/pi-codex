@@ -6,6 +6,11 @@
  * audit-tokens.mjs）**发现不了重复主题块**——同名选择器出现两次时，后一份
  * 会静默胜出。只有让浏览器真正解析 CSS 并读回 computed value 才能暴露。
  *
+ * 颜色比较走**渲染后的 RGB**，不是字面串：构建链会把 `oklch()` 重写成 `lab()`
+ * （实测 `--accent-soft` 读回来是 `lab(59.8% -5.25 -53.8 / .12)`），所以按字面比
+ * 较会在正确值上误报。把两侧都丢给浏览器解析成 rgb 再比，才是「上色对不对」这篇
+ * 测试真正要问的问题，也不依赖任何色彩空间写法。
+ *
  * 前置：dev server 已在 127.0.0.1:30141 运行（`npm run dev`）。
  *
  * 用法：node docs/codex-skin/verify-themes.mjs
@@ -21,40 +26,48 @@ const { chromium } = require("playwright");
 const BASE = "http://127.0.0.1:30141/";
 
 // 本皮肤的期望值。改调色板时同步更新这里。
-// 比较时会把 oklch() 归一化，所以这里写作者态的 `oklch(0.995 0.004 85)` 即可，
-// 构建压缩成 `oklch(99.5% .004 85)` 也不会误报。
+// 比较走浏览器解析后的 RGB（见文件头），所以 hex / oklch 两种写法都可以写。
+//
+// fork:zn-11 — light / dark 两套换成 Zeno 的中性灰阶梯（纯灰、实色 hover、
+// 代码底色比画布更暗），mist / rose / pine 保持自己的色相但同样改为实色面。
+// 改这些值时三处要一起改：这里、app/globals.css、visual-spec.md §1 表格。
 const EXPECTED = {
-  light: { dark: false, bg: "oklch(1 0 0)", text: "oklch(0.26 0 0)", accent: "oklch(0.66 0.16 250)", primaryBg: "oklch(0.26 0 0)" },
-  dark: { dark: true, bg: "oklch(0.22 0.008 60)", text: "oklch(0.94 0.01 85)", accent: "oklch(0.84 0.08 245)", primaryBg: "oklch(0.94 0.01 85)" },
+  light: { dark: false, bg: "#ffffff", text: "#171717", accent: "oklch(0.61 0.16 250)", primaryBg: "#171717" },
+  dark: { dark: true, bg: "#191919", text: "oklch(0.985 0.004 260)", accent: "oklch(0.78 0.12 253)", primaryBg: "oklch(0.985 0.004 260)" },
   mist: { dark: false, bg: "oklch(0.985 0.005 165)", text: "oklch(0.27 0.02 165)", accent: "oklch(0.46 0.07 178)", primaryBg: "oklch(0.27 0.02 165)" },
   rose: { dark: false, bg: "oklch(0.987 0.005 20)", text: "oklch(0.28 0.015 12)", accent: "oklch(0.47 0.1 5)", primaryBg: "oklch(0.28 0.015 12)" },
-  pine: { dark: true, bg: "oklch(0.22 0.008 155)", text: "oklch(0.94 0.012 155)", accent: "oklch(0.82 0.05 155)", primaryBg: "oklch(0.94 0.012 155)" },
+  pine: { dark: true, bg: "oklch(0.22 0.008 155)", text: "oklch(0.95 0.012 155)", accent: "oklch(0.82 0.05 155)", primaryBg: "oklch(0.94 0.012 155)" },
 };
 
 // 先做一次零成本的重复选择器检查，给出比浏览器报错更直接的提示。
 // 注意选择器可能写成两行（`html[data-theme="pine"],` + `[data-theme="pine"] {`），
 // 所以要数「带 { 的那一行」，而不是数选择器名出现几次。
 const css = readFileSync("app/globals.css", "utf8");
-const hex = (v) => {
-  const s = String(v).trim().toLowerCase();
-  const m = /^#([0-9a-f]{3})$/.exec(s);
-  return m ? `#${m[1].split("").map((c) => c + c).join("")}` : s;
+
+// 颜色归一：把每个值真的画到 canvas 上，再读回中心像素。
+//
+// 为什么不能直接读 computed `color`：CSS Color 4 会**保留色彩空间**，
+// `color: lab(...)` 原样回读 `lab(...)`、`oklch(...)` 原样回读 `oklch(...)`。
+// 而构建链会把源码里的 `oklch()` 重写成 `lab()`，于是「期望值 oklch / 实际值
+// lab」永远不相等——按字面或按空间比较都会在正确值上误报。像素是唯一不依赖
+// 色彩空间写法的口径：两种写法算完必须落到同一个 sRGB 像素（容差 ±2，覆盖两条
+// 转换路径的末位舍入）。
+const PIXEL_OF_COLOR = (values) => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 8;
+  canvas.height = 8;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  return values.map((v) => {
+    ctx.clearRect(0, 0, 8, 8);
+    ctx.fillStyle = "#000";
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, 8, 8);
+    const [r, g, b, a] = ctx.getImageData(4, 4, 1, 1).data;
+    return [r, g, b, a];
+  });
 };
 
-// 自定义属性不会被解析成 rgb，浏览器返回的就是构建后的 token 序列。压缩器会把
-// `oklch(0.995 0.004 85)` 写成 `oklch(99.5% .004 85)`，所以按数值而不是字面比较。
-const oklchTriple = (v) => {
-  const m = /oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)/i.exec(String(v));
-  if (!m) return null;
-  const scale = m[2] === "%" ? 100 : 1;
-  return [Number(m[1]) / scale, Number(m[3]), Number(m[4])];
-};
-const sameColor = (got, want) => {
-  const a = oklchTriple(got);
-  const b = oklchTriple(want);
-  if (a && b) return a.every((value, index) => Math.abs(value - b[index]) < 1e-4);
-  return hex(got) === hex(want);
-};
+const samePixel = (a, b) => a.every((value, index) => Math.abs(value - b[index]) <= 2);
 
 let duplicated = false;
 for (const theme of Object.keys(EXPECTED)) {
@@ -90,25 +103,44 @@ for (const [theme, want] of Object.entries(EXPECTED)) {
       text: v("--text"),
       accent: v("--accent"),
       primaryBg: v("--primary-bg"),
+      /* fork:zn-11 —Zeno 的三档圆角参与核对：行 6 / 控件 10 / 面板 12，
+         输入框跟面板同档。旧版这里核的是 Codex 的 calc 尺度（`*` 号），
+         尺度已换成字面值，所以改成核对三个实际生效的半径。 */
       radiusMd: v("--radius-md"),
+      radiusLg: v("--radius-lg"),
+      radiusComposer: v("--radius-composer"),
     };
   });
+
+  // 颜色一律归一成**实际像素**再比（见文件头）。
+  const [gotBg, gotText, gotAccent, gotPrimary, wantBg, wantText, wantAccent, wantPrimary] =
+    await page.evaluate(PIXEL_OF_COLOR, [
+      got.bg, got.text, got.accent, got.primaryBg,
+      want.bg, want.text, want.accent, want.primaryBg,
+    ]);
+  const gotColors = { bg: gotBg, text: gotText, accent: gotAccent, primaryBg: gotPrimary };
+  const wantColors = { bg: wantBg, text: wantText, accent: wantAccent, primaryBg: wantPrimary };
 
   const diffs = [];
   if (got.dataTheme !== theme) diffs.push(`data-theme=${got.dataTheme}（应为 ${theme}）`);
   if (got.dark !== want.dark) diffs.push(`dark 类=${got.dark}（应为 ${want.dark}）`);
   for (const key of ["bg", "text", "accent", "primaryBg"]) {
-    if (!sameColor(got[key], want[key])) {
-      diffs.push(`${key}=${got[key]}（应为 ${want[key]}）`);
+    if (!samePixel(gotColors[key], wantColors[key])) {
+      diffs.push(`${key}=rgba(${gotColors[key]})（应为 rgba(${wantColors[key]})，源码 ${want[key]}）`);
     }
   }
-  if (!got.radiusMd.includes("*")) diffs.push(`--radius-md 未走 calc 尺度：${got.radiusMd}`);
+  // 圆角：--radius-md 会被 --radius-composer 间接引用，浏览器把 var() 原样
+  // 回读，所以要跟着链展开一层再比。
+  const resolvedComposer = got.radiusComposer === "var(--radius-lg)" ? got.radiusLg : got.radiusComposer;
+  if (got.radiusMd !== "10px") diffs.push(`--radius-md=${got.radiusMd}（应为 10px）`);
+  if (got.radiusLg !== "12px") diffs.push(`--radius-lg=${got.radiusLg}（应为 12px）`);
+  if (resolvedComposer !== "12px") diffs.push(`--radius-composer=${resolvedComposer}（应为 12px）`);
 
   if (diffs.length) {
     failed = true;
     console.log(`FAIL ${theme.padEnd(6)} ${diffs.join(" | ")}`);
   } else {
-    console.log(`OK   ${theme.padEnd(6)} bg=${got.bg.padEnd(9)} accent=${got.accent.padEnd(9)} radius-md=${got.radiusMd}`);
+    console.log(`OK   ${theme.padEnd(6)} bg=rgb(${gotColors.bg.slice(0, 3)}) accent=rgb(${gotColors.accent.slice(0, 3)}) radius=${got.radiusMd}/${got.radiusLg}/${resolvedComposer}`);
   }
 }
 

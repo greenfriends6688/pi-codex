@@ -955,8 +955,16 @@
   font-weight: 700;
 }
 
+/* fork:zn-09 — section cards (Zeno .settings-card): a hairline boundary groups
+   each section so the page reads as cards, not a flat list. Border only, no
+   fill — a fill would fight the theme-option grids and sliders inside.
+   Per-row inset dividers deliberately skipped: Zeno's rows are uniform
+   label/control pairs, ours are heterogeneous control groups. */
 .settings-general-section {
-  margin-top: 30px;
+  margin-top: 16px;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
 }
 
 .settings-general-section:first-of-type {
@@ -1480,16 +1488,18 @@
 }
 
 /* fork:ui-14 — settings search: input, jump hint, row highlight. */
+/* fork:zn-09 — 36px pill search (Zeno .settings-search): one shell style for
+   the rail search, replacing the 28px box. */
 .settings-search-input {
   width: 100%;
-  height: 28px;
+  height: 36px;
   margin: 0 0 8px;
-  padding: 0 8px;
+  padding: 0 14px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-pill);
   background: var(--bg);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-md);
 }
 .settings-search-input:focus-visible {
   outline: 2px solid var(--focus-ring, var(--accent));

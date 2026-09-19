@@ -7,7 +7,8 @@ import { TEXT } from "@/lib/typography";
 /**
  * 聊天 分区标题行（fork feature: `docs/patches/0001-chat-workspace.md`）。
  *
- * 与「项目」标题行同款排版（12.5px / 500 / text-dim + 右侧 28×28 图标按钮），
+ * 与「项目」标题行同款排版（14px / 500 / text-dim + 右侧 28×28 图标按钮，
+ * fork:zn-02：hover 前隐藏动作组），
  * 让 聊天 与 项目 在侧栏里读起来是两个平级分区，而不是「项目」下面的一行。
  *
  * 交互分工：
@@ -56,8 +57,11 @@ export function ChatWorkspaceRow({
     cursor: busy ? "progress" : "pointer",
   } as const;
 
+  // fork:zn-02 — 14px medium section head (Zeno group label); actions hide
+  // until hover/focus via .fork-section-actions (touch keeps them visible).
   return (
     <div
+      className="fork-section-head"
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -66,7 +70,7 @@ export function ChatWorkspaceRow({
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
-        minHeight: 28,
+        minHeight: "var(--zn-row)",
         paddingLeft: 10,
         paddingRight: 4,
       }}
@@ -95,7 +99,7 @@ export function ChatWorkspaceRow({
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
-            fontSize: TEXT.sm,
+            fontSize: TEXT.lg,
             fontWeight: 500,
             color: selected || hovered ? "var(--text)" : "var(--text-dim)",
             transition: "color 0.12s",
@@ -111,7 +115,7 @@ export function ChatWorkspaceRow({
         )}
       </button>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <div className="fork-section-actions" style={{ display: "flex", alignItems: "center", gap: 2 }}>
         <button
           type="button"
           onClick={onNewChat}

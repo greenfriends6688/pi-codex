@@ -270,7 +270,7 @@ test("renders a complete SDK skill expansion as a compact command", () => {
   assert.doesNotMatch(html, /Review the supplied files/);
 });
 
-test("renders user messages as right-aligned Codex prompt cards", () => {
+test("renders user messages as right-aligned prompt bubbles", () => {
   const html = renderMessage({
     role: "user",
     content: "Make the conversation match the Codex layout.",
@@ -279,7 +279,9 @@ test("renders user messages as right-aligned Codex prompt cards", () => {
   assert.match(html, /align-items:flex-end/);
   assert.match(html, /justify-content:flex-end/);
   assert.match(html, /--fork-user-bubble-max, min\(70%, 620px\)/);
-  assert.match(html, /border:1px solid var\(--border-faint\)/);
+  // fork:zn-11 — Zeno bubble: solid --user-bg fill, transparent hairline, radius xl.
+  assert.match(html, /background:var\(--user-bg\)/);
+  assert.match(html, /border:1px solid transparent/);
   assert.doesNotMatch(html, /max-width:88%/);
 });
 

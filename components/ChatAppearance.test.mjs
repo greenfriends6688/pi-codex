@@ -49,8 +49,9 @@ test("chat width validation preserves the default and supported range", () => {
 });
 
 test("chat font size preserves the default and bounds stored or supplied values", () => {
+  // fork:zn-11 —默认字号 13 → 14（Zeno 的正文尺寸）；下限/上限不变。
   for (const value of [undefined, null, "invalid", Infinity, NaN]) {
-    assert.equal(clampChatContentFontSize(value), 13);
+    assert.equal(clampChatContentFontSize(value), 14);
   }
   assert.equal(clampChatContentFontSize(8), 12);
   assert.equal(clampChatContentFontSize("18"), 18);

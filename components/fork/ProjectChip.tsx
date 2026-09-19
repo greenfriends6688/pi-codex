@@ -168,26 +168,28 @@ export function ProjectChip({ targets }: { targets: NewSessionTargets }): ReactN
         gap: 6,
         height: 26,
         maxWidth: "min(100%, 260px)",
-        padding: "0 8px 0 9px",
-        border: "1px solid var(--border-faint)",
-        borderRadius: 14,
-        background: "var(--bg-panel)",
-        color: "var(--text-muted)",
-        fontSize: TEXT.sm,
-        fontWeight: 500,
+        padding: "0 8px",
+        // fork:zn-04 — Zeno .composer-protrusion-chip: a chromeless chip that
+        // lives ON the protrusion strip. It used to be its own bordered card
+        // (border + 14px radius + --bg-panel), which read as a control floating
+        // above the strip instead of the strip's own content.
+        border: "none",
+        borderRadius: "var(--radius-sm)",
+        background: "transparent",
+        // fork:zn-04 — `--text`, not Zeno's `--foreground`: this fork's foreground
+        // token is `--text` (audit-tokens.mjs keeps the reference spelling out).
+        color: "var(--text)",
+        fontSize: TEXT.md,
+        fontWeight: 400,
         lineHeight: 1,
         cursor: "pointer",
-        transition: "background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out), border-color var(--motion-fast) var(--ease-out)",
+        transition: "background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out)",
       }}
       onMouseEnter={(event) => {
-        event.currentTarget.style.background = "var(--bg-hover)";
-        event.currentTarget.style.color = "var(--text)";
-        event.currentTarget.style.borderColor = "var(--border)";
+        event.currentTarget.style.background = "color-mix(in srgb, var(--text) 10%, transparent)";
       }}
       onMouseLeave={(event) => {
-        event.currentTarget.style.background = "var(--bg-panel)";
-        event.currentTarget.style.color = "var(--text-muted)";
-        event.currentTarget.style.borderColor = "var(--border-faint)";
+        event.currentTarget.style.background = "transparent";
       }}
     >
       <span style={{ display: "flex", flexShrink: 0 }}>

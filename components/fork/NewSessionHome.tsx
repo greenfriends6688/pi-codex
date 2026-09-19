@@ -94,10 +94,12 @@ export function NewSessionHome({
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              width: 40,
-              height: 40,
+              // fork:zn-03 — 48px mark (Zeno hero logo size-12) on the 12px
+              // surface radius; it was a 40px badge on the control radius.
+              width: 48,
+              height: 48,
               marginBottom: 14,
-              borderRadius: "var(--radius-md)",
+              borderRadius: "var(--radius-lg)",
               background: "var(--bg-panel)",
               border: "1px solid var(--border-faint)",
               color: "var(--text-muted)",
@@ -111,9 +113,10 @@ export function NewSessionHome({
           <h1
             style={{
               margin: 0,
-              fontSize: "var(--text-2xl)",
-              fontWeight: 500,
-              letterSpacing: "-0.02em",
+              // fork:zn-03 — 26px semibold hero title (Zeno empty hero).
+              fontSize: "var(--zn-hero-title)",
+              fontWeight: 600,
+              letterSpacing: "-0.03em",
               color: "var(--text)",
               lineHeight: "var(--leading-title)",
             }}

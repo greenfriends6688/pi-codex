@@ -59,6 +59,8 @@ interface Props {
   onAgentEnd?: () => void;
   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
+  /** fork:zn-03 — reports empty-chat so AppShell can hide the top bar. */
+  onEmptyChange?: (empty: boolean) => void;
   onSessionForked?: (newSessionId: string) => void;
   /** fork:proma-05-explore — 在右栏开一个分支的只读 tab（与主线并排看）。 */
   onOpenSessionPane?: (sessionId: string, parentSessionId?: string | null) => void;
@@ -314,7 +316,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
   );
 }
 
-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onOpenSessionPane, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, newSessionTargets = null, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onOpenSessionPane, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, newSessionTargets = null, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, onEmptyChange }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
   const { displayMode: processDisplayMode } = useProcessDisplayMode();
@@ -957,6 +959,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [messages.length]);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
+  // fork:zn-03 — report emptiness up (Zeno shows ThreadHeader only once the
+  // timeline has activity). Effect, not render-time call: the parent setState
+  // must not run during this render.
+  useEffect(() => {
+    onEmptyChange?.(isEmptyNew);
+  }, [isEmptyNew, onEmptyChange]);
 
   // fork:ui-todo — the session's task list, read back from the transcript (the
   // built-in `todo` tool stores each list in its tool result). Memoized: the scan
@@ -1092,9 +1100,26 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     ? (modelThinkingLevelMaps[`${displayModelValue.provider}:${displayModelValue.modelId}`] ?? null)
     : null;
 
+  // fork:zn-04 — protrusion strip for the empty new-session state. Built here but
+  // rendered by ChatInput immediately above the card; see the `protrusion` prop.
+  // It only exists on the new-session page, so a normal session never renders one
+  // (and therefore never loses the card's top corners).
+  const composerProtrusion = isEmptyNew && newSessionTargets ? (
+    <div className="fork-protrusion-bar" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, minWidth: 0 }}>
+      <ProjectChip targets={newSessionTargets} />
+      {!newSessionTargets.error && <ComposerTipLine />}
+      {newSessionTargets.error && (
+        <span role="alert" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: TEXT.xs, color: "var(--danger)" }}>
+          {newSessionTargets.error}
+        </span>
+      )}
+    </div>
+  ) : null;
+
   const chatInputElement = (
     <ChatInput
       ref={chatInputRef}
+      protrusion={composerProtrusion}
       onSend={handleSend}
       onAbort={handleAbort}
       onSteer={agentRunning ? handleSteer : undefined}
@@ -1830,20 +1855,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           </div>
         )}
         {isEmptyNew && (
-          <div className="mx-auto w-full" style={{ maxWidth: "var(--composer-max-width, 892px)", paddingLeft: 16, paddingRight: isMobile ? 16 : 68 }}>
-            {/* fork:ui-projectchip — "this chat runs in <workspace>" selector, sitting
-                between the hero and the composer the way MusePi's welcome page does. */}
-            {newSessionTargets && (
-              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, minWidth: 0, marginBottom: 8 }}>
-                <ProjectChip targets={newSessionTargets} />
-                {!newSessionTargets.error && <ComposerTipLine />}
-                {newSessionTargets.error && (
-                  <span role="alert" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: TEXT.xs, color: "var(--danger)" }}>
-                    {newSessionTargets.error}
-                  </span>
-                )}
-              </div>
-            )}
+          <div className="mx-auto w-full" style={{ maxWidth: "var(--composer-max-width, 892px)", paddingLeft: 16, paddingRight: 16 }}>
             <NewSessionUpdateLink label={(version) => t("appUpdate.releaseNotes", { version })} />
           </div>
         )}

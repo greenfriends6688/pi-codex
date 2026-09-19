@@ -18,11 +18,12 @@ test("the chat row offers select, new chat, configure and collapse as separate b
   assert.ok(selectButtonEnd > 0 && newChatIndex > selectButtonEnd, "action buttons follow the select button");
 });
 
-// 聊天 与 项目 平级：标题行与「项目」标题行同款排版（同一字号 token/字重/颜色与 28×28 图标按钮；
-// DSN-07 后原 12.5px 归并到 --text-sm 档，两侧同步收敛）。
+// 聊天 与 项目 平级：标题行与「项目」标题行同款排版（fork:zn-02 后两侧都走
+// --zn-row 高 + TEXT.lg / 500 / text-dim + 28×28 图标按钮）。
+// 断言「两边一致」而不是钉死某一个字号：这才是这个测试的真正约束。
 test("the chat caption matches the projects caption typography", () => {
-  assert.match(row, /fontSize: TEXT\.sm,\n\s+fontWeight: 500,/);
-  assert.match(row, /minHeight: 28,/);
+  assert.match(row, /fontSize: TEXT\.lg,\n\s+fontWeight: 500,/);
+  assert.match(row, /minHeight: "var\(--zn-row\)"/);
   assert.match(row, /width: 28,\n\s+height: 28,/);
 });
 
