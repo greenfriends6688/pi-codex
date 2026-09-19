@@ -745,6 +745,9 @@ export const zhCNLocale: LocalePlugin = {
     "explore.broughtBack": "已写入父会话草稿",
     "explore.nothingYet": "这条分支还没有可带回的结论",
     "explore.openParent": "打开父会话",
+    "explore.openPane": "并排查看",
+    "explore.openInMain": "在主线打开",
+    "explore.paneFailed": "读不到这条分支",
     // fork:proma-04-rewind — 会话回退
     "rewind.action": "回退到此处",
     "rewind.actionTitle": "删掉这条消息之后的所有对话",

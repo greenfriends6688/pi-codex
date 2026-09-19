@@ -745,6 +745,9 @@ export const zhTWLocale: LocalePlugin = {
     "explore.broughtBack": "已寫入父會話草稿",
     "explore.nothingYet": "這條分支還沒有可帶回的結論",
     "explore.openParent": "開啟父會話",
+    "explore.openPane": "並排檢視",
+    "explore.openInMain": "在主題開啟",
+    "explore.paneFailed": "讀不到這條分支",
     // fork:proma-04-rewind — 工作階段回退
     "rewind.action": "回退到此處",
     "rewind.actionTitle": "刪掉這則訊息之後的所有對話",

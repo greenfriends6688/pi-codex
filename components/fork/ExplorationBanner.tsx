@@ -28,12 +28,15 @@ export function ExplorationBanner({
   branchEntryIds,
   branchMessages,
   onOpenParent,
+  onOpenPane,
 }: {
   branchSessionId: string;
   parentSessionId: string;
   branchEntryIds: readonly string[];
   branchMessages: readonly ExplorationMessageLike[];
   onOpenParent?: (sessionId: string) => void;
+  /** 有右栏面板时传进来：在右栏开一个只读 tab，与主线并排看（可选）。 */
+  onOpenPane?: () => void;
 }) {
   const { t } = useI18n();
   const [parent, setParent] = useState<{ entryIds: string[]; messages: ExplorationMessageLike[] } | null>(null);
@@ -120,6 +123,24 @@ export function ExplorationBanner({
       {broughtBack && <span role="status" style={{ fontSize: TEXT.xs, color: "var(--text-muted)" }}>{t("explore.broughtBack")}</span>}
       {!broughtBack && !canBringBack && (
         <span style={{ fontSize: TEXT.xs, color: "var(--text-muted)" }}>{t("explore.nothingYet")}</span>
+      )}
+      {onOpenPane && (
+        <button
+          type="button"
+          onClick={onOpenPane}
+          title={t("explore.openPane")}
+          style={{
+            padding: "3px 8px",
+            background: "none",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-sm)",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            fontSize: TEXT.xs,
+          }}
+        >
+          {t("explore.openPane")}
+        </button>
       )}
       {onOpenParent && (
         <button

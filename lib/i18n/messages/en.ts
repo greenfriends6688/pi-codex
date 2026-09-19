@@ -746,6 +746,9 @@ export const enLocale: LocalePlugin = {
     "explore.broughtBack": "Written to the parent's draft",
     "explore.nothingYet": "This branch has no conclusion to bring back yet",
     "explore.openParent": "Open the parent session",
+    "explore.openPane": "Open side by side",
+    "explore.openInMain": "Open as the main chat",
+    "explore.paneFailed": "Could not load this branch",
     // fork:proma-04-rewind — 会话回退
     "rewind.action": "Rewind to here",
     "rewind.actionTitle": "Truncate every message after this one",

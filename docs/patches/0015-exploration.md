@@ -5,9 +5,9 @@
 | 意图 | 从主线任意一条消息开一条**探索分支**（继承该点之前的上下文），分支里得到的结论可以一键「带回」主线草稿（不自动发送） |
 | 参照实现 | Proma：右栏 `exploration:<sessionId>` tab、「带回结论」只写草稿；探索元数据 `explorationParentSessionId / sourceMessageId / sourceLabel` |
 | fork 标记 | `fork:proma-05-explore` |
-| 新增文件 | 3 个：`lib/exploration.ts`、`lib/exploration.test.mjs`、`components/fork/ExplorationBanner.tsx` |
-| 上游文件接触面 | 4 个：`components/ChatWindow.tsx`（2 处接线）、三个 i18n 文件（8 个 key） |
-| `.patch` | [`0015-exploration.patch`](./0015-exploration.patch)（18.0KB，7 个文件；**基线是动手前的真快照**） |
+| 新增文件 | 4 个：`lib/exploration.ts`、`lib/exploration.test.mjs`、`components/fork/ExplorationBanner.tsx`、`components/fork/ExplorationPane.tsx` |
+| 上游文件接触面 | 6 个：`components/ChatWindow.tsx`、`components/AppShell.tsx`、`components/TabBar.tsx`（`kind: "session"`）、三个 i18n 文件（11 个 key） |
+| `.patch` | [`0015-exploration.patch`](./0015-exploration.patch)（基线是动手前的真快照） |
 
 ## 一个关键判断：来源不需要元数据
 
@@ -38,14 +38,20 @@
 ## 验收
 
 - 单测 `lib/exploration.test.mjs`（9 例）：文本抽取忽略 thinking/toolCall；标签压平与截断；公共前缀定位 fork 点；新条目之后不再匹配；无共有条目 → null；fork 在首条消息之后 → `sourceLabel` 为空串；delta 只取 assistant；只有用户消息 → 空结论；`planBringBack` 追加已有草稿 + 引用去重 + 空结论返回 null。
-- 浏览器冒烟 `test-results/smoke-exploration.mjs`（Playwright，一次性 fixture 会话，5 项全过）：分支显示「探索分支」抬头条 → 抬头条写出父会话那条来源消息 → 点「带回结论」切到父会话 → 父会话草稿里出现分支结论 → **父会话转录仍是 2 条（没有自动发送）**。
+- 浏览器冒烟 `test-results/smoke-exploration.mjs`（Playwright，一次性 fixture 会话，**7 项全过**）：分支显示抬头条 → 写出父会话那条来源消息 → 点「并排查看」右栏出现只读 tab 且**转录可读** → 右栏 tab 里也有抬头条 → 在**右栏**点「带回结论」→ 主线切到父会话 → 草稿里出现分支结论 → **父会话转录仍是 2 条（没有自动发送）**。
 - `tsc --noEmit` 干净；`npm run lint` 0 error；`npm test` 全绿（环境性失败见仓库说明）。
 
-## 还没做的（规格里的下一层）
+## 右栏并排（已做）与没做的部分
 
-- **右栏并排**：Proma 是把探索分支开在右栏 tab 里和主线并排看。本仓的 `Tab`（`components/TabBar.tsx`）目前只承载文件/终端/浏览器，**新增一种「会话 tab」要动 AppShell 的 tab 模型**，所以这一版先复用既有行为：fork 出来的分支直接作为当前会话打开（`onSessionForked` → `?session=<新 id>`），抬头条给出「打开父会话」回跳。
-- **划词探索**（`AgentHistorySelectionLayer` 那个入口）：本仓的选区工具栏（若有）可以直接复用同一个 fork 动作，不需要新逻辑。
-- 消息操作栏里**没有单独加**「探索此分支」按钮：既有「新会话」按钮走的 `fork` 命令与探索**完全同一条路径**（同一份复制语义），再加一个同名同义的按钮只会让人猜两者差别；抬头条会自动出现。要独立入口/文案的话是 3 行的事。
+**右栏并排看**：`components/fork/ExplorationPane.tsx` + `TabBar` 新增 `kind: "session"` + AppShell 的 `branchTabs` 状态。抽屉式的取舍：
+
+- 只读渲染分支转录（复用主线同款 `MessageView`，工具卡/排版一致），**不做第二个可交互聊天面板** —— 那要把 ChatWindow 的全套接线（SSE / composer / 模型选择）在右栏再搭一遍，成本高且容易和主线状态打架；
+- 抬头条**也在 pane 里**，所以不用离开主线就能「带回结论」；想接着聊就「在主线打开」（走既有的 `?session=` 路由）。
+
+**没有单独做的东西**（都是重复入口，做了只会让人猜差别）：
+
+- 消息操作栏里的「探索此分支」按钮：既有的「新会话」走的是同一条 `fork` 命令（同一份复制语义），抬头条会自动出现；
+- 划词入口（MU-04 那个选区工具栏）：本仓聊天里的选区流程是 `ChatWindow.captureQuotedSelection` → `AppShell.handleAskInNewChat`（`fork_branch` 新建会话），产出的同样是「带复制前缀的子会话」，抬头条同样会自动出现 —— 所以本仓现在缺的不是逻辑而是那个工具栏本身，要单独立一个补丁。
 
 ## 合并上游后怎么重打
 

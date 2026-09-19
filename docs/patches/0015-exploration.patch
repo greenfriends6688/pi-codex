@@ -266,7 +266,7 @@
 +});
 --- a/components/fork/ExplorationBanner.tsx
 +++ b/components/fork/ExplorationBanner.tsx
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,183 @@
 +"use client";
 +
 +import { useEffect, useMemo, useState } from "react";
@@ -297,12 +297,15 @@
 +  branchEntryIds,
 +  branchMessages,
 +  onOpenParent,
++  onOpenPane,
 +}: {
 +  branchSessionId: string;
 +  parentSessionId: string;
 +  branchEntryIds: readonly string[];
 +  branchMessages: readonly ExplorationMessageLike[];
 +  onOpenParent?: (sessionId: string) => void;
++  /** 有右栏面板时传进来：在右栏开一个只读 tab，与主线并排看（可选）。 */
++  onOpenPane?: () => void;
 +}) {
 +  const { t } = useI18n();
 +  const [parent, setParent] = useState<{ entryIds: string[]; messages: ExplorationMessageLike[] } | null>(null);
@@ -390,6 +393,24 @@
 +      {!broughtBack && !canBringBack && (
 +        <span style={{ fontSize: TEXT.xs, color: "var(--text-muted)" }}>{t("explore.nothingYet")}</span>
 +      )}
++      {onOpenPane && (
++        <button
++          type="button"
++          onClick={onOpenPane}
++          title={t("explore.openPane")}
++          style={{
++            padding: "3px 8px",
++            background: "none",
++            border: "1px solid var(--border)",
++            borderRadius: "var(--radius-sm)",
++            color: "var(--text-muted)",
++            cursor: "pointer",
++            fontSize: TEXT.xs,
++          }}
++        >
++          {t("explore.openPane")}
++        </button>
++      )}
 +      {onOpenParent && (
 +        <button
 +          type="button"
@@ -429,6 +450,124 @@
 +    </div>
 +  );
 +}
+--- a/components/fork/ExplorationPane.tsx
++++ b/components/fork/ExplorationPane.tsx
+@@ -0,0 +1,115 @@
++"use client";
++
++import { useEffect, useMemo, useState } from "react";
++import { useI18n } from "@/hooks/useI18n";
++import { TEXT } from "@/lib/typography";
++import type { AgentMessage, ToolResultMessage } from "@/lib/types";
++import { MessageView } from "../MessageView";
++import { ExplorationBanner } from "./ExplorationBanner";
++
++/**
++ * fork:proma-05-explore — 右栏的探索分支视图（只读）。
++ *
++ * 规格要的是「分支在右栏以独立 tab 打开、可与主线并排看」。这里刻意**不做**第二个可交互
++ * 的聊天面板：那要把 ChatWindow 的全套接线（SSE、composer、模型选择……）在右栏再搭一遍，
++ * 成本高且容易和主线状态打架。要做到的是「边看主线边看分支、看完就带回」：
++ *
++ * - 只读渲染分支转录（复用主线同款 `MessageView`，所以工具卡/排版一致）；
++ * - 抬头条也在这里（所以**不用离开主线**就能把结论带回父会话草稿）；
++ * - 想接着聊就「在主线打开」，走既有的 ?session= 路由。
++ */
++export function ExplorationPane({
++  sessionId,
++  parentSessionId,
++  onOpenAsMain,
++}: {
++  sessionId: string;
++  /** 已知父会话时传进来：抬头条要它来推「从哪条消息探索来的」。 */
++  parentSessionId?: string | null;
++  onOpenAsMain?: (sessionId: string) => void;
++}) {
++  const { t } = useI18n();
++  const [context, setContext] = useState<{ messages: AgentMessage[]; entryIds: string[] } | null>(null);
++  const [error, setError] = useState<string | null>(null);
++
++  useEffect(() => {
++    let cancelled = false;
++    setContext(null);
++    setError(null);
++    void (async () => {
++      try {
++        const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/context`, { cache: "no-store" });
++        if (!res.ok) throw new Error(`HTTP ${res.status}`);
++        const data = await res.json() as { context?: { messages?: AgentMessage[]; entryIds?: string[] } };
++        if (cancelled) return;
++        setContext({ messages: data.context?.messages ?? [], entryIds: data.context?.entryIds ?? [] });
++      } catch (caught) {
++        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
++      }
++    })();
++    return () => { cancelled = true; };
++  }, [sessionId]);
++
++  const toolResults = useMemo(() => {
++    const map = new Map<string, ToolResultMessage>();
++    for (const message of context?.messages ?? []) {
++      if (message.role === "toolResult") {
++        map.set((message as ToolResultMessage).toolCallId, message as ToolResultMessage);
++      }
++    }
++    return map;
++  }, [context]);
++
++  return (
++    <div style={{ height: "100%", minWidth: 0, overflowY: "auto", padding: "10px 12px" }}>
++      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
++        <strong style={{ fontSize: TEXT.sm, color: "var(--text)" }}>{t("explore.title")}</strong>
++        <span style={{ flex: 1 }} />
++        {onOpenAsMain && (
++          <button
++            type="button"
++            onClick={() => onOpenAsMain(sessionId)}
++            title={t("explore.openInMain")}
++            style={{
++              padding: "3px 8px",
++              background: "none",
++              border: "1px solid var(--border)",
++              borderRadius: "var(--radius-sm)",
++              color: "var(--text-muted)",
++              cursor: "pointer",
++              fontSize: TEXT.xs,
++            }}
++          >
++            {t("explore.openInMain")}
++          </button>
++        )}
++      </div>
++
++      {error && <div role="alert" style={{ fontSize: TEXT.sm, color: "var(--danger)" }}>{t("explore.paneFailed")}：{error}</div>}
++      {!error && context === null && <div style={{ fontSize: TEXT.sm, color: "var(--text-dim)" }}>{t("i18n.loading")}</div>}
++
++      {context && (
++        <>
++          {parentSessionId && (
++            <ExplorationBanner
++              branchSessionId={sessionId}
++              parentSessionId={parentSessionId}
++              branchEntryIds={context.entryIds}
++              branchMessages={context.messages}
++              onOpenParent={onOpenAsMain}
++            />
++          )}
++          <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
++            {context.messages.map((message, index) => (
++              <MessageView
++                key={context.entryIds[index] ?? index}
++                message={message}
++                toolResults={toolResults}
++              />
++            ))}
++          </div>
++        </>
++      )}
++    </div>
++  );
++}
 --- a/components/ChatWindow.tsx
 +++ b/components/ChatWindow.tsx
 @@ -22,6 +22,8 @@
@@ -440,7 +579,25 @@
  import { extractTodoState } from "@/lib/todo-state";
  import { AnsiText } from "./AnsiText";
  import { useI18n } from "@/hooks/useI18n";
-@@ -1269,6 +1271,16 @@
+@@ -58,6 +60,8 @@
+   onAttentionNeeded?: (request: BlockingExtensionUiRequest) => void;
+   onSessionCreated?: (session: SessionInfo, sourceDraftKey: string) => void;
+   onSessionForked?: (newSessionId: string) => void;
++  /** fork:proma-05-explore — 在右栏开一个分支的只读 tab（与主线并排看）。 */
++  onOpenSessionPane?: (sessionId: string, parentSessionId?: string | null) => void;
+   modelsRefreshKey?: number;
+   chatInputRef?: React.RefObject<ChatInputHandle | null>;
+   onBranchDataChange?: (tree: SessionTreeNode[], activeLeafId: string | null, onLeafChange: (leafId: string | null) => void) => void;
+@@ -310,7 +314,7 @@
+   );
+ }
+ 
+-export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, newSessionTargets = null, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
++export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onOpenSessionPane, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, newSessionTargets = null, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio }: Props) {
+   const { t } = useI18n();
+   const isMobile = useIsMobile();
+   const { displayMode: processDisplayMode } = useProcessDisplayMode();
+@@ -1269,6 +1273,17 @@
          >
            <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING_CSS}` }}>
              <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 800px)", margin: "0 auto" }}>
@@ -452,14 +609,115 @@
 +                branchEntryIds={entryIds}
 +                branchMessages={messages}
 +                onOpenParent={onOpenSession}
++                onOpenPane={onOpenSessionPane ? () => onOpenSessionPane(session.id, session.parentSessionId) : undefined}
 +              />
 +            )}
              {(() => {
                let lastUserIdx = -1;
                for (let i = messages.length - 1; i >= 0; i--) {
+--- a/components/TabBar.tsx
++++ b/components/TabBar.tsx
+@@ -11,7 +11,7 @@
+   id: string;
+   label: string;
+   filePath: string;
+-  kind?: "terminal" | "browser";
++  kind?: "terminal" | "browser" | "session";
+   closing?: boolean;
+   sourceSessionId?: string | null;
+   initialDisplayMode?: FileViewerDisplayMode;
+--- a/components/AppShell.tsx
++++ b/components/AppShell.tsx
+@@ -80,6 +80,8 @@
+ import type { SessionRowContextMenuDetail } from "@/lib/session-row-context-menu";
+ import { ContextMenuProvider } from "./ContextMenu";
+ import type { NewSessionProject, NewSessionTargets } from "./fork/ProjectChip";
++// fork:proma-05-explore — 右栏并排看探索分支（只读）
++import { ExplorationPane } from "./fork/ExplorationPane";
+ import { SessionRowContextMenuBridge } from "./SessionRowContextMenuBridge";
+ import { WallpaperLayer } from "./WallpaperLayer";
+ import { initWallpaper } from "@/hooks/useWallpaper";
+@@ -565,6 +567,8 @@
+   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
+   const [terminalsRestored, setTerminalsRestored] = useState(false);
+   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
++  // fork:proma-05-explore — 探索分支的右栏只读 tab（可与主线并排看）
++  const [branchTabs, setBranchTabs] = useState<{ id: string; sessionId: string; parentSessionId: string | null; label: string }[]>([]);
+   const [browsersRestored, setBrowsersRestored] = useState(false);
+   const panelTabs: Tab[] = [...fileTabs, ...terminalTabs.map((tab) => ({
+     id: tab.id,
+@@ -577,6 +581,11 @@
+     label: browserTabLabel(tab.url) || translate("browser.newTab"),
+     filePath: tab.url,
+     kind: "browser" as const,
++  })), ...branchTabs.map((tab) => ({
++    id: tab.id,
++    label: tab.label,
++    filePath: tab.sessionId,
++    kind: "session" as const,
+   }))];
+ 
+   useEffect(() => {
+@@ -1303,7 +1312,23 @@
+     if (!workspaceSwapped && !replacement && !remaining.length && !fileTabs.length) setRightPanelOpen(false);
+   };
+ 
++  // fork:proma-05-explore — 打开/切换探索分支的右栏 tab
++  const openBranchTab = useCallback((sessionId: string, parentSessionId?: string | null) => {
++    const id = `branch:${sessionId}`;
++    setBranchTabs((tabs) => (tabs.some((tab) => tab.id === id)
++      ? tabs
++      : [...tabs, { id, sessionId, parentSessionId: parentSessionId ?? null, label: translate("explore.title") }]));
++    setActiveFileTabId(id);
++    setRightPanelOpen(true);
++  }, [translate]);
++
+   const handleCloseFileTab = useCallback((tabId: string) => {
++    if (branchTabs.some((tab) => tab.id === tabId)) {
++      const remaining = branchTabs.filter((tab) => tab.id !== tabId);
++      setBranchTabs(remaining);
++      setActiveFileTabId((current) => current !== tabId ? current : remaining.at(-1)?.id ?? fileTabs.at(-1)?.id ?? null);
++      return;
++    }
+     if (browserTabs.some((tab) => tab.id === tabId)) {
+       const remaining = browserTabs.filter((tab) => tab.id !== tabId);
+       setBrowserTabs(remaining);
+@@ -3114,6 +3139,7 @@
+               onAttentionNeeded={handleAttentionNeeded}
+               onSessionCreated={handleSessionCreated}
+               onSessionForked={handleSessionForked}
++              onOpenSessionPane={openBranchTab}
+               modelsRefreshKey={modelsRefreshKey}
+               chatInputRef={chatInputRef}
+               onBranchDataChange={handleBranchDataChange}
+@@ -3295,7 +3321,7 @@
+                 { sourceSessionId: activeFileTab.sourceSessionId },
+               )}
+             />
+-          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !browserTabs.some((tab) => tab.id === activeFileTabId) ? (
++          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !browserTabs.some((tab) => tab.id === activeFileTabId) && !branchTabs.some((tab) => tab.id === activeFileTabId) ? (
+             activeCwd ? (
+               explorerPanel
+             ) : (
+@@ -3304,6 +3330,15 @@
+               </div>
+             )
+           ) : null}
++          {branchTabs.map((tab) => (
++            <div key={tab.id} hidden={tab.id !== activeFileTabId} style={{ width: "100%", height: "100%" }}>
++              <ExplorationPane
++                sessionId={tab.sessionId}
++                parentSessionId={tab.parentSessionId}
++                onOpenAsMain={handleOpenSession}
++              />
++            </div>
++          ))}
+           {browserTabs.map((tab) => (
+             <div key={tab.id} hidden={tab.id !== activeFileTabId} style={{ width: "100%", height: "100%" }}>
+               <BrowserPanel tab={tab} onChangeUrl={handleBrowserUrlChange} />
 --- a/lib/i18n/messages/en.ts
 +++ b/lib/i18n/messages/en.ts
-@@ -737,6 +737,15 @@
+@@ -737,6 +737,18 @@
      "chat.outputLocal": "output stays local",
      "chat.outputModel": "output sent to model",
      "chat.chatOnly": "Chat only",
@@ -472,12 +730,15 @@
 +    "explore.broughtBack": "Written to the parent's draft",
 +    "explore.nothingYet": "This branch has no conclusion to bring back yet",
 +    "explore.openParent": "Open the parent session",
++    "explore.openPane": "Open side by side",
++    "explore.openInMain": "Open as the main chat",
++    "explore.paneFailed": "Could not load this branch",
      // fork:proma-04-rewind — 会话回退
      "rewind.action": "Rewind to here",
      "rewind.actionTitle": "Truncate every message after this one",
 --- a/lib/i18n/messages/zh-CN.ts
 +++ b/lib/i18n/messages/zh-CN.ts
-@@ -736,6 +736,15 @@
+@@ -736,6 +736,18 @@
      "chat.outputLocal": "输出保留在本地",
      "chat.outputModel": "输出发送给模型",
      "chat.chatOnly": "仅聊天",
@@ -490,12 +751,15 @@
 +    "explore.broughtBack": "已写入父会话草稿",
 +    "explore.nothingYet": "这条分支还没有可带回的结论",
 +    "explore.openParent": "打开父会话",
++    "explore.openPane": "并排查看",
++    "explore.openInMain": "在主线打开",
++    "explore.paneFailed": "读不到这条分支",
      // fork:proma-04-rewind — 会话回退
      "rewind.action": "回退到此处",
      "rewind.actionTitle": "删掉这条消息之后的所有对话",
 --- a/lib/i18n/messages/zh-TW.ts
 +++ b/lib/i18n/messages/zh-TW.ts
-@@ -736,6 +736,15 @@
+@@ -736,6 +736,18 @@
      "chat.outputLocal": "輸出保留在本地",
      "chat.outputModel": "輸出會傳送給模型",
      "chat.chatOnly": "僅聊天",
@@ -508,6 +772,9 @@
 +    "explore.broughtBack": "已寫入父會話草稿",
 +    "explore.nothingYet": "這條分支還沒有可帶回的結論",
 +    "explore.openParent": "開啟父會話",
++    "explore.openPane": "並排檢視",
++    "explore.openInMain": "在主題開啟",
++    "explore.paneFailed": "讀不到這條分支",
      // fork:proma-04-rewind — 工作階段回退
      "rewind.action": "回退到此處",
      "rewind.actionTitle": "刪掉這則訊息之後的所有對話",

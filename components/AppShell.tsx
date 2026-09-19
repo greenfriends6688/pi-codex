@@ -80,6 +80,8 @@ import {
 import type { SessionRowContextMenuDetail } from "@/lib/session-row-context-menu";
 import { ContextMenuProvider } from "./ContextMenu";
 import type { NewSessionProject, NewSessionTargets } from "./fork/ProjectChip";
+// fork:proma-05-explore — 右栏并排看探索分支（只读）
+import { ExplorationPane } from "./fork/ExplorationPane";
 import { SessionRowContextMenuBridge } from "./SessionRowContextMenuBridge";
 import { WallpaperLayer } from "./WallpaperLayer";
 import { initWallpaper } from "@/hooks/useWallpaper";
@@ -565,6 +567,8 @@ export function AppShell() {
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [terminalsRestored, setTerminalsRestored] = useState(false);
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
+  // fork:proma-05-explore — 探索分支的右栏只读 tab（可与主线并排看）
+  const [branchTabs, setBranchTabs] = useState<{ id: string; sessionId: string; parentSessionId: string | null; label: string }[]>([]);
   const [browsersRestored, setBrowsersRestored] = useState(false);
   const panelTabs: Tab[] = [...fileTabs, ...terminalTabs.map((tab) => ({
     id: tab.id,
@@ -577,6 +581,11 @@ export function AppShell() {
     label: browserTabLabel(tab.url) || translate("browser.newTab"),
     filePath: tab.url,
     kind: "browser" as const,
+  })), ...branchTabs.map((tab) => ({
+    id: tab.id,
+    label: tab.label,
+    filePath: tab.sessionId,
+    kind: "session" as const,
   }))];
 
   useEffect(() => {
@@ -1303,7 +1312,23 @@ export function AppShell() {
     if (!workspaceSwapped && !replacement && !remaining.length && !fileTabs.length) setRightPanelOpen(false);
   };
 
+  // fork:proma-05-explore — 打开/切换探索分支的右栏 tab
+  const openBranchTab = useCallback((sessionId: string, parentSessionId?: string | null) => {
+    const id = `branch:${sessionId}`;
+    setBranchTabs((tabs) => (tabs.some((tab) => tab.id === id)
+      ? tabs
+      : [...tabs, { id, sessionId, parentSessionId: parentSessionId ?? null, label: translate("explore.title") }]));
+    setActiveFileTabId(id);
+    setRightPanelOpen(true);
+  }, [translate]);
+
   const handleCloseFileTab = useCallback((tabId: string) => {
+    if (branchTabs.some((tab) => tab.id === tabId)) {
+      const remaining = branchTabs.filter((tab) => tab.id !== tabId);
+      setBranchTabs(remaining);
+      setActiveFileTabId((current) => current !== tabId ? current : remaining.at(-1)?.id ?? fileTabs.at(-1)?.id ?? null);
+      return;
+    }
     if (browserTabs.some((tab) => tab.id === tabId)) {
       const remaining = browserTabs.filter((tab) => tab.id !== tabId);
       setBrowserTabs(remaining);
@@ -3114,6 +3139,7 @@ export function AppShell() {
               onAttentionNeeded={handleAttentionNeeded}
               onSessionCreated={handleSessionCreated}
               onSessionForked={handleSessionForked}
+              onOpenSessionPane={openBranchTab}
               modelsRefreshKey={modelsRefreshKey}
               chatInputRef={chatInputRef}
               onBranchDataChange={handleBranchDataChange}
@@ -3295,7 +3321,7 @@ export function AppShell() {
                 { sourceSessionId: activeFileTab.sourceSessionId },
               )}
             />
-          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !browserTabs.some((tab) => tab.id === activeFileTabId) ? (
+          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !browserTabs.some((tab) => tab.id === activeFileTabId) && !branchTabs.some((tab) => tab.id === activeFileTabId) ? (
             activeCwd ? (
               explorerPanel
             ) : (
@@ -3304,6 +3330,15 @@ export function AppShell() {
               </div>
             )
           ) : null}
+          {branchTabs.map((tab) => (
+            <div key={tab.id} hidden={tab.id !== activeFileTabId} style={{ width: "100%", height: "100%" }}>
+              <ExplorationPane
+                sessionId={tab.sessionId}
+                parentSessionId={tab.parentSessionId}
+                onOpenAsMain={handleOpenSession}
+              />
+            </div>
+          ))}
           {browserTabs.map((tab) => (
             <div key={tab.id} hidden={tab.id !== activeFileTabId} style={{ width: "100%", height: "100%" }}>
               <BrowserPanel tab={tab} onChangeUrl={handleBrowserUrlChange} />

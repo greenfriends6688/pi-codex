@@ -73,5 +73,6 @@ e2e_*.mjs
 /docs/design-audit-*
 /docs/fork-comparison-*
 /docs/ref-comparison-*
+/docs/zeno-*
 /docs/screenshot2.png
 /docs/pr470-*.png

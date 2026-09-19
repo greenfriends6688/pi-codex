@@ -22,10 +22,7 @@ Typecheck: `node_modules/.bin/tsc --noEmit`
 Lint: `npm run lint`  
 查看当前 `.next` 属于哪种模式：`npm run mode:status`
 
-**dev 与生产构建共用 `.next`，两者产物不兼容**，直接混用会报
-`Failed to compile` 或浏览器里 `Module ... factory is not available` 的假故障。
-`prod` / `dev:clean` 会在启动前自动把不匹配的缓存挪到系统临时目录，
-所以来回切换请走这两个命令，不要直接 `npm run build` 再 `npm run dev`。
+**dev 与生产构建共用&#x20;**`.next`**，两者产物不兼容**，直接混用会报 `Failed to compile` 或浏览器里 `Module ... factory is not available` 的假故障。 `prod` / `dev:clean` 会在启动前自动把不匹配的缓存挪到系统临时目录， 所以来回切换请走这两个命令，不要直接 `npm run build` 再 `npm run dev`。
 
 ### Dev server troubleshooting
 
