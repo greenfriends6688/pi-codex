@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
+// fork:proma-06-delegation — 展示层用有效状态（重启后不再假装在跑）
+import { effectiveSubagentStatus } from "@/lib/subagent-status";
 import { TEXT } from "@/lib/typography";
 
 interface Props {
@@ -83,7 +85,7 @@ function AgentRow({
 }) {
   const { locale, t } = useI18n();
   const relation = session.relation?.kind === "subagent" ? session.relation : null;
-  const status: SubagentSessionStatus = running ? "running" : relation?.status ?? "completed";
+  const status: SubagentSessionStatus = effectiveSubagentStatus(relation?.status, { running });
   const primary = main ? t("agentSwitcher.main") : relation?.description || sessionTitle(session);
   const secondary = main
     ? sessionTitle(session)

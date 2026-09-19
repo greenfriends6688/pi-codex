@@ -1,0 +1,154 @@
+--- a/lib/subagent-status.ts
++++ b/lib/subagent-status.ts
+@@ -0,0 +1,38 @@
++import type { SubagentSessionStatus } from "./types";
++
++/**
++ * fork:proma-06-delegation — 子会话的**有效状态**。
++ *
++ * 会话文件里最后一条 `pi-web:subagent-status` 记的是「上次写下的状态」，不等于「现在在跑」：
++ * 进程重启、崩溃、被 OOM 杀掉之后，它仍然是 `running`（或 `queued`）。直接照它显示就会
++ * 出现「假装还在跑」的假状态 —— 用户会等一个永远不会来的结果。所以展示层统一走这里。
++ *
++ * 规则：
++ * - 真的在跑（在 `/api/agent/running` 的集合里）→ `running`；
++ * - 不在跑，但持久化状态是「活的」（starting / queued / running）→ `interrupted`
++ *   （注意不是 `completed`：那次委派并没有产出结果）；
++ * - 其余照持久化状态；完全没有状态信息 → `completed`（历史会话的兜底）。
++ */
++const LIVE_STATUSES: readonly string[] = ["starting", "queued", "running"];
++
++export function effectiveSubagentStatus(
++  persisted: SubagentSessionStatus | string | null | undefined,
++  options: { running: boolean },
++): SubagentSessionStatus {
++  if (options.running) return "running";
++  if (persisted && LIVE_STATUSES.includes(persisted)) return "interrupted";
++  return (persisted as SubagentSessionStatus | undefined) ?? "completed";
++}
++
++/** 状态文案的 i18n key：面板与侧栏共用一处，避免两套文案漂移。 */
++export function subagentStatusLabelKey(status: SubagentSessionStatus): string {
++  return `agentSwitcher.status.${status}`;
++}
++
++/** 这次委派是否「没跑完就没了」（重启/崩溃留下的活状态）。 */
++export function isInterruptedSubagent(
++  persisted: SubagentSessionStatus | string | null | undefined,
++  options: { running: boolean },
++): boolean {
++  return effectiveSubagentStatus(persisted, options) === "interrupted";
++}
+--- a/lib/subagent-status.test.mjs
++++ b/lib/subagent-status.test.mjs
+@@ -0,0 +1,36 @@
++// fork:proma-06-delegation — 子会话有效状态单测（纯函数）
++import { test } from "node:test";
++import assert from "node:assert/strict";
++
++import { effectiveSubagentStatus, isInterruptedSubagent, subagentStatusLabelKey } from "./subagent-status.ts";
++
++test("真的在跑时就是 running，不管持久化写了什么", () => {
++  assert.equal(effectiveSubagentStatus("completed", { running: true }), "running");
++  assert.equal(effectiveSubagentStatus(undefined, { running: true }), "running");
++});
++
++test("持久化是活状态但已经不在跑 → interrupted（不是 completed）", () => {
++  for (const persisted of ["starting", "queued", "running"]) {
++    assert.equal(effectiveSubagentStatus(persisted, { running: false }), "interrupted");
++    assert.equal(isInterruptedSubagent(persisted, { running: false }), true);
++  }
++});
++
++test("终态照原样透传，不被打成 interrupted", () => {
++  for (const persisted of ["completed", "failed", "aborted"]) {
++    assert.equal(effectiveSubagentStatus(persisted, { running: false }), persisted);
++    assert.equal(isInterruptedSubagent(persisted, { running: false }), false);
++  }
++  // 已经写着 interrupted 的会话：状态透传，而且它确实算中断
++  assert.equal(effectiveSubagentStatus("interrupted", { running: false }), "interrupted");
++  assert.equal(isInterruptedSubagent("interrupted", { running: false }), true);
++});
++
++test("没有状态信息（老会话）→ completed 兜底", () => {
++  assert.equal(effectiveSubagentStatus(undefined, { running: false }), "completed");
++  assert.equal(effectiveSubagentStatus(null, { running: false }), "completed");
++});
++
++test("标签 key 只有一个来源", () => {
++  assert.equal(subagentStatusLabelKey("interrupted"), "agentSwitcher.status.interrupted");
++});
+--- a/components/AgentSessionPanel.tsx
++++ b/components/AgentSessionPanel.tsx
+@@ -3,6 +3,8 @@
+ import { useMemo, useState } from "react";
+ import { useI18n } from "@/hooks/useI18n";
+ import type { SessionInfo, SubagentSessionStatus } from "@/lib/types";
++// fork:proma-06-delegation — 展示层用有效状态（重启后不再假装在跑）
++import { effectiveSubagentStatus } from "@/lib/subagent-status";
+ import { TEXT } from "@/lib/typography";
+ 
+ interface Props {
+@@ -83,7 +85,7 @@
+ }) {
+   const { locale, t } = useI18n();
+   const relation = session.relation?.kind === "subagent" ? session.relation : null;
+-  const status: SubagentSessionStatus = running ? "running" : relation?.status ?? "completed";
++  const status: SubagentSessionStatus = effectiveSubagentStatus(relation?.status, { running });
+   const primary = main ? t("agentSwitcher.main") : relation?.description || sessionTitle(session);
+   const secondary = main
+     ? sessionTitle(session)
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -208,6 +208,7 @@
+     "agentSwitcher.search": "Search agents",
+     "agentSwitcher.noMatches": "No matching agents",
+     "agentSwitcher.status.starting": "Starting",
++    "agentSwitcher.status.queued": "Queued",
+     "agentSwitcher.status.running": "Running",
+     "agentSwitcher.status.completed": "Completed",
+     "agentSwitcher.status.failed": "Failed",
+@@ -419,6 +420,7 @@
+     "sidebar.loading": "Loading...",
+     "sidebar.noSessions": "No sessions found",
+     "sidebar.agentRunning": "Agent running…",
++    "sidebar.subagentInterrupted": "Sub-agent never finished (app restarted or was interrupted); marked as interrupted",
+     "sidebar.newActivity": "New activity",
+     "sidebar.newSessionActivity": "New session activity",
+     "sidebar.deleteSession": "Delete {title}?",
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -208,6 +208,7 @@
+     "agentSwitcher.search": "搜索 Agents",
+     "agentSwitcher.noMatches": "没有匹配的 Agent",
+     "agentSwitcher.status.starting": "正在启动",
++    "agentSwitcher.status.queued": "排队中",
+     "agentSwitcher.status.running": "运行中",
+     "agentSwitcher.status.completed": "已完成",
+     "agentSwitcher.status.failed": "失败",
+@@ -419,6 +420,7 @@
+     "sidebar.loading": "加载中...",
+     "sidebar.noSessions": "未找到会话",
+     "sidebar.agentRunning": "Agent 运行中…",
++    "sidebar.subagentInterrupted": "子会话未跑完（应用重启/中断），状态已标为中断",
+     "sidebar.newActivity": "有新活动",
+     "sidebar.newSessionActivity": "会话有新活动",
+     "sidebar.deleteSession": "删除 {title}？",
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -208,6 +208,7 @@
+     "agentSwitcher.search": "搜尋 Agents",
+     "agentSwitcher.noMatches": "找不到相符的 Agent",
+     "agentSwitcher.status.starting": "正在啟動",
++    "agentSwitcher.status.queued": "排隊中",
+     "agentSwitcher.status.running": "執行中",
+     "agentSwitcher.status.completed": "已完成",
+     "agentSwitcher.status.failed": "失敗",
+@@ -419,6 +420,7 @@
+     "sidebar.loading": "載入中...",
+     "sidebar.noSessions": "找不到工作階段",
+     "sidebar.agentRunning": "Agent 執行中…",
++    "sidebar.subagentInterrupted": "子會話未跑完（應用程式重啟/中斷），狀態已標為中斷",
+     "sidebar.newActivity": "有新活動",
+     "sidebar.newSessionActivity": "工作階段有新活動",
+     "sidebar.deleteSession": "刪除 {title}？",
