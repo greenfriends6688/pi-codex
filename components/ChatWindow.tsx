@@ -22,6 +22,8 @@ import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { NewSessionHome } from "./fork/NewSessionHome";
 import { ProjectChip, type NewSessionTargets } from "./fork/ProjectChip";
 import { ComposerTipLine } from "./fork/ComposerTipLine";
+// fork:proma-05-explore — 分支会话的来源抬头条 + 带回结论
+import { ExplorationBanner } from "./fork/ExplorationBanner";
 import { extractTodoState } from "@/lib/todo-state";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
@@ -1269,6 +1271,16 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING_CSS}` }}>
             <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 800px)", margin: "0 auto" }}>
+            {/* fork:proma-05-explore — 从主线某条消息 fork 出来的分支：显示来源 + 把结论带回父会话草稿 */}
+            {session && session.parentSessionId && (
+              <ExplorationBanner
+                branchSessionId={session.id}
+                parentSessionId={session.parentSessionId}
+                branchEntryIds={entryIds}
+                branchMessages={messages}
+                onOpenParent={onOpenSession}
+              />
+            )}
             {(() => {
               let lastUserIdx = -1;
               for (let i = messages.length - 1; i >= 0; i--) {

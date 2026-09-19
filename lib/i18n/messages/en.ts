@@ -737,6 +737,15 @@ export const enLocale: LocalePlugin = {
     "chat.outputLocal": "output stays local",
     "chat.outputModel": "output sent to model",
     "chat.chatOnly": "Chat only",
+    // fork:proma-05-explore — exploration branches
+    "explore.title": "Exploration branch",
+    "explore.from": "from “{label}”",
+    "explore.fromStart": "from the start of the main line",
+    "explore.bringBack": "Bring the conclusion back",
+    "explore.bringBackHint": "Append this branch's conclusion to the parent's draft (it is not sent automatically)",
+    "explore.broughtBack": "Written to the parent's draft",
+    "explore.nothingYet": "This branch has no conclusion to bring back yet",
+    "explore.openParent": "Open the parent session",
     // fork:proma-04-rewind — 会话回退
     "rewind.action": "Rewind to here",
     "rewind.actionTitle": "Truncate every message after this one",

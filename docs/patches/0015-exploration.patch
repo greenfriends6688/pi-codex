@@ -1,0 +1,513 @@
+--- a/lib/exploration.ts
++++ b/lib/exploration.ts
+@@ -0,0 +1,141 @@
++/**
++ * fork:proma-05-explore — 探索分支的语义层（纯函数，可单测）。
++ *
++ * 「探索」= 从主线某条消息 fork 出来的分支会话。SDK 的 `createBranchedSession()`
++ * 会把 fork 点之前的 entry **按原 id 复制**给新会话（`chunk-JVUZSMYM.js` 里
++ * `pathWithoutLabels = path.map(e => ({...e, parentId}))`），所以：
++ *
++ * - **「从哪条消息探索出来的」不需要任何额外元数据**：父子两条 entry id 序列的
++ *   公共前缀就是被复制的那段，前缀的最后一条 = fork 点之前那条，父会话里它的下一条
++ *   = 被用来 fork 的那条消息。
++ * - **「带回结论」只取 fork 点之后的 assistant 文本**：pre-fork 内容已经在父会话里，
++ *   重复注入等于双倍上下文；且**不自动发送**（对齐 Proma —— 自动发送会污染主线，
++ *   这是设计意图不是遗漏）。
++ *
++ * 与「会话内分支」（`navigate_tree`，同一个文件里多个 leaf）不是一回事：探索是新文件，
++ * 父子关系写在 header 的 `parentSession` 上（AGENTS.md 已强调这个区分）。
++ */
++
++/** 消息的最小形状（只用到 role 与 content）。 */
++export interface ExplorationMessageLike {
++  role?: string;
++  content?: unknown;
++}
++
++export interface ExplorationOrigin {
++  parentSessionId: string;
++  /** 分支里最后一条与父会话共有的 entry（= fork 点之前那条）。 */
++  boundaryEntryId: string;
++  /** 父会话里被 fork 的那条消息；父会话在它之后没有条目时为 null。 */
++  sourceEntryId: string | null;
++  /** 展示用短标签（取自 source 消息文本）。 */
++  sourceLabel: string;
++}
++
++export interface ExplorationDelta {
++  text: string;
++  /** 贡献了文本的 assistant 消息条数。 */
++  assistantMessages: number;
++}
++
++/** 把消息内容里的文本块拼成纯文本（数组内容只取 `type: "text"`）。 */
++export function messageText(message: ExplorationMessageLike | undefined): string {
++  const content = message?.content;
++  if (typeof content === "string") return content.trim();
++  if (!Array.isArray(content)) return "";
++  return content
++    .filter((block): block is { type: string; text: string } => (
++      typeof block === "object" && block !== null
++      && (block as { type?: unknown }).type === "text"
++      && typeof (block as { text?: unknown }).text === "string"
++    ))
++    .map((block) => block.text)
++    .join("\n")
++    .trim();
++}
++
++/** 压平成单行短标签（给 banner 用；空文本给空串，不要给"..."）。 */
++export function labelFromText(text: string, max = 60): string {
++  const flat = text.replace(/\s+/g, " ").trim();
++  if (!flat) return "";
++  return flat.length <= max ? flat : `${flat.slice(0, Math.max(1, max - 1))}…`;
++}
++
++/**
++ * 推导探索来源。
++ *
++ * 判定方式是「公共前缀」而不是「严格相等开头」：分支的 entry id 是父会话可见路径的
++ * 前缀副本，逐位比较时只要还能在父会话里找到同一个 id 就继续往后走；**至少要有 1 条
++ * 共有条目**，否则返回 null —— 这样 subagent 会话（同样有 parentSessionId，但没有复制
++ * 过来的历史）不会误判成探索分支。
++ */
++export function deriveExplorationOrigin(input: {
++  parentSessionId: string;
++  parentEntryIds: readonly string[];
++  parentMessages: readonly ExplorationMessageLike[];
++  branchEntryIds: readonly string[];
++}): ExplorationOrigin | null {
++  const parentIndex = new Map<string, number>();
++  input.parentEntryIds.forEach((id, index) => { if (!parentIndex.has(id)) parentIndex.set(id, index); });
++
++  let boundaryIndex = -1;
++  for (let index = 0; index < input.branchEntryIds.length; index += 1) {
++    const id = input.branchEntryIds[index]!;
++    if (!parentIndex.has(id)) break;
++    boundaryIndex = index;
++  }
++  if (boundaryIndex < 0) return null;
++
++  const boundaryEntryId = input.branchEntryIds[boundaryIndex]!;
++  const parentPosition = parentIndex.get(boundaryEntryId)!;
++  const sourceEntryId = input.parentEntryIds[parentPosition + 1] ?? null;
++  const sourceLabel = sourceEntryId
++    ? labelFromText(messageText(input.parentMessages[parentPosition + 1]))
++    : "";
++
++  return { parentSessionId: input.parentSessionId, boundaryEntryId, sourceEntryId, sourceLabel };
++}
++
++/** 分支里 fork 点之后的 assistant 文本（连着多条就用空行隔开）。 */
++export function explorationDelta(input: {
++  branchEntryIds: readonly string[];
++  branchMessages: readonly ExplorationMessageLike[];
++  boundaryEntryId: string | null;
++}): ExplorationDelta {
++  const boundary = input.boundaryEntryId;
++  const start = boundary === null ? 0 : input.branchEntryIds.indexOf(boundary) + 1;
++  const parts: string[] = [];
++  for (let index = Math.max(0, start); index < input.branchMessages.length; index += 1) {
++    const message = input.branchMessages[index];
++    if (!message || message.role !== "assistant") continue;
++    const text = messageText(message);
++    if (text) parts.push(text);
++  }
++  return { text: parts.join("\n\n").trim(), assistantMessages: parts.length };
++}
++
++export interface BringBackDraft {
++  /** 追加到父会话草稿的正文。 */
++  value: string;
++  /** 一并加进草稿的会话引用（`&session`），让父会话知道结论来自哪条分支。 */
++  sessionReference: { id: string; title?: string };
++}
++
++/**
++ * 「带回结论」要写进父会话草稿的东西：正文 + 一条指向分支的引用。
++ * 没有可带回的内容时返回 null（调用方据此禁用按钮，而不是写个空草稿进去）。
++ */
++export function planBringBack(input: {
++  delta: ExplorationDelta;
++  branch: { id: string; title?: string };
++  existingText?: string;
++}): BringBackDraft | null {
++  const delta = input.delta.text.trim();
++  if (!delta) return null;
++  const existing = (input.existingText ?? "").trimEnd();
++  const title = input.branch.title?.replace(/\s+/g, " ").trim();
++  return {
++    value: existing ? `${existing}\n\n${delta}` : delta,
++    sessionReference: { id: input.branch.id, ...(title ? { title } : {}) },
++  };
++}
+--- a/lib/exploration.test.mjs
++++ b/lib/exploration.test.mjs
+@@ -0,0 +1,119 @@
++// fork:proma-05-explore — 探索分支语义层单测（纯函数，不碰 DOM）
++import { test } from "node:test";
++import assert from "node:assert/strict";
++
++import {
++  deriveExplorationOrigin,
++  explorationDelta,
++  labelFromText,
++  messageText,
++  planBringBack,
++} from "./exploration.ts";
++
++const text = (...parts) => parts.map((part) => ({ type: "text", text: part }));
++const assistant = (...parts) => ({ role: "assistant", content: text(...parts) });
++const user = (value) => ({ role: "user", content: value });
++
++test("messageText 只取文本块，忽略 thinking / toolCall", () => {
++  assert.equal(messageText({ role: "assistant", content: [
++    { type: "thinking", thinking: "想" },
++    { type: "text", text: "答案" },
++    { type: "toolCall", name: "read", arguments: {} },
++  ] }), "答案");
++  assert.equal(messageText(user("字符串内容")), "字符串内容");
++  assert.equal(messageText(undefined), "");
++  assert.equal(messageText({ role: "assistant", content: [{ type: "image" }] }), "");
++});
++
++test("labelFromText 压平空白、超长截断，空文本给空串", () => {
++  assert.equal(labelFromText("  第一行\n第二行  "), "第一行 第二行");
++  assert.equal(labelFromText(""), "");
++  assert.equal(labelFromText("x".repeat(100), 10), "xxxxxxxxx…");
++});
++
++test("deriveExplorationOrigin：公共前缀结束处就是 fork 点之前那条", () => {
++  const origin = deriveExplorationOrigin({
++    parentSessionId: "p1",
++    parentEntryIds: ["a", "b", "c", "d"],
++    parentMessages: [user("第一条"), user("第二条"), user("第三条"), user("第四条")],
++    branchEntryIds: ["a", "b", "x1"],
++  });
++  assert.deepEqual(origin, {
++    parentSessionId: "p1",
++    boundaryEntryId: "b",
++    sourceEntryId: "c",            // 父会话里紧随边界的那条 = 被 fork 的消息
++    sourceLabel: "第三条",
++  });
++});
++
++test("deriveExplorationOrigin：分支跑出新条目后不再往后匹配", () => {
++  const origin = deriveExplorationOrigin({
++    parentSessionId: "p1",
++    parentEntryIds: ["a", "b", "c"],
++    parentMessages: [user("一"), user("二"), user("三")],
++    // x1 是分支自己的新条目；即使它后面的 id 又撞上父会话的 id 也不算共有
++    branchEntryIds: ["a", "b", "x1", "c"],
++  });
++  assert.equal(origin?.boundaryEntryId, "b");
++});
++
++test("deriveExplorationOrigin：没有共有条目 → null（subagent 会话不能误判成探索）", () => {
++  assert.equal(deriveExplorationOrigin({
++    parentSessionId: "p1",
++    parentEntryIds: ["a", "b"],
++    parentMessages: [user("一"), user("二")],
++    branchEntryIds: ["z1", "z2"],
++  }), null);
++});
++
++test("deriveExplorationOrigin：fork 在第一条消息之后 → sourceLabel 为空而不是 undefined", () => {
++  const origin = deriveExplorationOrigin({
++    parentSessionId: "p1",
++    parentEntryIds: ["a"],
++    parentMessages: [user("只有一条")],
++    branchEntryIds: ["a", "n1"],
++  });
++  assert.equal(origin?.sourceEntryId, null);
++  assert.equal(origin?.sourceLabel, "");
++});
++
++test("explorationDelta：只取 fork 点之后的 assistant 文本", () => {
++  const delta = explorationDelta({
++    branchEntryIds: ["a", "b", "n1", "n2", "n3"],
++    branchMessages: [
++      user("pre-fork 用户"),
++      assistant("pre-fork 结论"),
++      user("分支上的提问"),
++      assistant("分支结论一", "续行"),
++      assistant("分支结论二"),
++    ],
++    boundaryEntryId: "b",
++  });
++  assert.equal(delta.text, "分支结论一\n续行\n\n分支结论二");
++  assert.equal(delta.assistantMessages, 2);
++});
++
++test("explorationDelta：边界之后只有用户消息 → 空结论", () => {
++  const delta = explorationDelta({
++    branchEntryIds: ["a", "n1"],
++    branchMessages: [assistant("pre-fork"), user("刚问出去还没回答")],
++    boundaryEntryId: "a",
++  });
++  assert.equal(delta.text, "");
++  assert.equal(delta.assistantMessages, 0);
++});
++
++test("planBringBack：追加到已有草稿、带上分支引用；没有结论时返回 null", () => {
++  const plan = planBringBack({
++    delta: { text: "  分支结论  ", assistantMessages: 1 },
++    branch: { id: "branch-1", title: "  探索  分支  " },
++    existingText: "我已经写了一半",
++  });
++  assert.deepEqual(plan, {
++    value: "我已经写了一半\n\n分支结论",
++    sessionReference: { id: "branch-1", title: "探索 分支" },
++  });
++
++  assert.equal(planBringBack({ delta: { text: "   ", assistantMessages: 0 }, branch: { id: "b" } }), null);
++  assert.equal(planBringBack({ delta: { text: "结论", assistantMessages: 1 }, branch: { id: "b" } })?.value, "结论");
++});
+--- a/components/fork/ExplorationBanner.tsx
++++ b/components/fork/ExplorationBanner.tsx
+@@ -0,0 +1,162 @@
++"use client";
++
++import { useEffect, useMemo, useState } from "react";
++import { useI18n } from "@/hooks/useI18n";
++import { getDraft, setDraft } from "@/lib/draft-store";
++import { TEXT } from "@/lib/typography";
++import {
++  deriveExplorationOrigin,
++  explorationDelta,
++  planBringBack,
++  type ExplorationMessageLike,
++} from "@/lib/exploration";
++
++/**
++ * fork:proma-05-explore — 探索分支的抬头条。
++ *
++ * 当前会话是「从某条主线消息 fork 出来的分支」时显示：来源那条消息 + 一个「带回结论」。
++ *
++ * - **来源不靠元数据**：父子 entry id 的公共前缀就是被复制过来那段历史（见
++ *   `lib/exploration.ts` 的说明），所以这里只需要拉父会话的 context 比一下。
++ * - **带回结论只写草稿、不自动发送**：把 fork 点之后的 assistant 文本追加到父会话草稿，
++ *   并带上一条 `&session:<分支 id>` 引用，然后切到父会话让用户自己决定发不发。
++ * - 拉不到父会话 / 推不出来源时**什么都不显示**：宁可不显示，也不要给一个假来源。
++ */
++export function ExplorationBanner({
++  branchSessionId,
++  parentSessionId,
++  branchEntryIds,
++  branchMessages,
++  onOpenParent,
++}: {
++  branchSessionId: string;
++  parentSessionId: string;
++  branchEntryIds: readonly string[];
++  branchMessages: readonly ExplorationMessageLike[];
++  onOpenParent?: (sessionId: string) => void;
++}) {
++  const { t } = useI18n();
++  const [parent, setParent] = useState<{ entryIds: string[]; messages: ExplorationMessageLike[] } | null>(null);
++  const [broughtBack, setBroughtBack] = useState(false);
++
++  useEffect(() => {
++    let cancelled = false;
++    void (async () => {
++      try {
++        const res = await fetch(`/api/sessions/${encodeURIComponent(parentSessionId)}/context`);
++        if (!res.ok) return;
++        const data = await res.json() as { context?: { messages?: ExplorationMessageLike[]; entryIds?: string[] } };
++        if (cancelled || !data.context?.entryIds) return;
++        setParent({ entryIds: data.context.entryIds, messages: data.context.messages ?? [] });
++      } catch {
++        // 父会话读不到就当不是探索分支（不显示比显示错好）
++      }
++    })();
++    return () => { cancelled = true; };
++  }, [parentSessionId]);
++
++  const origin = useMemo(() => (parent
++    ? deriveExplorationOrigin({
++      parentSessionId,
++      parentEntryIds: parent.entryIds,
++      parentMessages: parent.messages,
++      branchEntryIds,
++    })
++    : null), [parent, parentSessionId, branchEntryIds]);
++
++  const delta = useMemo(() => explorationDelta({
++    branchEntryIds,
++    branchMessages,
++    boundaryEntryId: origin?.boundaryEntryId ?? null,
++  }), [branchEntryIds, branchMessages, origin?.boundaryEntryId]);
++
++  if (!origin) return null;
++
++  const canBringBack = delta.assistantMessages > 0;
++  const sourceLabel = origin.sourceLabel || t("explore.fromStart");
++
++  const handleBringBack = () => {
++    const existing = getDraft(parentSessionId);
++    const plan = planBringBack({ delta, branch: { id: branchSessionId }, existingText: existing?.value });
++    if (!plan) return;
++    setDraft(parentSessionId, {
++      value: plan.value,
++      images: existing?.images ?? [],
++      ...(existing?.contexts ? { contexts: existing.contexts } : {}),
++      sessionReferences: [
++        ...(existing?.sessionReferences ?? []).filter((reference) => reference.id !== plan.sessionReference.id),
++        plan.sessionReference,
++      ],
++    });
++    setBroughtBack(true);
++    onOpenParent?.(parentSessionId);
++  };
++
++  return (
++    <div
++      role="status"
++      style={{
++        display: "flex",
++        flexWrap: "wrap",
++        alignItems: "center",
++        gap: 8,
++        margin: "0 0 10px",
++        padding: "6px 10px",
++        border: "1px solid var(--accent-border)",
++        borderRadius: "var(--radius-md)",
++        background: "var(--accent-soft)",
++        fontSize: TEXT.sm,
++        color: "var(--text)",
++      }}
++    >
++      <span aria-hidden="true" style={{ fontSize: TEXT.md, lineHeight: 1 }}>⑂</span>
++      <span style={{ display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
++        <strong style={{ fontWeight: 600 }}>{t("explore.title")}</strong>
++        <span style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 420 }}>
++          {t("explore.from", { label: sourceLabel })}
++        </span>
++      </span>
++      <span style={{ flex: 1 }} />
++      {broughtBack && <span role="status" style={{ fontSize: TEXT.xs, color: "var(--text-muted)" }}>{t("explore.broughtBack")}</span>}
++      {!broughtBack && !canBringBack && (
++        <span style={{ fontSize: TEXT.xs, color: "var(--text-muted)" }}>{t("explore.nothingYet")}</span>
++      )}
++      {onOpenParent && (
++        <button
++          type="button"
++          onClick={() => onOpenParent(parentSessionId)}
++          title={t("explore.openParent")}
++          style={{
++            padding: "3px 8px",
++            background: "none",
++            border: "1px solid var(--border)",
++            borderRadius: "var(--radius-sm)",
++            color: "var(--text-muted)",
++            cursor: "pointer",
++            fontSize: TEXT.xs,
++          }}
++        >
++          {t("explore.openParent")}
++        </button>
++      )}
++      <button
++        type="button"
++        onClick={handleBringBack}
++        disabled={!canBringBack}
++        title={t("explore.bringBackHint")}
++        style={{
++          padding: "3px 10px",
++          background: canBringBack ? "var(--accent)" : "var(--bg-subtle)",
++          border: "none",
++          borderRadius: "var(--radius-sm)",
++          color: canBringBack ? "var(--accent-contrast, #fff)" : "var(--text-dim)",
++          cursor: canBringBack ? "pointer" : "not-allowed",
++          fontSize: TEXT.xs,
++          fontWeight: 500,
++        }}
++      >
++        {t("explore.bringBack")}
++      </button>
++    </div>
++  );
++}
+--- a/components/ChatWindow.tsx
++++ b/components/ChatWindow.tsx
+@@ -22,6 +22,8 @@
+ import { NewSessionHome } from "./fork/NewSessionHome";
+ import { ProjectChip, type NewSessionTargets } from "./fork/ProjectChip";
+ import { ComposerTipLine } from "./fork/ComposerTipLine";
++// fork:proma-05-explore — 分支会话的来源抬头条 + 带回结论
++import { ExplorationBanner } from "./fork/ExplorationBanner";
+ import { extractTodoState } from "@/lib/todo-state";
+ import { AnsiText } from "./AnsiText";
+ import { useI18n } from "@/hooks/useI18n";
+@@ -1269,6 +1271,16 @@
+         >
+           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING_CSS}` }}>
+             <div ref={messageContentRef} onPointerUp={captureQuotedSelection} style={{ width: "100%", minWidth: 0, maxWidth: "var(--chat-content-max-width, 800px)", margin: "0 auto" }}>
++            {/* fork:proma-05-explore — 从主线某条消息 fork 出来的分支：显示来源 + 把结论带回父会话草稿 */}
++            {session && session.parentSessionId && (
++              <ExplorationBanner
++                branchSessionId={session.id}
++                parentSessionId={session.parentSessionId}
++                branchEntryIds={entryIds}
++                branchMessages={messages}
++                onOpenParent={onOpenSession}
++              />
++            )}
+             {(() => {
+               let lastUserIdx = -1;
+               for (let i = messages.length - 1; i >= 0; i--) {
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -737,6 +737,15 @@
+     "chat.outputLocal": "output stays local",
+     "chat.outputModel": "output sent to model",
+     "chat.chatOnly": "Chat only",
++    // fork:proma-05-explore — exploration branches
++    "explore.title": "Exploration branch",
++    "explore.from": "from “{label}”",
++    "explore.fromStart": "from the start of the main line",
++    "explore.bringBack": "Bring the conclusion back",
++    "explore.bringBackHint": "Append this branch's conclusion to the parent's draft (it is not sent automatically)",
++    "explore.broughtBack": "Written to the parent's draft",
++    "explore.nothingYet": "This branch has no conclusion to bring back yet",
++    "explore.openParent": "Open the parent session",
+     // fork:proma-04-rewind — 会话回退
+     "rewind.action": "Rewind to here",
+     "rewind.actionTitle": "Truncate every message after this one",
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -736,6 +736,15 @@
+     "chat.outputLocal": "输出保留在本地",
+     "chat.outputModel": "输出发送给模型",
+     "chat.chatOnly": "仅聊天",
++    // fork:proma-05-explore — 探索分支
++    "explore.title": "探索分支",
++    "explore.from": "从「{label}」开始",
++    "explore.fromStart": "从主线开头开始",
++    "explore.bringBack": "带回结论",
++    "explore.bringBackHint": "把这条分支的结论写进父会话草稿（不会自动发送）",
++    "explore.broughtBack": "已写入父会话草稿",
++    "explore.nothingYet": "这条分支还没有可带回的结论",
++    "explore.openParent": "打开父会话",
+     // fork:proma-04-rewind — 会话回退
+     "rewind.action": "回退到此处",
+     "rewind.actionTitle": "删掉这条消息之后的所有对话",
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -736,6 +736,15 @@
+     "chat.outputLocal": "輸出保留在本地",
+     "chat.outputModel": "輸出會傳送給模型",
+     "chat.chatOnly": "僅聊天",
++    // fork:proma-05-explore — 探索分支
++    "explore.title": "探索分支",
++    "explore.from": "從「{label}」開始",
++    "explore.fromStart": "從主線開頭開始",
++    "explore.bringBack": "帶回結論",
++    "explore.bringBackHint": "把這條分支的結論寫進父會話草稿（不會自動傳送）",
++    "explore.broughtBack": "已寫入父會話草稿",
++    "explore.nothingYet": "這條分支還沒有可帶回的結論",
++    "explore.openParent": "開啟父會話",
+     // fork:proma-04-rewind — 工作階段回退
+     "rewind.action": "回退到此處",
+     "rewind.actionTitle": "刪掉這則訊息之後的所有對話",

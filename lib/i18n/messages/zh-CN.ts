@@ -736,6 +736,15 @@ export const zhCNLocale: LocalePlugin = {
     "chat.outputLocal": "输出保留在本地",
     "chat.outputModel": "输出发送给模型",
     "chat.chatOnly": "仅聊天",
+    // fork:proma-05-explore — 探索分支
+    "explore.title": "探索分支",
+    "explore.from": "从「{label}」开始",
+    "explore.fromStart": "从主线开头开始",
+    "explore.bringBack": "带回结论",
+    "explore.bringBackHint": "把这条分支的结论写进父会话草稿（不会自动发送）",
+    "explore.broughtBack": "已写入父会话草稿",
+    "explore.nothingYet": "这条分支还没有可带回的结论",
+    "explore.openParent": "打开父会话",
     // fork:proma-04-rewind — 会话回退
     "rewind.action": "回退到此处",
     "rewind.actionTitle": "删掉这条消息之后的所有对话",

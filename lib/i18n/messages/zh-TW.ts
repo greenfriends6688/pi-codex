@@ -736,6 +736,15 @@ export const zhTWLocale: LocalePlugin = {
     "chat.outputLocal": "輸出保留在本地",
     "chat.outputModel": "輸出會傳送給模型",
     "chat.chatOnly": "僅聊天",
+    // fork:proma-05-explore — 探索分支
+    "explore.title": "探索分支",
+    "explore.from": "從「{label}」開始",
+    "explore.fromStart": "從主線開頭開始",
+    "explore.bringBack": "帶回結論",
+    "explore.bringBackHint": "把這條分支的結論寫進父會話草稿（不會自動傳送）",
+    "explore.broughtBack": "已寫入父會話草稿",
+    "explore.nothingYet": "這條分支還沒有可帶回的結論",
+    "explore.openParent": "開啟父會話",
     // fork:proma-04-rewind — 工作階段回退
     "rewind.action": "回退到此處",
     "rewind.actionTitle": "刪掉這則訊息之後的所有對話",
