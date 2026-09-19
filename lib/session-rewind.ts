@@ -128,9 +128,3 @@ export function rewindSessionFile(filePath: string, entryId: string): RewindResu
     filesReverted: false,
   };
 }
-
-/** 回退后的用户提示（把「文件没被回退」这条明确说出来，避免误解）。 */
-export function rewindSummary(result: RewindResult, t: (key: string, params?: Record<string, string | number>) => string): string {
-  if (!result.ok) return result.message ?? t("rewind.failed");
-  return t("rewind.done", { count: result.dropped ?? 0 });
-}

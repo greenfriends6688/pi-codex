@@ -1,0 +1,1433 @@
+--- a/lib/approval-policy.ts
++++ b/lib/approval-policy.ts
+@@ -0,0 +1,266 @@
++/**
++ * fork:proma-01-approval — 工具审批的**语义层**（纯函数）。
++ *
++ * pi 官方文档把 permission gate 列为扩展首要用例（`docs/extensions.md:19`），
++ * 并给了完整写法（`examples/extensions/permission-gate.ts`）：`pi.on("tool_call")`
++ * 里返回 `{ block: true, reason }` 拦截，用 `ctx.ui.select()` 问用户。
++ *
++ * 本仓的 UI 与回答通道**早就做完了**（`extension_ui_request` → ChatWindow 对话框 →
++ * `extension_ui_response`，含 rpc-manager 重发未决请求带来的刷新恢复），所以这个补丁
++ * 从零写的只有语义：**风险档、摘要脱敏、白名单/会话授权、以及「放行还是不拦」的判定**。
++ *
++ * ## 默认必须是全放行
++ *
++ * 升级链（对齐 Proma 的 `agent-permission-service.ts:120-167`）：
++ *
++ *   1. 会话授权命中 → 放行（用户说过「本次会话总是允许」）
++ *   2. 模式 = bypass（**默认**）→ 放行（与改动前的行为完全等价）
++ *   3. 只读 / 安全命令 → 放行
++ *   4. 其余 → 在 ask / plan 模式下拦住问人
++ *
++ * 第 2 条是硬约束：只有用户显式选了「需审批 / 计划」才会出现审批卡，默认路径一个字都不改。
++ *
++ * ## 只读判定宁可保守
++ *
++ * 安全命令走**显式白名单**（`git status`、`ls`、`cat`、`grep`…），而不是「看起来不像危险的就算安全」。
++ * 白名单没命中一律算未知 —— 未知在 bypass 下依然放行，但在 ask 下会问，这正是我们要的：
++ * 宁可多问一次，也不要把 `rm -rf` 误判成安全（那正是 Proma `agent-orchestrator.ts:1204-1240`
++ * 的 Bash 只读正则的价值所在）。
++ *
++ * 纯数据模块：服务端与客户端都可 import，无平台依赖，全部可单测。
++ */
++
++export type ApprovalRiskTier = "read-only" | "unknown" | "dangerous";
++
++/** 判定输入：工具名 + 它的参数（`bash` 的 `command`、`write` 的 `path` 等）。 */
++export interface ApprovalSubject {
++  toolName: string;
++  input: Record<string, unknown> | undefined;
++}
++
++/** 会话授权：一条授权覆盖「同一个工具的同一类动作」。 */
++export interface ToolGrant {
++  toolName: string;
++  /** 归一化后的匹配串（bash 是命令前缀，文件类工具是路径前缀）。 */
++  target: string;
++}
++
++export interface ApprovalDecision {
++  tier: ApprovalRiskTier;
++  /** 是否需要弹审批卡。 */
++  needsApproval: boolean;
++  /** 命中的具体原因（危险模式的说明或安全判定的名称），用于卡片副标题。 */
++  reason?: string;
++  /** 供卡片显示的参数摘要（已脱敏、已截断）。 */
++  summary: string;
++  /** 授权匹配用的键；空字符串表示这个工具不适合「总是允许」。 */
++  grantTarget: string;
++}
++
++/** 危险模式：命中即 dangerous。顺序无关，全部对照小写后的命令。 */
++const DANGEROUS_RULES: ReadonlyArray<{ id: string; pattern: RegExp }> = [
++  { id: "recursive-delete", pattern: /\brm\s+(-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r|--recursive|--force)/i },
++  { id: "privilege-escalation", pattern: /\b(sudo|doas|runas)\b/i },
++  { id: "world-writable", pattern: /\b(chmod|chown)\b[^\n]*\b(777|666)\b/i },
++  { id: "git-force-push", pattern: /\bgit\s+push\b[^\n]*(--force\b|--force-with-lease|\s-f\b)/i },
++  { id: "git-destructive", pattern: /\bgit\s+(reset\s+--hard|clean\s+-[a-z]*[fdx]|checkout\s+--\s)/i },
++  { id: "pipe-to-shell", pattern: /\b(curl|wget|invoke-webrequest|iwr)\b[^\n]*\|\s*(ba)?sh\b/i },
++  { id: "encoded-powershell", pattern: /\bpowershell\b[^\n]*\s-(enc|encodedcommand)\b/i },
++  { id: "publish-or-release", pattern: /\b(npm|pnpm|yarn)\s+publish\b|\bgh\s+release\s+create\b/i },
++  { id: "raw-disk", pattern: /\b(dd|mkfs|fdisk|diskpart)\b/i },
++  { id: "system-package-manager", pattern: /\b(apt-get|apt|yum|dnf|brew|choco|winget)\s+(install|remove|uninstall|upgrade)\b/i },
++  { id: "kill-all", pattern: /\bkill(all)?\s+-9\b|\btaskkill\b[^\n]*\/f\b/i },
++  { id: "env-exfiltration", pattern: /\b(env|printenv|set)\b[^\n]*\|\s*(curl|wget)\b/i },
++];
++
++/** 显式安全白名单：只读、无副作用。**不是**「不危险」的兜底。 */
++const READ_ONLY_RULES: ReadonlyArray<{ id: string; pattern: RegExp }> = [
++  { id: "list", pattern: /^\s*(ls|dir|pwd|tree|find)\b[^\n]*$/i },
++  { id: "read", pattern: /^\s*(cat|head|tail|less|type|wc|file)\b[^\n]*$/i },
++  { id: "search", pattern: /^\s*(grep|rg|findstr|select-string|ag)\b[^\n]*$/i },
++  { id: "git-read", pattern: /^\s*git\s+(status|log|diff|show|branch|remote|describe|rev-parse|ls-files)\b[^\n]*$/i },
++  { id: "version", pattern: /^\s*(node|npm|pnpm|yarn|python|python3|go|rustc|cargo|java)\s+(-v|--version|-version)\b[^\n]*$/i },
++  { id: "echo", pattern: /^\s*echo\b[^\n]*$/i },
++];
++
++/** 只读工具名（读文件、搜索、列目录）——工具级安全，无需看参数。 */
++const READ_ONLY_TOOLS = new Set(["read", "grep", "find", "ls", "glob", "search"]);
++
++/** 密钥类参数的脱敏：命中键名就把值换掉，**绝不回显完整内容**。 */
++const SECRET_KEY = /(token|secret|password|passwd|api[-_]?key|authorization|cookie|credential|private[-_]?key)/i;
++
++const MAX_ARG_CHARS = 160;
++
++function asString(value: unknown): string | undefined {
++  return typeof value === "string" && value.trim() ? value : undefined;
++}
++
++/** 取命令文本（bash/powershell 的 `command`，兼容 `cmd`/`script` 拼写）。 */
++export function commandOf(input: Record<string, unknown> | undefined): string | undefined {
++  if (!input) return undefined;
++  return asString(input.command) ?? asString(input.cmd) ?? asString(input.script);
++}
++
++/**
++ * 参数摘要：只留最有辨识度的一两个字段，其余按密钥规则脱敏并截断。
++ *
++ * 规格要求「卡片只显示参数摘要，不要回显完整密钥/长内容」——所以这里先按键名脱敏，
++ * 再把整串压成一行、超长截断。宁可摘要不够详细，也不要把 token 画到屏幕上。
++ */
++export function summarizeApprovalInput(
++  toolName: string,
++  input: Record<string, unknown> | undefined,
++): string {
++  if (!input || Object.keys(input).length === 0) return "";
++  const preferred = ["command", "cmd", "script", "path", "file_path", "filePath", "url", "pattern", "query", "prompt"];
++  const parts: string[] = [];
++  const used = new Set<string>();
++
++  for (const key of preferred) {
++    const value = asString(input[key]);
++    if (!value) continue;
++    used.add(key);
++    const safe = SECRET_KEY.test(key) ? "[redacted]" : value;
++    parts.push(safe);
++    if (parts.length >= 2) break;
++  }
++  if (parts.length === 0) {
++    for (const [key, value] of Object.entries(input)) {
++      const text = asString(value);
++      if (!text) continue;
++      parts.push(SECRET_KEY.test(key) ? `${key}=[redacted]` : `${key}=${text}`);
++      if (parts.length >= 2) break;
++    }
++  }
++
++  const joined = parts.join(" · ").replace(/\s+/g, " ").trim();
++  return joined.length > MAX_ARG_CHARS ? `${joined.slice(0, MAX_ARG_CHARS - 1)}…` : joined;
++}
++
++/** 授权匹配串：命令取首两个词（`git push`），文件类取路径本身。 */
++export function grantTargetFor(subject: ApprovalSubject): string {
++  const command = commandOf(subject.input);
++  if (command) {
++    const words = command.trim().split(/\s+/).slice(0, 2).join(" ");
++    return words.toLowerCase();
++  }
++  const path = asString(subject.input?.path) ?? asString(subject.input?.file_path) ?? asString(subject.input?.filePath);
++  if (path) return path;
++  const url = asString(subject.input?.url);
++  if (url) return url;
++  return "";
++}
++
++/** 一个授权是否覆盖当前调用：工具同名且目标相同（或目标的上级路径）。 */
++export function grantMatches(grant: ToolGrant, subject: ApprovalSubject): boolean {
++  if (grant.toolName !== subject.toolName) return false;
++  const target = grantTargetFor(subject);
++  if (!grant.target || !target) return grant.target === target;
++  if (grant.target === target) return true;
++  // 路径类授权覆盖子路径（授权 /repo 覆盖 /repo/a.ts）；命令类要求完全一致，
++  // 否则一条 `git status` 的授权会顺带放行 `git push`。
++  const looksLikePath = /[\\/]/.test(grant.target);
++  if (!looksLikePath) return false;
++  const normalized = grant.target.replace(/[\\/]+$/, "");
++  return target.startsWith(`${normalized}/`) || target.startsWith(`${normalized}\\`);
++}
++
++export type PermissionModeName = "bypass" | "ask" | "plan";
++
++export interface ApprovalDecisionInput extends ApprovalSubject {
++  mode: PermissionModeName;
++  grants?: readonly ToolGrant[];
++}
++
++/**
++ * 主判定：返回风险档、是否要问人、摘要与授权键。
++ *
++ * 注意顺序：**先看授权，再看模式**。用户在 ask 模式下点过「本次会话总是允许」之后，
++ * 同一动作不该再被问第二遍。
++ */
++export function decideApproval(input: ApprovalDecisionInput): ApprovalDecision {
++  const subject: ApprovalSubject = { toolName: input.toolName, input: input.input };
++  const command = commandOf(input.input);
++  const summary = summarizeApprovalInput(input.toolName, input.input);
++  const grantTarget = grantTargetFor(subject);
++  const base = { summary, grantTarget };
++
++  if (input.grants?.some((grant) => grantMatches(grant, subject))) {
++    return { ...base, tier: "unknown", needsApproval: false, reason: "session-grant" };
++  }
++  if (input.mode === "bypass") {
++    return { ...base, tier: "unknown", needsApproval: false, reason: "bypass" };
++  }
++  if (READ_ONLY_TOOLS.has(input.toolName.toLowerCase())) {
++    return { ...base, tier: "read-only", needsApproval: false, reason: "read-only-tool" };
++  }
++  if (command) {
++    const dangerous = DANGEROUS_RULES.find((rule) => rule.pattern.test(command));
++    if (dangerous) {
++      return { ...base, tier: "dangerous", needsApproval: true, reason: dangerous.id };
++    }
++    const safe = READ_ONLY_RULES.find((rule) => rule.pattern.test(command));
++    if (safe) {
++      return { ...base, tier: "read-only", needsApproval: false, reason: safe.id };
++    }
++  }
++  return { ...base, tier: "unknown", needsApproval: true, reason: "unclassified" };
++}
++
++/**
++ * 审批卡片的三个选项。
++ *
++ * 注意这里是**给人看的标签**，不是机器 id：`ctx.ui.select` 会把选项原样渲染成对话框按钮，
++ * 传 `allow-once` 这种 id 的话，用户看到的就是三行英文单词。机器语义放 `APPROVAL_CHOICE_IDS`。
++ */
++export const APPROVAL_CHOICES = ["允许一次", "本次会话总是允许", "拒绝"] as const;
++export const APPROVAL_CHOICE_IDS = ["allow-once", "allow-session", "deny"] as const;
++export type ApprovalChoice = typeof APPROVAL_CHOICE_IDS[number];
++
++/**
++ * 把 `ctx.ui.select` 的返回值映射成决策。
++ *
++ * 三种写法都接受：人话标签（实际渲染的）、机器 id（测试与旧调用）、以及**下标**
++ * （`select` 在部分实现里返回选中项的下标）。除此之外一律当拒绝 ——
++ * 取消/中止/乱码都不能变成放行。
++ */
++export function parseApprovalChoice(selected: string | number | undefined | null): ApprovalChoice {
++  if (typeof selected === "number") {
++    return APPROVAL_CHOICE_IDS[selected] ?? "deny";
++  }
++  if (typeof selected !== "string") return "deny";
++  const trimmed = selected.trim();
++  const asId = APPROVAL_CHOICE_IDS.find((id) => id === trimmed);
++  if (asId) return asId;
++  const asLabel = APPROVAL_CHOICES.findIndex((label) => label === trimmed);
++  if (asLabel >= 0) return APPROVAL_CHOICE_IDS[asLabel]!;
++  return "deny";
++}
++
++/** 会话授权的持久化形态（写进 `pi-web:tool-grants` custom entry）。 */
++export interface ToolGrantsEntry {
++  version: 1;
++  grants: ToolGrant[];
++}
++
++export const TOOL_GRANTS_ENTRY_TYPE = "pi-web:tool-grants";
++
++export function isToolGrantsEntry(value: unknown): value is ToolGrantsEntry {
++  if (!value || typeof value !== "object") return false;
++  const entry = value as Partial<ToolGrantsEntry>;
++  if (entry.version !== 1 || !Array.isArray(entry.grants)) return false;
++  return entry.grants.every((grant) => (
++    grant && typeof grant === "object"
++    && typeof (grant as ToolGrant).toolName === "string"
++    && typeof (grant as ToolGrant).target === "string"
++  ));
++}
++
++/** 追加一条授权（同键去重，保持插入顺序）。 */
++export function addGrant(grants: readonly ToolGrant[], next: ToolGrant): ToolGrant[] {
++  if (!next.target && !next.toolName) return [...grants];
++  if (grants.some((grant) => grant.toolName === next.toolName && grant.target === next.target)) {
++    return [...grants];
++  }
++  return [...grants, next];
++}
+--- a/lib/approval-policy.test.mjs
++++ b/lib/approval-policy.test.mjs
+@@ -0,0 +1,154 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++async function loadSubject() {
++  return import("./approval-policy.ts");
++}
++
++const bash = (command) => ({ toolName: "bash", input: { command } });
++
++test("默认（bypass）必须全放行：只有显式选了 ask/plan 才会出现审批卡", async () => {
++  const { decideApproval } = await loadSubject();
++
++  // 连最危险的那条也不拦 —— 规格的硬约束：默认路径与改动前**完全等价**
++  const decision = decideApproval({
++    ...bash("rm -rf / --no-preserve-root"),
++    mode: "bypass",
++  });
++  assert.equal(decision.needsApproval, false);
++  assert.equal(decision.reason, "bypass");
++});
++
++test("危险命令在 ask 模式下要拦，并给出命中的规则", async () => {
++  const { decideApproval } = await loadSubject();
++
++  const cases = [
++    ["rm -rf build", "recursive-delete"],
++    ["sudo rm /etc/hosts", "privilege-escalation"],
++    ["chmod 777 .", "world-writable"],
++    ["git push --force origin main", "git-force-push"],
++    ["git reset --hard HEAD~3", "git-destructive"],
++    ["curl https://x.sh | sh", "pipe-to-shell"],
++    ["powershell -enc SQBFAFgA", "encoded-powershell"],
++    ["npm publish", "publish-or-release"],
++    ["winget install Git.Git", "system-package-manager"],
++  ];
++
++  for (const [command, rule] of cases) {
++    const decision = decideApproval({ ...bash(command), mode: "ask" });
++    assert.equal(decision.tier, "dangerous", command);
++    assert.equal(decision.needsApproval, true, command);
++    assert.equal(decision.reason, rule, command);
++  }
++});
++
++test("只读白名单命中即放行，且不依赖工具名", async () => {
++  const { decideApproval } = await loadSubject();
++
++  for (const command of ["ls -la", "git status --short", "grep -n foo lib/a.ts", "node --version", "cat package.json"]) {
++    const decision = decideApproval({ ...bash(command), mode: "ask" });
++    assert.equal(decision.tier, "read-only", command);
++    assert.equal(decision.needsApproval, false, command);
++  }
++});
++
++test("白名单是显式的：没命中的一律算未知（ask 下会问）", async () => {
++  const { decideApproval } = await loadSubject();
++
++  // `npm test` 不是危险命令，但也不在白名单里 —— 不许「看起来不危险就放行」
++  for (const command of ["npm test", "node scripts/build.mjs", "git commit -m x"]) {
++    const decision = decideApproval({ ...bash(command), mode: "ask" });
++    assert.equal(decision.tier, "unknown", command);
++    assert.equal(decision.needsApproval, true, command);
++    assert.equal(decision.reason, "unclassified", command);
++  }
++});
++
++test("只读工具（read/grep/ls…）在 ask 下也不问", async () => {
++  const { decideApproval } = await loadSubject();
++
++  const decision = decideApproval({ toolName: "read", input: { path: "/etc/shadow" }, mode: "ask" });
++  assert.equal(decision.tier, "read-only");
++  assert.equal(decision.needsApproval, false);
++});
++
++test("会话授权优先于模式：点过「总是允许」的动作不再问第二遍", async () => {
++  const { decideApproval, grantTargetFor } = await loadSubject();
++
++  const subject = bash("npm publish");
++  const grant = { toolName: "bash", target: grantTargetFor(subject) };
++  assert.equal(grant.target, "npm publish");
++
++  const decision = decideApproval({ ...subject, mode: "ask", grants: [grant] });
++  assert.equal(decision.needsApproval, false);
++  assert.equal(decision.reason, "session-grant");
++});
++
++test("命令类授权不做前缀放宽：一条 git status 不能顺带放行 git push", async () => {
++  const { grantMatches } = await loadSubject();
++
++  const grant = { toolName: "bash", target: "git status" };
++  assert.equal(grantMatches(grant, bash("git status --short")), true);
++  assert.equal(grantMatches(grant, bash("git push --force")), false);
++  assert.equal(grantMatches(grant, bash("git commit -m x")), false);
++});
++
++test("路径类授权覆盖子路径，但不覆盖兄弟目录", async () => {
++  const { grantMatches } = await loadSubject();
++
++  const grant = { toolName: "write", target: "/repo/src" };
++  assert.equal(grantMatches(grant, { toolName: "write", input: { path: "/repo/src/a.ts" } }), true);
++  assert.equal(grantMatches(grant, { toolName: "write", input: { path: "/repo/other/a.ts" } }), false);
++  assert.equal(grantMatches(grant, { toolName: "write", input: { path: "/repo/src" } }), true);
++  // 工具不同也不覆盖
++  assert.equal(grantMatches(grant, { toolName: "edit", input: { path: "/repo/src/a.ts" } }), false);
++});
++
++test("摘要脱敏：密钥类字段不回显，长内容截断", async () => {
++  const { summarizeApprovalInput } = await loadSubject();
++
++  assert.equal(
++    summarizeApprovalInput("bash", { command: "curl -H \"Authorization: Bearer abc\" https://api" }),
++    'curl -H "Authorization: Bearer abc" https://api',
++  );
++  // 键名带 token 的值直接被替换
++  assert.equal(summarizeApprovalInput("http", { url: "https://x", token: "sk-live-123" }), "https://x");
++  // 没有首选键时退回前两个字段，且密钥字段脱敏
++  assert.equal(
++    summarizeApprovalInput("custom", { apiKey: "sk-1", other: "v" }),
++    "apiKey=[redacted] · other=v",
++  );
++  // 超长截断到 160 字符以内
++  const long = summarizeApprovalInput("bash", { command: "x".repeat(400) });
++  assert.ok(long.length <= 160, `${long.length}`);
++  assert.ok(long.endsWith("…"));
++  // 空输入不报错
++  assert.equal(summarizeApprovalInput("bash", undefined), "");
++});
++
++test("选项解析：未识别/取消（undefined）一律当拒绝", async () => {
++  const { parseApprovalChoice } = await loadSubject();
++
++  assert.equal(parseApprovalChoice("allow-once"), "allow-once");
++  assert.equal(parseApprovalChoice("allow-session"), "allow-session");
++  assert.equal(parseApprovalChoice("deny"), "deny");
++  assert.equal(parseApprovalChoice(undefined), "deny");
++  assert.equal(parseApprovalChoice("随便什么"), "deny");
++});
++
++test("授权条目校验与去重追加", async () => {
++  const { isToolGrantsEntry, addGrant, TOOL_GRANTS_ENTRY_TYPE } = await loadSubject();
++
++  assert.equal(TOOL_GRANTS_ENTRY_TYPE, "pi-web:tool-grants");
++  assert.equal(isToolGrantsEntry({ version: 1, grants: [{ toolName: "bash", target: "npm publish" }] }), true);
++  assert.equal(isToolGrantsEntry({ version: 2, grants: [] }), false);
++  assert.equal(isToolGrantsEntry({ version: 1, grants: [{ toolName: "bash" }] }), false);
++  assert.equal(isToolGrantsEntry(null), false);
++
++  const first = addGrant([], { toolName: "bash", target: "npm publish" });
++  assert.deepEqual(first, [{ toolName: "bash", target: "npm publish" }]);
++  assert.equal(addGrant(first, { toolName: "bash", target: "npm publish" }).length, 1);
++  assert.equal(addGrant(first, { toolName: "bash", target: "npm version" }).length, 2);
++  // 空授权不加
++  assert.equal(addGrant(first, { toolName: "", target: "" }).length, 1);
++});
+--- a/lib/approval-extension.ts
++++ b/lib/approval-extension.ts
+@@ -0,0 +1,123 @@
++import type { ExtensionAPI, ExtensionContext, InlineExtension } from "@earendil-works/pi-coding-agent";
++import {
++  APPROVAL_CHOICES,
++  TOOL_GRANTS_ENTRY_TYPE,
++  addGrant,
++  decideApproval,
++  grantTargetFor,
++  isToolGrantsEntry,
++  parseApprovalChoice,
++  type PermissionModeName,
++  type ToolGrant,
++} from "./approval-policy";
++
++/**
++ * fork:proma-01-approval — 工具审批引擎（pi 内联扩展）。
++ *
++ * 官方文档把 permission gate 列为扩展首要用例，并给了完整写法
++ * （`docs/extensions.md:19`、`examples/extensions/permission-gate.ts`）：在
++ * `pi.on("tool_call")` 里返回 `{ block: true, reason }` 就能拦下这次调用，
++ * 用 `ctx.ui.select()` 问用户。本扩展走的就是这条路，**没有自造审批通道** ——
++ * `ctx.ui.select` 在本仓映射到既有的 `extension_ui_request` → ChatWindow 对话框 →
++ * `extension_ui_response`，连「刷新后待决请求能恢复」都由 rpc-manager 重发未决请求
++ * 免费提供（`AgentSessionWrapper.onEvent` 会补发 `pendingUiRequests`）。
++ *
++ * 三条纪律：
++ *
++ * 1. **默认全放行**：`getMode()` 返回 `bypass` 时这个扩展等价于不存在（`decideApproval`
++ *    在 bypass 下直接放行）。只有用户显式把会话设成 ask / plan，才会出现审批卡。
++ * 2. **中止即拒绝**：等待期间用户点了停止（stop），`select` 的 Promise 会抛/返回空 ——
++ *    一律当拒绝，绝不放行一个没被回答的危险调用。
++ * 3. **只记「总是允许」的授权**：一次性放行不写会话，避免会话文件里堆噪音；
++ *    授权写进 `pi-web:tool-grants` custom entry，随分支回退一起回退（与 todo 同款语义）。
++ */
++
++export const HOST_APPROVAL_EXTENSION_NAME = "pi-web-approval";
++
++/** 从分支里读回会话授权（同名工具 + 同目标；后写的覆盖先写的）。 */
++export function readToolGrants(entries: readonly unknown[]): ToolGrant[] {
++  let grants: ToolGrant[] = [];
++  for (const entry of entries) {
++    if (!entry || typeof entry !== "object") continue;
++    const candidate = entry as { type?: unknown; customType?: unknown; data?: unknown };
++    if (candidate.type !== "custom" || candidate.customType !== TOOL_GRANTS_ENTRY_TYPE) continue;
++    if (!isToolGrantsEntry(candidate.data)) continue;
++    grants = candidate.data.grants.map((grant) => ({ ...grant }));
++  }
++  return grants;
++}
++
++/** 人话描述：卡片上先看到「要干什么」，再看参数摘要。 */
++function approvalPrompt(toolName: string, summary: string, reason: string | undefined): string {
++  const label = toolName === "bash" ? "命令" : `工具 ${toolName}`;
++  const because = reason === "unclassified" ? "不在只读白名单里" : `命中风险规则：${reason}`;
++  return [
++    `需要确认这笔操作（${because}）`,
++    "",
++    summary ? `${label}：${summary}` : label,
++  ].join("\n");
++}
++
++export function createApprovalExtension(getMode: () => PermissionModeName): InlineExtension {
++  return {
++    name: HOST_APPROVAL_EXTENSION_NAME,
++    hidden: true,
++    factory: (pi: ExtensionAPI) => {
++      let grants: ToolGrant[] = [];
++
++      const reconstruct = (ctx: ExtensionContext) => {
++        grants = readToolGrants(ctx.sessionManager.getBranch());
++      };
++      pi.on("session_start", async (_event, ctx) => reconstruct(ctx));
++      pi.on("session_tree", async (_event, ctx) => reconstruct(ctx));
++
++      pi.on("tool_call", async (event, ctx) => {
++        const input = (event.input ?? {}) as Record<string, unknown>;
++        const decision = decideApproval({
++          mode: getMode(),
++          toolName: event.toolName,
++          input,
++          grants,
++        });
++        if (!decision.needsApproval) return undefined;
++
++        // 没有 UI（非交互运行）时必须拦，而不是默默放行 —— 与官方示例一致。
++        if (!ctx.hasUI) {
++          return { block: true, reason: `需要用户确认，但当前没有可用的交互界面（${decision.reason ?? "unknown"}）` };
++        }
++
++        let selected: string | null | undefined;
++        try {
++          selected = await ctx.ui.select(
++            approvalPrompt(event.toolName, decision.summary, decision.reason),
++            [...APPROVAL_CHOICES],
++          );
++        } catch {
++          // 中止本轮 / 对话框被取消：按拒绝处理
++          return { block: true, reason: "审批未获答复，已按拒绝处理" };
++        }
++
++        const choice = parseApprovalChoice(selected);
++        if (choice === "deny") return { block: true, reason: "用户拒绝了这次工具调用" };
++
++        if (choice === "allow-session" && decision.grantTarget) {
++          const grant: ToolGrant = { toolName: event.toolName, target: decision.grantTarget };
++          grants = addGrant(grants, grant);
++          try {
++            // 扩展侧写会话状态的正规入口是 `pi.appendEntry()`（官方文档 § Session persistence）。
++            // 不用 `ctx.sessionManager.appendCustomEntry`：那条在扩展上下文里被标成只读类型，
++            // 是宿主（rpc-manager）侧用的。
++            pi.appendEntry(TOOL_GRANTS_ENTRY_TYPE, { version: 1, grants });
++          } catch (error) {
++            // 写不进去不影响本次放行；下一次同类调用会再问一次（宁可多问，不可静默放行）
++            console.error("[pi-web] failed to persist tool grant:", error instanceof Error ? error.message : error);
++          }
++        }
++        return undefined;
++      });
++    },
++  };
++}
++
++/** 供测试断言用：授权键的入口就是策略里的那一个实现。 */
++export { grantTargetFor };
+--- a/lib/approval-extension.test.mjs
++++ b/lib/approval-extension.test.mjs
+@@ -0,0 +1,139 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { createJiti } from "jiti";
++
++const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
++const { readToolGrants, createApprovalExtension } = await jiti.import("./approval-extension.ts");
++
++const customEntry = (data) => ({ type: "custom", customType: "pi-web:tool-grants", data });
++
++test("授权从分支读回：取最后一条，忽略其它 custom entry 与畸形数据", () => {
++  const grants = readToolGrants([
++    { type: "message", message: { role: "user", content: "hi" } },
++    { type: "custom", customType: "pi-web:tool-selection", data: { version: 1, tools: ["read"] } },
++    customEntry({ version: 1, grants: [{ toolName: "bash", target: "npm publish" }] }),
++    customEntry({ version: 1, grants: [{ toolName: "bash", target: "npm publish" }, { toolName: "write", target: "/repo" }] }),
++    customEntry({ version: 99, grants: [] }),
++  ]);
++  assert.deepEqual(grants, [
++    { toolName: "bash", target: "npm publish" },
++    { toolName: "write", target: "/repo" },
++  ]);
++  assert.deepEqual(readToolGrants([]), []);
++  assert.deepEqual(readToolGrants([null, "x", 42]), []);
++});
++
++test("默认模式（bypass）下扩展不拦任何工具调用", async () => {
++  const extension = createApprovalExtension(() => "bypass");
++  const handlers = [];
++  const fakePi = { on: (name, handler) => handlers.push({ name, handler }) };
++  extension.factory(fakePi);
++
++  const toolCall = handlers.find((entry) => entry.name === "tool_call").handler;
++  const result = await toolCall(
++    { toolName: "bash", input: { command: "rm -rf /" } },
++    { hasUI: true, ui: { select: async () => "deny" }, sessionManager: { getBranch: () => [] } },
++  );
++  assert.equal(result, undefined, "bypass 必须放行（默认路径与改动前等价）");
++});
++
++test("没有 UI 时危险调用被拦，而不是默默放行", async () => {
++  const extension = createApprovalExtension(() => "ask");
++  const handlers = [];
++  extension.factory({ on: (name, handler) => handlers.push({ name, handler }) });
++  const toolCall = handlers.find((entry) => entry.name === "tool_call").handler;
++
++  const result = await toolCall(
++    { toolName: "bash", input: { command: "git push --force" } },
++    { hasUI: false, ui: { select: async () => "allow-once" }, sessionManager: { getBranch: () => [] } },
++  );
++  assert.equal(result.block, true);
++  assert.match(result.reason, /没有可用的交互界面/);
++});
++
++test("ask 模式下：拒绝 → block，允许一次 → 放行且不写授权", async () => {
++  const extension = createApprovalExtension(() => "ask");
++  const handlers = [];
++  const appended = [];
++  extension.factory({ on: (name, handler) => handlers.push({ name, handler }) });
++  const toolCall = handlers.find((entry) => entry.name === "tool_call").handler;
++  const ctx = (choice) => ({
++    hasUI: true,
++    ui: { select: async () => choice },
++    sessionManager: { getBranch: () => [], appendCustomEntry: (type, data) => appended.push({ type, data }) },
++  });
++
++  const denied = await toolCall({ toolName: "bash", input: { command: "git push --force" } }, ctx("deny"));
++  assert.equal(denied.block, true);
++  assert.equal(appended.length, 0);
++
++  const once = await toolCall({ toolName: "bash", input: { command: "git push --force" } }, ctx("allow-once"));
++  assert.equal(once, undefined);
++  assert.equal(appended.length, 0, "一次性放行不该写会话");
++});
++
++test("「本次会话总是允许」写入 pi-web:tool-grants，且随后同类调用直接放行", async () => {
++  const extension = createApprovalExtension(() => "ask");
++  const handlers = [];
++  const appended = [];
++  let branch = [];
++  // 扩展侧写状态的正规入口是 pi.appendEntry（不是 ctx.sessionManager）
++  const fakePi = {
++    on: (name, handler) => handlers.push({ name, handler }),
++    appendEntry: (type, data) => {
++      appended.push({ type, data });
++      branch = [...branch, { type: "custom", customType: type, data }];
++    },
++  };
++  extension.factory(fakePi);
++  const toolCall = handlers.find((entry) => entry.name === "tool_call").handler;
++  const ctx = {
++    hasUI: true,
++    ui: { select: async () => "allow-session" },
++    sessionManager: { getBranch: () => branch },
++  };
++
++  const first = await toolCall({ toolName: "bash", input: { command: "npm publish" } }, ctx);
++  assert.equal(first, undefined);
++  assert.equal(appended.length, 1);
++  assert.equal(appended[0].type, "pi-web:tool-grants");
++  assert.deepEqual(appended[0].data, { version: 1, grants: [{ toolName: "bash", target: "npm publish" }] });
++
++  // 第二次同类调用：不应再问（select 不再被调用也能放行）
++  const secondCtx = { ...ctx, ui: { select: async () => { throw new Error("should not ask again"); } } };
++  const second = await toolCall({ toolName: "bash", input: { command: "npm publish --tag next" } }, secondCtx);
++  assert.equal(second, undefined);
++});
++
++test("等待期间被中止（select 抛错）→ 按拒绝处理", async () => {
++  const extension = createApprovalExtension(() => "ask");
++  const handlers = [];
++  extension.factory({ on: (name, handler) => handlers.push({ name, handler }) });
++  const toolCall = handlers.find((entry) => entry.name === "tool_call").handler;
++
++  const result = await toolCall(
++    { toolName: "bash", input: { command: "sudo rm -rf /" } },
++    {
++      hasUI: true,
++      ui: { select: async () => { throw new Error("aborted"); } },
++      sessionManager: { getBranch: () => [] },
++    },
++  );
++  assert.equal(result.block, true);
++  assert.match(result.reason, /拒绝/);
++});
++
++test("只读调用在 ask 模式下不触发对话框", async () => {
++  const extension = createApprovalExtension(() => "ask");
++  const handlers = [];
++  extension.factory({ on: (name, handler) => handlers.push({ name, handler }) });
++  const toolCall = handlers.find((entry) => entry.name === "tool_call").handler;
++
++  let asked = false;
++  const result = await toolCall(
++    { toolName: "bash", input: { command: "git status --short" } },
++    { hasUI: true, ui: { select: async () => { asked = true; return "deny"; } }, sessionManager: { getBranch: () => [] } },
++  );
++  assert.equal(result, undefined);
++  assert.equal(asked, false);
++});
+--- a/lib/permission-mode.ts
++++ b/lib/permission-mode.ts
+@@ -0,0 +1,108 @@
++/**
++ * fork:proma-02-mode — 会话级权限模式（全自动 / 需审批 / 计划）。
++ *
++ * 三档语义（对齐 Proma 的 `agent-orchestrator.ts:1138-1142`）：
++ *
++ * | 档位 | 行为 |
++ * | --- | --- |
++ * | `bypass`（**默认**） | 全自动，等同改动前：工具调用一律放行 |
++ * | `ask` | 非只读调用弹审批卡（见 `lib/approval-policy.ts` 的判定链） |
++ * | `plan` | 计划档。PROMA-03 落地前它按**最严格的审批档**走（绝不比 ask 更松） |
++ *
++ * ## 为什么必须是会话级 custom entry，而不是 localStorage
++ *
++ * 模式要跟着会话走：换浏览器、换机器、把会话文件拷到别处，打开时模式都得还在。
++ * localStorage 只描述「这台机器的这个浏览器」，会话文件才是会话状态的载体 ——
++ * 所以这里与 `lib/session-tool-selection.ts` 用**同一套**写入模式
++ * （`sessionManager.appendCustomEntry`，读回时后写覆盖先写、分支回退跟着回退）。
++ *
++ * 纯数据模块（除 append 那个薄封装外）：可单测。
++ */
++
++import type { SessionManager } from "@earendil-works/pi-coding-agent";
++
++export const PERMISSION_MODES = ["bypass", "ask", "plan"] as const;
++export type PermissionMode = typeof PERMISSION_MODES[number];
++
++/** 缺省即现状：不选任何档位时行为与改动前完全一致。 */
++export const DEFAULT_PERMISSION_MODE: PermissionMode = "bypass";
++
++export const PERMISSION_MODE_ENTRY_TYPE = "pi-web:permission-mode";
++
++export interface PermissionModeEntry {
++  version: 1;
++  mode: PermissionMode;
++}
++
++export function isPermissionMode(value: unknown): value is PermissionMode {
++  return typeof value === "string" && (PERMISSION_MODES as readonly string[]).includes(value);
++}
++
++export function isPermissionModeEntry(value: unknown): value is PermissionModeEntry {
++  if (!value || typeof value !== "object") return false;
++  const entry = value as Partial<PermissionModeEntry>;
++  return entry.version === 1 && isPermissionMode(entry.mode);
++}
++
++/**
++ * 从条目里读回模式：**后写的覆盖先写的**（会话中途切过档就取最后一次），
++ * 没有任何条目或数据畸形时回退默认档（而不是抛错，避免一个坏条目让会话打不开）。
++ */
++export function readPermissionMode(entries: readonly unknown[]): PermissionMode {
++  let mode: PermissionMode | null = null;
++  for (const entry of entries) {
++    if (!entry || typeof entry !== "object") continue;
++    const candidate = entry as { type?: unknown; customType?: unknown; data?: unknown };
++    if (candidate.type !== "custom" || candidate.customType !== PERMISSION_MODE_ENTRY_TYPE) continue;
++    if (!isPermissionModeEntry(candidate.data)) continue;
++    mode = candidate.data.mode;
++  }
++  return mode ?? DEFAULT_PERMISSION_MODE;
++}
++
++/** 写入模式（与 `appendSessionToolSelection` 同款：一条 custom entry）。 */
++export function appendPermissionMode(sessionManager: SessionManager, mode: PermissionMode): void {
++  sessionManager.appendCustomEntry(PERMISSION_MODE_ENTRY_TYPE, {
++    version: 1,
++    mode: isPermissionMode(mode) ? mode : DEFAULT_PERMISSION_MODE,
++  });
++}
++
++/**
++ * 把权限模式折成审批引擎看得懂的档位。
++ *
++ * `plan` 在 PROMA-03 落地前等价于 `ask` —— 有意如此：一个刚被选中的档位如果要等下一个
++ * 补丁才有约束力，用户会以为自己已经受保护了。宁可更严（多问几次），不可更松。
++ */
++export function approvalModeFor(mode: PermissionMode): "bypass" | "ask" {
++  return mode === "bypass" ? "bypass" : "ask";
++}
++
++/**
++ * fork:proma-03-plan — 计划档下审批引擎**不需要**再问：`lib/plan-mode.ts` 已经把
++ * 写动作全拦了，剩下的只读动作本来就不会触发审批。两处都拦会在同一个动作上弹两次卡。
++ */
++export function approvalModeForPlanAwareMode(mode: PermissionMode): "bypass" | "ask" {
++  if (mode === "bypass") return "bypass";
++  if (mode === "plan") return "bypass";
++  return "ask";
++}
++
++/** i18n 键（三档的显示名与说明）。 */
++export const PERMISSION_MODE_LABEL_KEYS: Record<PermissionMode, string> = {
++  bypass: "permission.modeBypass",
++  ask: "permission.modeAsk",
++  plan: "permission.modePlan",
++};
++
++export const PERMISSION_MODE_HINT_KEYS: Record<PermissionMode, string> = {
++  bypass: "permission.modeBypassHint",
++  ask: "permission.modeAskHint",
++  plan: "permission.modePlanHint",
++};
++
++/** 循环切换（控件行是一个按钮，点一下换下一档）。 */
++export function nextPermissionMode(mode: PermissionMode): PermissionMode {
++  const index = PERMISSION_MODES.indexOf(mode);
++  return PERMISSION_MODES[(index + 1) % PERMISSION_MODES.length]!;
++}
+--- a/lib/permission-mode.test.mjs
++++ b/lib/permission-mode.test.mjs
+@@ -0,0 +1,69 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { createJiti } from "jiti";
++
++const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
++const {
++  PERMISSION_MODES,
++  DEFAULT_PERMISSION_MODE,
++  PERMISSION_MODE_ENTRY_TYPE,
++  readPermissionMode,
++  appendPermissionMode,
++  isPermissionModeEntry,
++  nextPermissionMode,
++} = await jiti.import("./permission-mode.ts");
++
++const entry = (mode) => ({ type: "custom", customType: PERMISSION_MODE_ENTRY_TYPE, data: { version: 1, mode } });
++
++test("缺省档位是 bypass：没选过档位的会话行为与改动前完全一致", () => {
++  assert.equal(DEFAULT_PERMISSION_MODE, "bypass");
++  assert.equal(readPermissionMode([]), "bypass");
++  assert.equal(readPermissionMode([{ type: "message", message: {} }]), "bypass");
++});
++
++test("读回取最后一次写入（会话中途切档生效）", () => {
++  assert.equal(readPermissionMode([entry("ask"), entry("bypass"), entry("plan")]), "plan");
++  assert.equal(readPermissionMode([entry("plan"), entry("ask")]), "ask");
++});
++
++test("畸形数据一律回退默认档，而不是抛错（坏条目不能让会话打不开）", () => {
++  assert.equal(readPermissionMode([null, "x", 42]), "bypass");
++  assert.equal(readPermissionMode([{ type: "custom", customType: PERMISSION_MODE_ENTRY_TYPE, data: { version: 2, mode: "ask" } }]), "bypass");
++  assert.equal(readPermissionMode([{ type: "custom", customType: PERMISSION_MODE_ENTRY_TYPE, data: { version: 1, mode: "yolo" } }]), "bypass");
++  // 别的 custom entry 不能被误读
++  assert.equal(readPermissionMode([{ type: "custom", customType: "pi-web:tool-grants", data: { version: 1, mode: "ask" } }]), "bypass");
++});
++
++test("写入一条 custom entry（与工具选择同款）", () => {
++  const appended = [];
++  const fakeSessionManager = { appendCustomEntry: (type, data) => appended.push({ type, data }) };
++
++  appendPermissionMode(fakeSessionManager, "ask");
++  assert.deepEqual(appended, [{ type: PERMISSION_MODE_ENTRY_TYPE, data: { version: 1, mode: "ask" } }]);
++
++  // 非法值落回默认档，绝不写半个坏条目
++  appendPermissionMode(fakeSessionManager, "yolo");
++  assert.deepEqual(appended[1], { type: PERMISSION_MODE_ENTRY_TYPE, data: { version: 1, mode: "bypass" } });
++  assert.equal(isPermissionModeEntry(appended[1].data), true);
++});
++
++test("plan 在 PROMA-03 落地后仍走最严格档：写动作由计划扩展拦，审批不再重复问", async () => {
++  const { approvalModeFor, approvalModeForPlanAwareMode } = await jiti.import("./permission-mode.ts");
++  // 保留原函数（语义：plan 不比其他受限档松）
++  assert.equal(approvalModeFor("plan"), "ask");
++  // 但实际接线用这个：plan 下写动作已被计划扩展拦死，审批再问一次就是双重弹卡
++  assert.equal(approvalModeForPlanAwareMode("bypass"), "bypass");
++  assert.equal(approvalModeForPlanAwareMode("ask"), "ask");
++  assert.equal(approvalModeForPlanAwareMode("plan"), "bypass");
++});
++
++test("循环切换覆盖三档且回到起点", () => {
++  const seen = [];
++  let mode = DEFAULT_PERMISSION_MODE;
++  for (let i = 0; i < PERMISSION_MODES.length; i += 1) {
++    seen.push(mode);
++    mode = nextPermissionMode(mode);
++  }
++  assert.deepEqual(seen, ["bypass", "ask", "plan"]);
++  assert.equal(mode, "bypass");
++});
+--- a/lib/plan-mode.ts
++++ b/lib/plan-mode.ts
+@@ -0,0 +1,62 @@
++/**
++ * fork:proma-03-plan — 计划模式的**语义层**（纯函数）。
++ *
++ * 计划档的约束只有一条原则：**只允许能证明是只读的动作**。
++ *
++ * 参考实现（官方 `examples/extensions/plan-mode/`）的做法是两份列表：一份工具白名单
++ * （`read/bash/grep/find/ls`）、一份 bash 只读命令白名单（它的 `utils.ts:isSafeCommand`）。
++ * 本仓不这么干 —— PROMA-01 已经有分类器（`lib/approval-policy.ts` 的 `READ_ONLY_TOOLS`
++ * 与 `READ_ONLY_RULES`），这里直接复用。两份白名单一定会漂移，而漂移的方向通常是
++ * 「看起来放行、实际放行了一个写操作」，那是这个功能最不该出的错。
++ *
++ * 于是判定就是：read-only 工具 → 放行；bash 类 → 命令必须命中只读白名单；其余 → 拦。
++ * 拦下来的理由要写给模型看（它会据此改成先出计划），所以文案是给模型的一句话。
++ */
++
++import { commandOf, decideApproval, type PermissionModeName } from "./approval-policy";
++
++export interface PlanModeDecision {
++  allowed: boolean;
++  /** 拦下来的原因（写给模型看的一句话）。 */
++  reason?: string;
++}
++
++/** 计划模式追加到 system prompt 的指令（对齐官方示例的 "present a plan first"）。 */
++export const PLAN_MODE_SYSTEM_PROMPT = [
++  "## 计划模式（只读）",
++  "",
++  "你当前处于**计划模式**：只允许只读动作（读文件、搜索、列目录、以及只读的 shell 命令）。",
++  "写文件、改文件、以及任何有副作用的命令都会被系统拦住。",
++  "",
++  "请先用只读手段把情况摸清，然后**用编号列表给出计划**，每步一句话、写清要改哪个文件。",
++  "用户确认后会自动切回可执行档位，那时再动手。",
++].join("\n");
++
++/**
++ * 计划档下的单次判定。
++ *
++ * 复用 `decideApproval` 的 `read-only` 档作为唯一依据：它已经覆盖了工具级白名单
++ * （read/grep/ls…）与命令级白名单（`git status`、`ls`、`cat`…）。判成 `read-only`
++ * 才放行，其余（含 unknown）一律拦 —— 计划模式宁可拦多，因为它承诺的是"只调研"。
++ */
++export function decidePlanModeToolCall(toolName: string, input: Record<string, unknown> | undefined): PlanModeDecision {
++  const decision = decideApproval({ mode: "ask" satisfies PermissionModeName, toolName, input });
++  if (decision.tier === "read-only") return { allowed: true };
++
++  const command = commandOf(input);
++  const what = command
++    ? `命令：${decision.summary || command}`
++    : `工具：${toolName}`;
++  return {
++    allowed: false,
++    reason: [
++      `计划模式下不允许执行这个动作（${what}）。`,
++      "请改用只读手段（读文件 / 搜索 / 只读命令）继续调研，然后把计划用编号列表写出来。",
++    ].join(""),
++  };
++}
++
++/** 计划模式是否生效（模式名到布尔的唯一映射，避免各处各写一遍）。 */
++export function isPlanMode(mode: PermissionModeName): boolean {
++  return mode === "plan";
++}
+--- a/lib/plan-mode.test.mjs
++++ b/lib/plan-mode.test.mjs
+@@ -0,0 +1,85 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { createJiti } from "jiti";
++
++const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
++const { decidePlanModeToolCall, isPlanMode, PLAN_MODE_SYSTEM_PROMPT } = await jiti.import("./plan-mode.ts");
++const { createPlanModeExtension } = await jiti.import("./plan-mode-extension.ts");
++
++const bash = (command) => ({ toolName: "bash", input: { command } });
++
++test("计划档下只读工具放行", () => {
++  assert.equal(decidePlanModeToolCall("read", { path: "/repo/a.ts" }).allowed, true);
++  assert.equal(decidePlanModeToolCall("grep", { pattern: "foo" }).allowed, true);
++  assert.equal(decidePlanModeToolCall("ls", { path: "/repo" }).allowed, true);
++  // 只读命令同样放行（复用 PROMA-01 的命令白名单）
++  assert.equal(decidePlanModeToolCall("bash", { command: "git status --short" }).allowed, true);
++  assert.equal(decidePlanModeToolCall("bash", { command: "ls -la" }).allowed, true);
++});
++
++test("写工具与有副作用的命令一律拦下，理由写给模型看", () => {
++  const cases = [
++    ["write", { path: "/repo/a.ts", content: "x" }],
++    ["edit", { path: "/repo/a.ts", oldText: "a", newText: "b" }],
++    ["bash", { command: "npm test" }],
++    ["bash", { command: "rm -rf build" }],
++    ["bash", { command: "git commit -m x" }],
++  ];
++  for (const [toolName, input] of cases) {
++    const decision = decidePlanModeToolCall(toolName, input);
++    assert.equal(decision.allowed, false, `${toolName} ${JSON.stringify(input)}`);
++    assert.match(decision.reason, /计划模式下不允许/, toolName);
++    // 理由必须告诉它下一步干什么（否则模型只会反复重试同一个动作）
++    assert.match(decision.reason, /只读手段/, toolName);
++  }
++});
++
++test("未分类的命令也拦（计划模式宁可拦多）", () => {
++  const decision = decidePlanModeToolCall("bash", { command: "node scripts/build.mjs" });
++  assert.equal(decision.allowed, false);
++});
++
++test("isPlanMode 只认 plan 档", () => {
++  assert.equal(isPlanMode("plan"), true);
++  assert.equal(isPlanMode("ask"), false);
++  assert.equal(isPlanMode("bypass"), false);
++});
++
++test("system prompt 指令包含只读约束与「先给编号计划」", () => {
++  assert.match(PLAN_MODE_SYSTEM_PROMPT, /只读/);
++  assert.match(PLAN_MODE_SYSTEM_PROMPT, /编号/);
++});
++
++function runExtension(mode) {
++  const handlers = [];
++  createPlanModeExtension(() => mode).factory({ on: (name, handler) => handlers.push({ name, handler }) });
++  return {
++    beforeAgentStart: handlers.find((entry) => entry.name === "before_agent_start")?.handler,
++    toolCall: handlers.find((entry) => entry.name === "tool_call")?.handler,
++  };
++}
++
++test("非计划档下扩展完全不介入", async () => {
++  const extension = runExtension("bypass");
++  assert.equal(await extension.beforeAgentStart({ systemPrompt: "BASE" }), undefined);
++  assert.equal(await extension.toolCall({ toolName: "write", input: { path: "a" } }), undefined);
++});
++
++test("计划档下追加 system prompt 且保留原有内容", async () => {
++  const extension = runExtension("plan");
++  const result = await extension.beforeAgentStart({ systemPrompt: "BASE" });
++  assert.match(result.systemPrompt, /^BASE\n\n/);
++  assert.match(result.systemPrompt, /计划模式/);
++  // 没有原 prompt 时不能拼出 "undefined"
++  const bare = await extension.beforeAgentStart({});
++  assert.doesNotMatch(bare.systemPrompt, /undefined/);
++});
++
++test("计划档下写工具被 block，只读调用照常返回 undefined", async () => {
++  const extension = runExtension("plan");
++  const blocked = await extension.toolCall({ toolName: "write", input: { path: "/repo/a.ts" } });
++  assert.equal(blocked.block, true);
++  assert.match(blocked.reason, /计划模式/);
++  assert.equal(await extension.toolCall({ toolName: "read", input: { path: "/repo/a.ts" } }), undefined);
++  assert.equal(await extension.toolCall(bash("git status")), undefined);
++});
+--- a/lib/plan-mode-extension.ts
++++ b/lib/plan-mode-extension.ts
+@@ -0,0 +1,42 @@
++import type { ExtensionAPI, InlineExtension } from "@earendil-works/pi-coding-agent";
++import { PLAN_MODE_SYSTEM_PROMPT, decidePlanModeToolCall, isPlanMode } from "./plan-mode";
++import type { PermissionModeName } from "./approval-policy";
++
++/**
++ * fork:proma-03-plan — 计划模式扩展。
++ *
++ * 只做两件事，都是官方示例里与 UI 无关的那部分语义：
++ *
++ * 1. `before_agent_start`：计划档下往 system prompt 追加「先调研、再给编号计划」的指令；
++ * 2. `tool_call`：拦截非只读动作（判定复用 `lib/plan-mode.ts`，而它复用 PROMA-01 的分类器）。
++ *
++ * 官方示例里那些 TUI 专属部分（`/plan` 命令、Ctrl+Alt+P、footer 状态、进度 widget）
++ * 在本仓要么已有等价物（档位按钮 = 开关；todo 工具 + 待办 chip = 进度），要么不适用。
++ * `[DONE:n]` 标记那套也不搬：本仓的 todo 工具已经能在任务列表里表达同样的进度，
++ * 再引入一套标记只会让模型有两套互相竞争的进度表达方式。
++ */
++
++export const HOST_PLAN_MODE_EXTENSION_NAME = "pi-web-plan-mode";
++
++export function createPlanModeExtension(getMode: () => PermissionModeName): InlineExtension {
++  return {
++    name: HOST_PLAN_MODE_EXTENSION_NAME,
++    hidden: true,
++    factory: (pi: ExtensionAPI) => {
++      pi.on("before_agent_start", async (event) => {
++        if (!isPlanMode(getMode())) return undefined;
++        // 官方示例的同类处理：保留原有 systemPrompt，在其后追加上去。
++        const base = event?.systemPrompt ? `${event.systemPrompt}\n\n` : "";
++        return { systemPrompt: `${base}${PLAN_MODE_SYSTEM_PROMPT}` };
++      });
++
++      pi.on("tool_call", async (event) => {
++        if (!isPlanMode(getMode())) return undefined;
++        const input = (event.input ?? {}) as Record<string, unknown>;
++        const decision = decidePlanModeToolCall(event.toolName, input);
++        if (decision.allowed) return undefined;
++        return { block: true, reason: decision.reason ?? "计划模式下只允许只读动作" };
++      });
++    },
++  };
++}
+--- a/components/ChatInput.tsx
++++ b/components/ChatInput.tsx
+@@ -29,6 +29,8 @@
+ import { useChatAppearance } from "@/hooks/useChatAppearance";
+ import { ThinkingIcon } from "./ThinkingIcon";
+ import type { ToolPreset } from "@/lib/tool-presets";
++// fork:proma-02-mode — 会话权限模式
++import { nextPermissionMode, PERMISSION_MODE_HINT_KEYS, PERMISSION_MODE_LABEL_KEYS, type PermissionMode } from "@/lib/permission-mode";
+ import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
+ import { ComposerContextStrip } from "./ComposerContextStrip";
+ import { TodoChip } from "./fork/TodoChip";
+@@ -107,6 +109,9 @@
+   compactResult?: CompactResultInfo | null;
+   toolPreset?: ToolPreset;
+   onToolPresetChange?: (preset: ToolPreset) => void;
++  /** fork:proma-02-mode — 会话权限模式（Chat-only 会话不显示这个控件）。 */
++  permissionMode?: PermissionMode;
++  onPermissionModeChange?: (mode: PermissionMode) => void;
+   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+   onThinkingLevelChange?: (level: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
+   availableThinkingLevels?: string[] | null;
+@@ -700,6 +705,7 @@
+ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
+   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
+   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
++  permissionMode, onPermissionModeChange,
+   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
+   retryInfo, queuedMessages, inputHistory = [], onRecallQueue, todoSummary, currentSessionId,
+   onQueueRemove, onQueueMove, onQueuePromote,
+@@ -3376,6 +3382,44 @@
+                 )}
+               </div>
+             )}
++            {/* fork:proma-02-mode — 权限档位（Chat-only 会话没有意义，所以隐藏）。
++                点一下循环切换：全自动 → 需审批 → 计划。 */}
++            {onPermissionModeChange && permissionMode && toolPreset !== "none" && (
++              <button
++                type="button"
++                onClick={() => onPermissionModeChange(nextPermissionMode(permissionMode))}
++                title={`${t(PERMISSION_MODE_LABEL_KEYS[permissionMode])}：${t(PERMISSION_MODE_HINT_KEYS[permissionMode])}`}
++                aria-label={t(PERMISSION_MODE_LABEL_KEYS[permissionMode])}
++                style={{
++                  display: "flex",
++                  alignItems: "center",
++                  justifyContent: "center",
++                  gap: 5,
++                  padding: isMobile ? "0 6px" : "6px 10px",
++                  width: isMobile ? "auto" : undefined,
++                  height: 28,
++                  background: "none",
++                  border: "none",
++                  borderRadius: "var(--radius-md)",
++                  // 非默认档位用强调色，因为「当前不全自动」是需要一眼看出来的状态
++                  color: permissionMode === "bypass" ? "var(--text-muted)" : "var(--accent)",
++                  cursor: "pointer",
++                  fontSize: TEXT.sm,
++                  transition: "background 0.12s, color 0.12s",
++                }}
++                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
++                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
++              >
++                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
++                  {permissionMode === "bypass" && <path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z" />}
++                  {permissionMode === "ask" && (<><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z" /><path d="m9 12 2 2 4-4" /></>)}
++                  {permissionMode === "plan" && (<><path d="M8 4h9a2 2 0 0 1 2 2v14l-4-2-3 2-3-2-4 2V6a2 2 0 0 1 2-2z" /><path d="M9 9h6M9 13h4" /></>)}
++                </svg>
++                {(!isMobile || controlsMenuOpen) && (
++                  <span style={{ whiteSpace: "nowrap" }}>{t(PERMISSION_MODE_LABEL_KEYS[permissionMode])}</span>
++                )}
++              </button>
++            )}
+             {!isStreaming && onToolPresetChange && (
+               <div ref={toolDropdownRef} style={{ position: "relative" }}>
+                 <button
+--- a/components/ChatWindow.tsx
++++ b/components/ChatWindow.tsx
+@@ -376,6 +376,8 @@
+     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
+     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+     handleRecallQueue,
++    // fork:proma-02-mode
++    permissionMode, handlePermissionModeChange,
+     // fork:gap04-queue
+     handleQueueRemove, handleQueueMove, handleQueuePromote,
+     handleBuiltinSlashCommand,
+@@ -1108,6 +1110,9 @@
+       compactResult={compactResult}
+       toolPreset={toolPreset}
+       onToolPresetChange={session || isNew ? handleToolPresetChange : undefined}
++      // fork:proma-02-mode — 权限档位控件（Chat-only 会话由 ChatInput 自行隐藏）
++      permissionMode={permissionMode}
++      onPermissionModeChange={handlePermissionModeChange}
+       thinkingLevel={thinkingLevel}
+       onThinkingLevelChange={session || isNew ? handleThinkingLevelChange : undefined}
+       availableThinkingLevels={availableThinkingLevels}
+--- a/hooks/useAgentSession.ts
++++ b/hooks/useAgentSession.ts
+@@ -39,6 +39,8 @@
+ import type { SelectionContext, SessionReference } from "@/lib/composer-context";
+ // fork:gap04-queue — 队列逐条操控的操作类型
+ import type { QueueKind } from "@/lib/queue-surgery";
++// fork:proma-02-mode — 会话权限模式
++import { DEFAULT_PERMISSION_MODE, isPermissionMode, type PermissionMode } from "@/lib/permission-mode";
+ 
+ export interface SessionData {
+   sessionId: string;
+@@ -86,6 +88,8 @@
+   extensionStatuses?: ExtensionStatusItem[];
+   extensionWidgets?: ExtensionWidgetItem[];
+   queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
++  /** fork:proma-02-mode — 会话权限模式（bypass / ask / plan）。 */
++  permissionMode?: string | null;
+ };
+ 
+ export interface QueuedMessages {
+@@ -343,6 +347,12 @@
+   const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
+   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
+   const [queuedMessages, setQueuedMessages] = useState<QueuedMessages>({ steering: [], followUp: [] });
++  // fork:proma-02-mode — 当前档位。默认 bypass（与改动前行为一致），
++  // 真实值从 get_state 的 permissionMode 恢复（服务端从会话 custom entry 读）。
++  const [permissionMode, setPermissionMode] = useState<PermissionMode>(DEFAULT_PERMISSION_MODE);
++  /** 供切换失败时回滚（handler 里读的是最新值，不受闭包影响）。 */
++  const permissionModeRef = useRef<PermissionMode>(DEFAULT_PERMISSION_MODE);
++  permissionModeRef.current = permissionMode;
+ 
+   const eventConnectionRef = useRef<AgentEventConnection | null>(null);
+   const eventStreamGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+@@ -542,6 +552,7 @@
+           if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
+           if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
+           if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
++    if (isPermissionMode(liveState.permissionMode)) setPermissionMode(liveState.permissionMode);
+           if (liveState.autoCompactionEnabled !== undefined) setAutoCompactionEnabled(liveState.autoCompactionEnabled ?? true);
+         } else if (!agentState.running) {
+           setQueuedMessages({ steering: [], followUp: [] });
+@@ -1085,6 +1096,8 @@
+       setIsCompacting(state?.isCompacting ?? false);
+       setAutoCompactionEnabled(state?.autoCompactionEnabled ?? true);
+       setQueuedMessages(normalizeQueuedMessages(state?.queuedMessages));
++      // fork:proma-02-mode — 选会话/刷新后的档位恢复
++      if (isPermissionMode(state?.permissionMode)) setPermissionMode(state.permissionMode);
+       const busy = data.running && state
+         && (state.isStreaming || state.isPromptRunning || state.isCompacting);
+       if (busy) {
+@@ -1187,6 +1200,8 @@
+               // Aborted turns can leave messages queued in pi (delivered with the
+               // next turn); dead wrapper (no state) means the queue is gone.
+               setQueuedMessages(normalizeQueuedMessages(d.state?.queuedMessages));
++        // fork:proma-02-mode
++        if (isPermissionMode(d.state?.permissionMode)) setPermissionMode(d.state.permissionMode);
+             })
+             .catch(() => {});
+         }
+@@ -2018,6 +2033,27 @@
+     runQueueOperation({ type: "queue_promote", index, expect }, "promote")
+   ), [runQueueOperation]);
+ 
++  /**
++   * fork:proma-02-mode — 切换权限模式。
++   *
++   * 乐观更新 + 以服务端回执为准：切档失败（例如会话已被销毁）时把 UI 拨回去并说明原因，
++   * 绝不能出现「界面显示已受保护、实际仍是全自动」这种反向错误。
++   */
++  const handlePermissionModeChange = useCallback(async (mode: PermissionMode) => {
++    const sid = sessionIdRef.current;
++    const previous = permissionModeRef.current;
++    setPermissionMode(mode);
++    if (!sid) return;
++    try {
++      const result = await sendAgentCommand<{ mode?: string }>(sid, { type: "set_permission_mode", mode });
++      if (isPermissionMode(result?.mode)) setPermissionMode(result.mode);
++    } catch (error) {
++      console.error("Failed to change permission mode:", error);
++      setPermissionMode(previous);
++      addNotice({ type: "error", message: "Failed to change the permission mode" });
++    }
++  }, [addNotice]);
++
+   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
+     setThinkingLevel(level);
+     if (isNew && !sessionIdRef.current) {
+@@ -2327,6 +2363,8 @@
+     addNotice,
+     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
+     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
++    // fork:proma-02-mode
++    permissionMode, handlePermissionModeChange,
+     handleRecallQueue,
+     // fork:gap04-queue
+     handleQueueRemove, handleQueueMove, handleQueuePromote,
+--- a/lib/rpc-manager.ts
++++ b/lib/rpc-manager.ts
+@@ -5,6 +5,18 @@
+ import { existsSync, realpathSync, writeFileSync } from "fs";
+ import { resolve } from "path";
+ import { validateAgentImages } from "./image-attachments";
++// fork:proma-01-approval / proma-02-mode — 工具审批引擎与会话权限模式
++import { createApprovalExtension } from "./approval-extension";
++// fork:proma-03-plan — 计划模式扩展
++import { createPlanModeExtension } from "./plan-mode-extension";
++import {
++  DEFAULT_PERMISSION_MODE,
++  appendPermissionMode,
++  approvalModeForPlanAwareMode,
++  isPermissionMode,
++  readPermissionMode,
++  type PermissionMode,
++} from "./permission-mode";
+ // fork:gap04-queue — 队列逐条操控的纯逻辑与类型
+ import {
+   applyQueueOperation,
+@@ -124,6 +136,15 @@
+   chatOnly?: boolean;
+   onAgentRunComplete?: AgentRunCompleteListener;
+   suppressCompletionNotifications?: boolean;
++  /**
++   * fork:proma-02-mode — 会话权限模式的读写桥。
++   *
++   * 为什么不直接放在 wrapper 字段里：模式要在**创建扩展之前**就知道（审批扩展的
++   * `getMode` 闭包），而扩展是在 `createAgentSessionFromServices` 里实例化的 —— 比
++   * wrapper 构造还早。所以用一对回调把 startRpcSession 里的闭包变量接到 wrapper 上。
++   */
++  getPermissionMode?: () => PermissionMode;
++  setPermissionMode?: (mode: PermissionMode) => void;
+ };
+ 
+ const IDLE_RESET_EVENT_TYPES = new Set([
+@@ -247,6 +268,9 @@
+   private readonly chatOnly: boolean;
+   private readonly onAgentRunComplete?: AgentRunCompleteListener;
+   private readonly suppressCompletionNotifications: boolean;
++  /** fork:proma-02-mode — 会话权限模式（读/写都走 startRpcSession 里的闭包）。 */
++  private readonly getPermissionMode?: () => PermissionMode;
++  private readonly setPermissionMode?: (mode: PermissionMode) => void;
+   private unsubscribe: (() => void) | null = null;
+   /** fork:gap04-queue — 队列编辑的串行化尾巴（见 withQueueLock）。 */
+   private queueLock: Promise<void> = Promise.resolve();
+@@ -265,6 +289,8 @@
+     this.chatOnly = options.chatOnly ?? false;
+     this.onAgentRunComplete = options.onAgentRunComplete;
+     this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
++    this.getPermissionMode = options.getPermissionMode;
++    this.setPermissionMode = options.setPermissionMode;
+     this.installExactSystemPromptContinuation();
+     this.applyExactSystemPrompt();
+   }
+@@ -832,6 +858,8 @@
+             steering: [...this.inner.getSteeringMessages()],
+             followUp: [...this.inner.getFollowUpMessages()],
+           },
++          // fork:proma-02-mode — 前端控件行据此显示当前档位（刷新/换机器后也能恢复）
++          permissionMode: this.getPermissionMode?.() ?? DEFAULT_PERMISSION_MODE,
+           contextUsage: contextUsage
+             ? { percent: contextUsage.percent, contextWindow: contextUsage.contextWindow, tokens: contextUsage.tokens }
+             : null,
+@@ -1011,6 +1039,16 @@
+         return null;
+       }
+ 
++      case "set_permission_mode": {
++        // fork:proma-02-mode — 会话级权限模式：写 custom entry（跟着会话走）+ 更新
++        // 闭包变量（审批扩展立刻生效，不必重建会话）。
++        const mode = command.mode;
++        if (!isPermissionMode(mode)) throw new Error(`Invalid permission mode: ${String(mode)}`);
++        this.setPermissionMode?.(mode);
++        appendPermissionMode(this.inner.sessionManager as unknown as SessionManager, mode);
++        return { mode: this.getPermissionMode?.() ?? mode };
++      }
++
+       case "clear_queue": {
+         // Full clear only: pi has no single-item dequeue, and clear+requeue
+         // races against the agent loop pulling messages mid-flight.
+@@ -2165,6 +2203,11 @@
+   const persistedToolNames = subagentResources
+     ? undefined
+     : readSessionToolSelection(sessionManager.getEntries() as unknown as SessionEntry[]);
++  // fork:proma-02-mode — 权限模式也是会话级的（custom entry，不是 localStorage），
++  // 所以会话文件拷到别的机器/浏览器，模式跟着一起走。
++  let permissionMode: PermissionMode = subagentResources
++    ? DEFAULT_PERMISSION_MODE
++    : readPermissionMode(sessionManager.getEntries());
+   const selectedToolNames = subagentResources?.tools ?? persistedToolNames ?? requestedToolNames;
+   if (!subagentResources && persistedToolNames === undefined && requestedToolNames !== undefined) {
+     appendSessionToolSelection(sessionManager, requestedToolNames);
+@@ -2239,6 +2282,13 @@
+               ),
+               // fork:ui-todo — the session's task list (see lib/todo-extension.ts).
+               createTodoExtension(),
++              // fork:proma-01-approval — 工具审批。默认档是 bypass，所以这个扩展在默认
++              // 配置下等价于不存在（`decideApproval` 直接放行）—— 只有用户显式把会话
++              // 设成 ask/plan 才会弹卡。
++              createApprovalExtension(() => approvalModeForPlanAwareMode(permissionMode)),
++              // fork:proma-03-plan — 计划档：先调研、给编号计划，非只读动作一律拦。
++              // 与审批扩展共存：审批管「问不问」，计划管「允不允许写」。
++              createPlanModeExtension(() => permissionMode),
+             ],
+             extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
+           },
+@@ -2317,6 +2367,10 @@
+     const wrapper = new AgentSessionWrapper(inner, {
+       exactSystemPrompt,
+       chatOnly,
++      // fork:proma-02-mode — 模式读/写的桥（startRpcSession 里的闭包变量，
++      // 所以在审批扩展创建之前就已经存在）
++      getPermissionMode: () => permissionMode,
++      setPermissionMode: (mode) => { permissionMode = mode; },
+       onAgentRunComplete: (completedSessionId) => {
+         void notifySessionComplete(completedSessionId).catch((error) => {
+           console.error("[pi-web] failed to send completion push:", error instanceof Error ? error.message : error);
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -737,6 +737,13 @@
+     "chat.outputLocal": "output stays local",
+     "chat.outputModel": "output sent to model",
+     "chat.chatOnly": "Chat only",
++    // fork:proma-02-mode — 会话权限档位
++    "permission.modeBypass": "Full auto",
++    "permission.modeBypassHint": "Run every tool call without asking",
++    "permission.modeAsk": "Needs approval",
++    "permission.modeAskHint": "Ask before non read-only tool calls",
++    "permission.modePlan": "Plan",
++    "permission.modePlanHint": "Strictest approval until plan mode lands",
+     "chat.readOnlyTools": "{count} read-only built-in tools",
+     "chat.builtInTools": "{count} built-in tools",
+     "chat.allBuiltInTools": "All built-in tools",
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -736,6 +736,13 @@
+     "chat.outputLocal": "输出保留在本地",
+     "chat.outputModel": "输出发送给模型",
+     "chat.chatOnly": "仅聊天",
++    // fork:proma-02-mode — 会话权限档位
++    "permission.modeBypass": "全自动",
++    "permission.modeBypassHint": "工具调用一律直接执行，不询问",
++    "permission.modeAsk": "需审批",
++    "permission.modeAskHint": "非只读的工具调用先弹审批卡",
++    "permission.modePlan": "计划",
++    "permission.modePlanHint": "计划模式落地前，按最严格的审批档执行",
+     "chat.readOnlyTools": "{count} 个只读内置工具",
+     "chat.builtInTools": "{count} 个内置工具",
+     "chat.allBuiltInTools": "全部内置工具",
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -736,6 +736,13 @@
+     "chat.outputLocal": "輸出保留在本地",
+     "chat.outputModel": "輸出會傳送給模型",
+     "chat.chatOnly": "僅聊天",
++    // fork:proma-02-mode — 工作階段權限檔位
++    "permission.modeBypass": "全自動",
++    "permission.modeBypassHint": "工具呼叫一律直接執行，不詢問",
++    "permission.modeAsk": "需審批",
++    "permission.modeAskHint": "非唯讀的工具呼叫先跳審批卡",
++    "permission.modePlan": "計畫",
++    "permission.modePlanHint": "計畫模式落地前，按最嚴格的審批檔執行",
+     "chat.readOnlyTools": "{count} 個只讀內建工具",
+     "chat.builtInTools": "{count} 個內建工具",
+     "chat.allBuiltInTools": "全部內建工具",

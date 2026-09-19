@@ -7,7 +7,7 @@
 | fork 标记 | `fork:proma-01-approval`、`fork:proma-02-mode`、`fork:proma-03-plan`、`fork:fix-stale-wrapper` |
 | 新增文件 | 5 个：`lib/approval-policy.ts`、`lib/approval-extension.ts`、`lib/permission-mode.ts`、`lib/plan-mode.ts`、`lib/plan-mode-extension.ts`（外加 3 份单测） |
 | 上游文件接触面 | 6 个：`lib/rpc-manager.ts`、`hooks/useAgentSession.ts`、`components/ChatInput.tsx`、`components/ChatWindow.tsx`、三个 i18n 文件 |
-| `.patch` | **待生成**（见文末说明） |
+| `.patch` | [`0009-permission-and-plan.patch`](./0009-permission-and-plan.patch)（58.2KB，16 个文件；基线由会话记录反演，见文末） |
 
 ## 一个关键的实现判断：规格里那条"新管路"不用加
 
@@ -70,9 +70,17 @@ pi.on("tool_call", async (event, ctx) => {
 - 危险规则是**正则清单**，不追求完备；方向是「宁可多问」：白名单没命中的一律算未知（ask 档会问）。
 - 计划档的"只读"约束也是白名单式的：`bash` 里只放行能证明只读的命令，其余（含 `npm test`）都拦 —— 官方示例也是这个取舍。
 
-## `.patch` 待生成（诚实交代）
+## `.patch` 是怎么补上的（诚实交代）
 
-生成 0009 的 `.patch` 需要这 6 个文件的**改前**内容，而这一轮我忘了先跑改前快照工具（`test-results/snapshot-stage.mjs`）。不会丢：补丁 0002–0008 的链条可从最早基线逐阶段还原出任一阶段的改前内容（`test-results/make-patches.mjs` 的组合校验就是干这个的），下一轮补上即可。本次的改动清单与 `fork:` 标记已完整记录在上文，按 `docs/patches/README.md` 的约定，标记本身就是权威依据。
+0009 当时忘了先跑改前快照（`test-results/snapshot-stage.mjs` 必须在**动手之前**跑）。补的办法不是手写反演锚点：
+
+1. **从会话记录反演**：pi 的会话文件里存着每次 `edit` 的 `oldText`/`newText` 成对内容，按时间**倒序**把 `newText` 换回 `oldText` 就得到「本阶段开始前」的文件。每步要求唯一匹配，对不上就跳过（记录里混有实际未生效的 op）。
+2. **跳过的地方用检查兜**：基线必须能解析、“基线里不能再有 `fork:proma-0X` 标记”、以及一条重复行 artifact 扫描。实测只留下 2 处人工修正（`lib/rpc-manager.ts` 一段重复 `case`、`hooks/useAgentSession.ts` 一行重复）。
+3. **一致性证明**：把 0009/0010 挂进 `test-results/make-patches.mjs` 后重跑，**0002–0008 的 `.patch` 与已入库版本逐字节相同**，且 28 个文件的组合校验（最早基线 → 逐阶段打补丁 → 当前文件）全部通过。
+
+工具（都在 gitignored 的 `test-results/`）：`build-baseline-0009-0010.mjs`（反演）、`check-baselines.mjs`（改动内容核对）、`scan-baseline-artifacts.mjs`（重复行扫描）。
+
+教训：**新补丁一律先 `node test-results/snapshot-stage.mjs <编号> <文件...>` 再动手改。**
 
 ## 合并上游后怎么重打
 

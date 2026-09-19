@@ -1,0 +1,543 @@
+--- a/lib/session-rewind.ts
++++ b/lib/session-rewind.ts
+@@ -0,0 +1,130 @@
++/**
++ * fork:proma-04-rewind — 会话回退（rewind）的**语义层**。
++ *
++ * 「回退到此处」= 把会话文件截断到指定条目（**含**该条），它之后的所有对话消失。
++ * 对齐 Proma 的 rewind 契约（`agent-session-manager.ts:932-1030, 1118-1145`）：
++ *
++ * - **按 entryId 定位、含该条截断**：定位用会话文件里的 `id`（每条 entry 都有），
++ *   不是按消息序号 —— 序号会随分支/压缩变化，entryId 才是稳定的。
++ * - **文件回退明确不支持**：Proma 的 rewind 也不回退磁盘上的文件改动（正常返回，
++ *   而不是报错）。所以这里不碰工作区，只在返回里说明这一点，避免用户以为代码也回滚了。
++ * - **严格解析**：任何一行不是合法 JSON，直接拒绝。宁可不回退，也不要把读不懂的
++ *   会话文件重写一遍 —— 那是唯一可能永久丢数据的操作。
++ * - **原子写**：复用 `lib/atomic-file.ts` 的 `writePrivateFileAtomicSync`（临时文件 + rename）。
++ *
++ * 纯函数（planRewind）与薄 IO（rewindSessionFile）分开，前者可单测。
++ */
++
++import { readFileSync } from "node:fs";
++import { writePrivateFileAtomicSync } from "./atomic-file";
++
++export type RewindRefusalReason = "entry-not-found" | "invalid-jsonl" | "nothing-to-drop" | "empty-file";
++
++export interface RewindPlan {
++  /** 保留的行（含目标条目）。 */
++  kept: string[];
++  /** 被截断掉的行数。 */
++  dropped: number;
++  /** 目标条目的类型，供回执显示（例如停在一条 user 消息上）。 */
++  entryType?: string;
++}
++
++export type RewindPlanResult =
++  | { ok: true; plan: RewindPlan }
++  | { ok: false; reason: RewindRefusalReason; message: string };
++
++export interface RewindResult {
++  ok: boolean;
++  reason?: RewindRefusalReason;
++  message?: string;
++  dropped?: number;
++  kept?: number;
++  entryType?: string;
++  /** 明确告知调用方：磁盘上的文件改动**不会**被回退。 */
++  filesReverted: false;
++}
++
++const REFUSAL_MESSAGES: Record<RewindRefusalReason, string> = {
++  "empty-file": "这个会话文件是空的，无法回退",
++  "invalid-jsonl": "会话文件里有无法解析的行，为保证不丢数据，已拒绝回退",
++  "entry-not-found": "找不到这条消息对应的记录（可能已被压缩或来自更早的版本）",
++  "nothing-to-drop": "这已经是最后一条消息，没有可回退的内容",
++};
++
++function refuse(reason: RewindRefusalReason): RewindPlanResult {
++  return { ok: false, reason, message: REFUSAL_MESSAGES[reason] };
++}
++
++/**
++ * 规划一次回退：算出保留哪些行。
++ *
++ * 第 0 行是 `type: "session"` 的头部（会话元数据），**永远保留** ——
++ * 它不带 `id`，也不该参与匹配。
++ */
++export function planRewind(lines: readonly string[], entryId: string): RewindPlanResult {
++  const trimmed = lines.filter((line) => line.trim().length > 0);
++  if (trimmed.length === 0) return refuse("empty-file");
++
++  let targetIndex = -1;
++  let targetType: string | undefined;
++  // 严格解析**整个文件**，找到目标也不提前 break：
++  // 只要有一行读不懂，就说明我们对这份文件的理解不完整，宁可什么都不做。
++  for (let index = 1; index < trimmed.length; index += 1) {
++    let parsed: unknown;
++    try {
++      parsed = JSON.parse(trimmed[index]!);
++    } catch {
++      return refuse("invalid-jsonl");
++    }
++    const entry = parsed as { id?: unknown; type?: unknown };
++    if (targetIndex === -1 && entry && typeof entry.id === "string" && entry.id === entryId) {
++      targetIndex = index;
++      targetType = typeof entry.type === "string" ? entry.type : undefined;
++    }
++  }
++  if (targetIndex === -1) return refuse("entry-not-found");
++  if (targetIndex === trimmed.length - 1) return refuse("nothing-to-drop");
++
++  return {
++    ok: true,
++    plan: {
++      kept: trimmed.slice(0, targetIndex + 1),
++      dropped: trimmed.length - targetIndex - 1,
++      ...(targetType ? { entryType: targetType } : {}),
++    },
++  };
++}
++
++/**
++ * 执行回退：读文件 → 规划 → 原子写回。
++ *
++ * 只在 `planRewind` 成功时才写文件；写入是原子的（临时文件 + rename），
++ * 所以「写一半失败」不会留下半个会话。
++ */
++export function rewindSessionFile(filePath: string, entryId: string): RewindResult {
++  let raw: string;
++  try {
++    raw = readFileSync(filePath, "utf8");
++  } catch (error) {
++    return {
++      ok: false,
++      reason: "empty-file",
++      message: error instanceof Error ? error.message : String(error),
++      filesReverted: false,
++    };
++  }
++
++  const result = planRewind(raw.split("\n"), entryId);
++  if (!result.ok) return { ok: false, reason: result.reason, message: result.message, filesReverted: false };
++
++  // 保留原文件末尾的换行风格（会话文件每行一条，最后一行带换行）
++  writePrivateFileAtomicSync(filePath, `${result.plan.kept.join("\n")}\n`);
++
++  return {
++    ok: true,
++    dropped: result.plan.dropped,
++    kept: result.plan.kept.length,
++    ...(result.plan.entryType ? { entryType: result.plan.entryType } : {}),
++    filesReverted: false,
++  };
++}
+--- a/lib/session-rewind.test.mjs
++++ b/lib/session-rewind.test.mjs
+@@ -0,0 +1,96 @@
++import assert from "node:assert/strict";
++import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import test from "node:test";
++import { createJiti } from "jiti";
++
++const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
++const { planRewind, rewindSessionFile } = await jiti.import("./session-rewind.ts");
++
++const header = JSON.stringify({ type: "session", version: 3, id: "sess-1", cwd: "/repo" });
++const entry = (id, type, parentId) => JSON.stringify({ type, id, parentId, message: { role: "user", content: id } });
++const assistant = (id, parentId) => JSON.stringify({ type: "message", id, parentId, message: { role: "assistant", content: [] } });
++
++const lines = (...extra) => [header, ...extra];
++
++test("按 entryId 含该条截断：保留目标及其之前，丢掉之后", () => {
++  const input = lines(entry("e1", "message", null), assistant("e2", "e1"), entry("e3", "message", "e2"), assistant("e4", "e3"));
++  const result = planRewind(input, "e2");
++  assert.equal(result.ok, true);
++  assert.equal(result.plan.dropped, 2);
++  assert.deepEqual(result.plan.kept, [header, input[1], input[2]]);
++  assert.equal(result.plan.entryType, "message");
++});
++
++test("目标就是最后一条 → 没什么可回退（拒绝而不是空写）", () => {
++  const input = lines(entry("e1", "message", null), assistant("e2", "e1"));
++  const result = planRewind(input, "e2");
++  assert.equal(result.ok, false);
++  assert.equal(result.reason, "nothing-to-drop");
++  assert.match(result.message, /最后一条/);
++});
++
++test("找不到 entryId → 拒绝并说明可能被压缩", () => {
++  const result = planRewind(lines(entry("e1", "message", null)), "missing");
++  assert.equal(result.ok, false);
++  assert.equal(result.reason, "entry-not-found");
++  assert.match(result.message, /压缩/);
++});
++
++test("严格解析：有一行不是合法 JSON 就整体拒绝（绝不部分重写）", () => {
++  const input = lines(entry("e1", "message", null), "{ 这不是 json", entry("e3", "message", "e1"));
++  const result = planRewind(input, "e1");
++  assert.equal(result.ok, false);
++  assert.equal(result.reason, "invalid-jsonl");
++});
++
++test("头部永远保留，且不参与 id 匹配", () => {
++  // 头部即使带 id 也不该被当成目标（它是会话元数据）
++  const headerWithId = JSON.stringify({ type: "session", id: "sess-1", version: 3 });
++  const input = [headerWithId, entry("e1", "message", null), assistant("e2", "e1")];
++  const result = planRewind(input, "sess-1");
++  assert.equal(result.ok, false);
++  assert.equal(result.reason, "entry-not-found");
++});
++
++test("空文件与空行被正确处理", () => {
++  assert.equal(planRewind([], "x").reason, "empty-file");
++  assert.equal(planRewind(["", "  "], "x").reason, "empty-file");
++  // 末尾多空行不影响判定
++  const input = [...lines(entry("e1", "message", null), assistant("e2", "e1")), ""];
++  assert.equal(planRewind(input, "e1").plan.dropped, 1);
++});
++
++test("rewindSessionFile 真的截断文件，且声明文件改动未回退", () => {
++  const dir = mkdtempSync(join(tmpdir(), "pi-rewind-"));
++  const file = join(dir, "session.jsonl");
++  const content = [header, entry("e1", "message", null), assistant("e2", "e1"), entry("e3", "message", "e2")].join("\n") + "\n";
++  writeFileSync(file, content, "utf8");
++
++  const result = rewindSessionFile(file, "e2");
++  assert.equal(result.ok, true);
++  assert.equal(result.dropped, 1);
++  assert.equal(result.filesReverted, false, "必须明确告诉调用方磁盘文件没有被回退");
++
++  const after = readFileSync(file, "utf8");
++  assert.equal(after, [header, entry("e1", "message", null), assistant("e2", "e1")].join("\n") + "\n");
++  assert.equal(after.endsWith("\n"), true, "尾部换行风格保持");
++});
++
++test("失败时绝不改动文件", () => {
++  const dir = mkdtempSync(join(tmpdir(), "pi-rewind-noop-"));
++  const file = join(dir, "session.jsonl");
++  const content = [header, entry("e1", "message", null)].join("\n") + "\n";
++  writeFileSync(file, content, "utf8");
++
++  const result = rewindSessionFile(file, "nope");
++  assert.equal(result.ok, false);
++  assert.equal(readFileSync(file, "utf8"), content, "拒绝路径必须原样保留文件");
++});
++
++test("文件不存在 → 可读失败而不是抛异常", () => {
++  const result = rewindSessionFile(join(tmpdir(), "definitely-missing-file.jsonl"), "e1");
++  assert.equal(result.ok, false);
++  assert.equal(result.filesReverted, false);
++});
+--- a/app/api/sessions/[id]/rewind/route.ts
++++ b/app/api/sessions/[id]/rewind/route.ts
+@@ -0,0 +1,77 @@
++import { NextRequest, NextResponse } from "next/server";
++import { getRpcSession } from "@/lib/rpc-manager";
++import { resolveSessionPath, invalidateSessionListCache } from "@/lib/session-reader";
++import { rewindSessionFile } from "@/lib/session-rewind";
++
++/**
++ * fork:proma-04-rewind — POST /api/sessions/[id]/rewind  { entryId }
++ *
++ * 「回退到此处」：把会话截断到这条记录（**含**该条），之后的对话消失。
++ *
++ * 三条纪律（都来自本仓已记录的坑）：
++ *
++ * 1. **运行中拒绝**：agent 正在跑时截断它自己的会话文件，等于把手伸进别人的写操作里。
++ *    返回 409 + 可读原因（而不是 500）—— 这是最常见的拒绝路径，UI 要能直接显示。
++ * 2. **先销毁 wrapper**：AGENTS.md「Fork must destroy the wrapper immediately」同样适用于回退。
++ *    wrapper 缓存着文件和内存态；截断后必须让它下次重建，否则后续请求拿到的是被截断前的脏状态。
++ * 3. **文件改动不回退**：与 Proma 的 rewind 契约一致（`filesReverted: false` 会跟着回执返回），
++ *    避免用户以为磁盘上的改动也被撤销了。
++ */
++export const dynamic = "force-dynamic";
++
++export async function POST(
++  request: NextRequest,
++  { params }: { params: Promise<{ id: string }> },
++) {
++  const { id } = await params;
++
++  let body: { entryId?: unknown };
++  try {
++    body = await request.json() as { entryId?: unknown };
++  } catch {
++    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
++  }
++  const entryId = typeof body.entryId === "string" ? body.entryId.trim() : "";
++  if (!entryId) {
++    return NextResponse.json({ error: "entryId is required" }, { status: 400 });
++  }
++
++  const live = getRpcSession(id);
++  if (live?.isAlive() && live.isRunning()) {
++    return NextResponse.json({
++      error: "会话正在运行，先停止再回退",
++      code: "rewind_rejected",
++      reason: "running",
++    }, { status: 409 });
++  }
++
++  const filePath = await resolveSessionPath(id);
++  if (!filePath) {
++    return NextResponse.json({ error: "Session not found" }, { status: 404 });
++  }
++
++  // 先销毁：截断之后再让它按需重建（否则内存里的文件句柄/状态还是旧的）
++  live?.destroy();
++
++  const result = rewindSessionFile(filePath, entryId);
++  if (!result.ok) {
++    // 拒绝路径给可读原因 + 机器可读的 reason（UI 按 reason 决定文案与是否给"刷新"入口）
++    const status = result.reason === "entry-not-found" ? 404 : 409;
++    return NextResponse.json({
++      error: result.message,
++      code: "rewind_rejected",
++      reason: result.reason,
++    }, { status });
++  }
++
++  invalidateSessionListCache();
++  return NextResponse.json({
++    success: true,
++    data: {
++      dropped: result.dropped,
++      kept: result.kept,
++      entryType: result.entryType,
++      filesReverted: result.filesReverted,
++    },
++  });
++}
+--- a/components/ChatWindow.tsx
++++ b/components/ChatWindow.tsx
+@@ -376,6 +376,8 @@
+     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
+     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+     handleRecallQueue,
++    // fork:proma-04-rewind
++    handleRewind, rewinding,
+     // fork:proma-02-mode
+     permissionMode, handlePermissionModeChange,
+     // fork:gap04-queue
+@@ -1342,6 +1344,12 @@
+                     entryId={entryIds[idx]}
+                     searchBlock={entryIds[idx] === pendingSearchScroll?.entryId ? searchBlock : undefined}
+                     onFork={sessionBusy || isNew ? undefined : handleFork}
++      // fork:proma-04-rewind — 回退是破坏性操作，先弹一道警示确认（回退不可撤销）
++      onRewind={sessionBusy || isNew ? undefined : (entryId) => {
++        if (!window.confirm(t("rewind.confirm"))) return;
++        void handleRewind(entryId);
++      }}
++      rewinding={rewinding}
+                     forking={forkingEntryId === entryIds[idx]}
+                     onNavigate={sessionBusy ? undefined : handleNavigate}
+                     onEditContent={handleEditContent}
+--- a/components/MessageView.tsx
++++ b/components/MessageView.tsx
+@@ -213,6 +213,9 @@
+   searchBlock?: AssistantContentBlock;
+   onFork?: (entryId: string) => void;
+   forking?: boolean;
++  /** fork:proma-04-rewind — 「回退到此处」：截断这条之后的所有对话。 */
++  onRewind?: (entryId: string) => void;
++  rewinding?: boolean;
+   onNavigate?: (entryId: string) => Promise<boolean>;
+   onEditContent?: (message: UserMessage) => void;
+   showTimestamp?: boolean;
+@@ -295,9 +298,9 @@
+   return true;
+ }
+ 
+-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, searchBlock, onFork, forking, onNavigate, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, expandedToolIds, onToggleTool }: Props) {
++export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, searchBlock, onFork, forking, onRewind, rewinding, onNavigate, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, expandedToolIds, onToggleTool }: Props) {
+   if (message.role === "user") {
+-    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} onEditContent={onEditContent} />;
++    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onRewind={onRewind} rewinding={rewinding} onNavigate={onNavigate} onEditContent={onEditContent} />;
+   }
+   if (message.role === "assistant") {
+     return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} expandedToolIds={expandedToolIds} onToggleTool={onToggleTool} />;
+@@ -328,6 +331,9 @@
+     && prev.searchBlock === next.searchBlock
+     && prev.onFork === next.onFork
+     && prev.forking === next.forking
++    // fork:proma-04-rewind
++    && prev.onRewind === next.onRewind
++    && prev.rewinding === next.rewinding
+     && prev.onNavigate === next.onNavigate
+     && prev.onEditContent === next.onEditContent
+     && prev.showTimestamp === next.showTimestamp
+@@ -338,7 +344,7 @@
+     && prev.onToggleTool === next.onToggleTool;
+ });
+ 
+-function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, onEditContent }: {
++function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onRewind, rewinding, onNavigate, onEditContent }: {
+   message: UserMessage;
+   cwd?: string;
+   onOpenFile?: (filePath: string) => void;
+@@ -345,6 +351,9 @@
+   entryId?: string;
+   onFork?: (entryId: string) => void;
+   forking?: boolean;
++  // fork:proma-04-rewind — 「回退到此处」（UserMessageView 自己的 props 类型）
++  onRewind?: (entryId: string) => void;
++  rewinding?: boolean;
+   onNavigate?: (entryId: string) => Promise<boolean>;
+   onEditContent?: (message: UserMessage) => void;
+ }) {
+@@ -376,6 +385,8 @@
+ 
+   const time = formatTime(message.timestamp);
+   const canFork = !!entryId && !!onFork;
++  // fork:proma-04-rewind — 回退同样是「按 entryId」的会话级操作
++  const canRewind = !!entryId && !!onRewind;
+   const copyTarget = commandText ?? content;
+   const editTarget = commandText ? replaceUserMessageText(message, commandText) : message;
+ 
+@@ -599,6 +610,33 @@
+                  {forking ? t("i18n.creating") : t("i18n.newSession")}
+               </button>
+             )}
++            {/* fork:proma-04-rewind — 回退到此处（放在 fork 旁：两者都是「从这条消息出发」的会话级操作） */}
++            {canRewind && (
++              <button
++                onClick={() => { onRewind!(entryId!); }}
++                disabled={rewinding}
++                title={t("rewind.actionTitle")}
++                style={{
++                  display: "flex", alignItems: "center", gap: 4,
++                  padding: "3px 8px", height: 22,
++                  background: "none", border: "none",
++                  borderRadius: "var(--radius-xs)",
++                  color: rewinding ? "var(--warning)" : "var(--text-dim)",
++                  cursor: rewinding ? "not-allowed" : "pointer",
++                  fontSize: TEXT.xs, fontWeight: 400,
++                  whiteSpace: "nowrap",
++                  transition: "color 0.12s",
++                }}
++                onMouseEnter={(e) => { if (!rewinding) e.currentTarget.style.color = "var(--warning)"; }}
++                onMouseLeave={(e) => { if (!rewinding) e.currentTarget.style.color = "var(--text-dim)"; }}
++              >
++                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
++                  <path d="M3 12a9 9 0 1 0 3-6.7" />
++                  <polyline points="3 4 3 9 8 9" />
++                </svg>
++                {t("rewind.action")}
++              </button>
++            )}
+           </div>
+         )}
+         {time && <span style={{ fontSize: TEXT["2xs"], color: "var(--text-dim)" }}>{time}</span>}
+--- a/hooks/useAgentSession.ts
++++ b/hooks/useAgentSession.ts
+@@ -350,6 +350,8 @@
+   // fork:proma-02-mode — 当前档位。默认 bypass（与改动前行为一致），
+   // 真实值从 get_state 的 permissionMode 恢复（服务端从会话 custom entry 读）。
+   const [permissionMode, setPermissionMode] = useState<PermissionMode>(DEFAULT_PERMISSION_MODE);
++  /** fork:proma-04-rewind — 回退请求进行中（按钮置灰） */
++  const [rewinding, setRewinding] = useState(false);
+   /** 供切换失败时回滚（handler 里读的是最新值，不受闭包影响）。 */
+   const permissionModeRef = useRef<PermissionMode>(DEFAULT_PERMISSION_MODE);
+   permissionModeRef.current = permissionMode;
+@@ -2054,6 +2056,51 @@
+     }
+   }, [addNotice]);
+ 
++  /**
++   * fork:proma-04-rewind — 「回退到此处」：截断这条之后的所有对话。
++   *
++   * 拒绝路径先在客户端拦一道（运行中 / 尚未落盘），服务端也会再判一次：客户端拦是为了即时、
++   * 可读的原因，服务端判是为了正确性（多标签页并发时客户端状态不作数）。
++   * 成功后重载上下文：回退改的是**文件**，不重载的话界面还停在回退前的消息上。
++   */
++  const handleRewind = useCallback(async (entryId: string) => {
++    const sid = sessionIdRef.current;
++    if (!sid) {
++      addNotice({ type: "error", message: "Cannot rewind a session that has not been saved yet" });
++      return;
++    }
++    if (agentRunningRef.current) {
++      addNotice({ type: "warning", message: "Session is running — stop it before rewinding" });
++      return;
++    }
++    setRewinding(true);
++    try {
++      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/rewind`, {
++        method: "POST",
++        headers: { "content-type": "application/json" },
++        body: JSON.stringify({ entryId }),
++      });
++      const body = await res.json().catch(() => null) as { error?: string; data?: { dropped?: number } } | null;
++      if (!res.ok) {
++        // 服务端的拒绝理由已经是可读的（running / entry-not-found / invalid-jsonl）
++        addNotice({ type: "error", message: body?.error ?? `Rewind failed (HTTP ${res.status})` });
++        return;
++      }
++      // 回到回退后那条分支的叶子：截断后原来的 leafId 已不存在，用 null 让服务端取当前分支
++      await loadContext(sid, null);
++      setActiveLeafId(null);
++      addNotice({
++        type: "success",
++        message: `Rewound the conversation — dropped ${body?.data?.dropped ?? 0} entries (files on disk were not reverted)`,
++      });
++    } catch (error) {
++      console.error("Rewind failed:", error);
++      addNotice({ type: "error", message: "Rewind failed" });
++    } finally {
++      setRewinding(false);
++    }
++  }, [addNotice, loadContext]);
++
+   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
+     setThinkingLevel(level);
+     if (isNew && !sessionIdRef.current) {
+@@ -2365,6 +2412,8 @@
+     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+     // fork:proma-02-mode
+     permissionMode, handlePermissionModeChange,
++    // fork:proma-04-rewind
++    handleRewind, rewinding,
+     handleRecallQueue,
+     // fork:gap04-queue
+     handleQueueRemove, handleQueueMove, handleQueuePromote,
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -737,6 +737,10 @@
+     "chat.outputLocal": "output stays local",
+     "chat.outputModel": "output sent to model",
+     "chat.chatOnly": "Chat only",
++    // fork:proma-04-rewind — 会话回退
++    "rewind.action": "Rewind to here",
++    "rewind.actionTitle": "Truncate every message after this one",
++    "rewind.confirm": "Rewind to here?\n\nEverything after this message is deleted from the session file. Files already written to disk are NOT reverted. This cannot be undone.",
+     // fork:proma-02-mode — 会话权限档位
+     "permission.modeBypass": "Full auto",
+     "permission.modeBypassHint": "Run every tool call without asking",
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -736,6 +736,10 @@
+     "chat.outputLocal": "输出保留在本地",
+     "chat.outputModel": "输出发送给模型",
+     "chat.chatOnly": "仅聊天",
++    // fork:proma-04-rewind — 会话回退
++    "rewind.action": "回退到此处",
++    "rewind.actionTitle": "删掉这条消息之后的所有对话",
++    "rewind.confirm": "回退到此处？\n\n这条消息之后的对话会从会话文件里删除。已经写到磁盘的文件**不会**被回退。此操作不可撤销。",
+     // fork:proma-02-mode — 会话权限档位
+     "permission.modeBypass": "全自动",
+     "permission.modeBypassHint": "工具调用一律直接执行，不询问",
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -736,6 +736,10 @@
+     "chat.outputLocal": "輸出保留在本地",
+     "chat.outputModel": "輸出會傳送給模型",
+     "chat.chatOnly": "僅聊天",
++    // fork:proma-04-rewind — 工作階段回退
++    "rewind.action": "回退到此處",
++    "rewind.actionTitle": "刪掉這則訊息之後的所有對話",
++    "rewind.confirm": "回退到此處？\n\n這則訊息之後的對話會從工作階段檔案裡刪除。已經寫到磁碟的檔案**不會**被回退。此操作無法撤銷。",
+     // fork:proma-02-mode — 工作階段權限檔位
+     "permission.modeBypass": "全自動",
+     "permission.modeBypassHint": "工具呼叫一律直接執行，不詢問",

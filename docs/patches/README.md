@@ -35,7 +35,8 @@
 | 0006 | [队列逐条操控（撤回 / 删除 / 拖拽排序 / 立即发送）](./0006-queue-controls.md) | 已实现（含 11 单测 + 端到端交付顺序验证） | 7 个文件，均为接线级改动 |
 | 0007 | [DSN-07 收尾：内联字号全部收口到 token](./0007-typography-tokens.md) | 已实现（DSN-07 完成，带全仓守卫） | 10 个文件，均加一行 import + 字号换 token |
 | 0008 | [文件树：多根 + 作用域徽标 + 三个细节](./0008-file-tree-roots.md) | 已实现（GAP-08/10，含 13 单测 + 浏览器冒烟） | 6 个文件，均为接线级改动 |
-| 0009 | [工具审批 + 权限档位 + 计划模式（PROMA-01/02/03）](./0009-permission-and-plan.md) | 已实现（含 32 单测 + 浏览器/端到端实测；`.patch` 待生成） | 6 个文件，均为接线级改动 |
+| 0009 | [工具审批 + 权限档位 + 计划模式（PROMA-01/02/03）](./0009-permission-and-plan.md) | 已实现（含 32 单测 + 浏览器/端到端实测；`.patch` 已补） | 6 个文件，均为接线级改动 |
+| 0010 | [会话回退「回退到此处」（PROMA-04）](./0010-session-rewind.md) | 已实现（含 9 单测 + 浏览器/端到端实测） | 5 个文件，均为接线级改动 |
 
 ## 工具：没有版本控制时怎么产出 `.patch`
 
@@ -74,3 +75,16 @@ node scripts/fork-patch.mjs --apply docs/patches/0003-composer-references.patch
 
 这两个脚本放在 gitignored 的 `test-results/` 下（一次性工具）；`--selftest` 则在仓内的
 `scripts/fork-patch.mjs` 里，随时可跑。
+
+### 忘了快照怎么办：从会话记录反演
+
+0009/0010 是回头补的（当时没先跑 `snapshot-stage.mjs`）。补法不是手写反演锚点，而是拿 pi 会话文件里
+每次 `edit` 的 `oldText`/`newText`，按时间**倒序**把 `newText` 换回 `oldText` —— 每步要求唯一匹配，
+对不上就跳过（记录里混有实际未生效的 op），再用「基线里不能有本补丁的 `fork:` 标记」「基线必须能解析」
+「连续重复行扫描」三条兜底，最后只留 2 处人工修正。
+
+一致性证明：把新阶段挂进 `make-patches.mjs` 后重跑，**已入库的 `0002–0008` 必须逐字节不变** ——
+变了就说明新反演的基线跟原链条不兼容。
+
+工具：`test-results/build-baseline-0009-0010.mjs`、`check-baselines.mjs`、`scan-baseline-artifacts.mjs`。
+**新补丁一律先 `node test-results/snapshot-stage.mjs <编号> <文件...>` 再动手改。**
