@@ -1,5 +1,9 @@
 # Proma-main ⇄ pi-web-0.9.0 全量功能对比矩阵
 
+> ⚠️ **矩阵里的实现状态已过时（2026-09-19 复核）**：多项标为「未做」的功能代码里已经有了。
+> 別按本文件判断完成度，先 grep 代码；最新权威状态见
+> [`proma-status-2026-09-19.md`](./proma-status-2026-09-19.md)。
+
 日期：2026-09-18
 基准：**A** = `/Users/yingjing/Desktop/pi-web-0.9.0`（`@agegr/pi-web` 0.9.1 fork，Next.js Web 优先 + Electron 壳跑 `next start`）
 对照：**B** = `pi参考项目/Proma-main`（Proma 开源版，`apps/electron` 0.19.55，Electron + Vite 纯静态 + preload IPC）

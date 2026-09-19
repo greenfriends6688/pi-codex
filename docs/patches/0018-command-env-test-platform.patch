@@ -1,0 +1,14 @@
+--- a/lib/project-command-env.test.mjs
++++ b/lib/project-command-env.test.mjs
+@@ -240,7 +240,10 @@
+   const cases = [
+     {
+       options: { agentBinDir, baseEnvironment: { Path: "project-metadata", PATH: "/usr/bin" }, platform: "linux" },
+-      expected: { Path: "project-metadata", PATH: `${agentBinDir}${delimiter}/usr/bin` },
++      // 这个用例声明的是 linux：分隔符要跟着**用例的**平台走。
++      // 原来用的是宿主的 `delimiter`（node:path）—— 在 macOS 上恰好也是 ":" 所以一直绿，
++      // 在 Windows 上宿主是 ";" 就变成假失败。
++      expected: { Path: "project-metadata", PATH: `${agentBinDir}:/usr/bin` },
+     },
+     {
+       options: { agentBinDir: "C:\\pi-agent\\bin", baseEnvironment: { Path: "C:\\Windows" }, platform: "win32" },
