@@ -29,6 +29,13 @@ export interface DesktopBridge {
   setKeepAwake(active: boolean): void;
   openExternal(url: string): void;
   revealPath(target: string): void;
+  /**
+   * fork:gap07-attachments — 拖入文件的真实磁盘路径。
+   *
+   * 浏览器拿不到 `File` 的路径（安全限制），桌面外壳可以（`webUtils.getPathForFile`）。
+   * 只有拿到路径，超过上传上限的文件才能「就地引用」而不是被跳过。
+   */
+  filePathFor?(file: File): string | null;
   onAction(callback: (action: DesktopAction) => void): () => void;
 }
 
@@ -45,6 +52,25 @@ export function getDesktopBridge(): DesktopBridge | null {
 
 export function isDesktopShell(): boolean {
   return getDesktopBridge() !== null;
+}
+
+/**
+ * fork:gap07-attachments — 拿拖入文件的本地路径；浏览器里恒返回 `null`。
+ *
+ * 桥不可用、旧版外壳没有这个方法、或 Electron 拒绝这个 File（例如它来自
+ * `new File([...])` 而不是真实拖拽）时，都会安静地退到 `null` —— 调用方据此走上传，
+ * 而不是抛错。
+ */
+export function desktopFilePathFor(file: File | null | undefined): string | null {
+  if (!file) return null;
+  const bridge = getDesktopBridge();
+  if (!bridge?.filePathFor) return null;
+  try {
+    const path = bridge.filePathFor(file);
+    return typeof path === "string" && path.length > 0 ? path : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

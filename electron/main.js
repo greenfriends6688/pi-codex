@@ -158,6 +158,18 @@ function createWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) return mainWindow;
 
   const state = loadWindowState();
+  // fork:desktop-win — 窗口边框按平台分叉。
+  //
+  // macOS 保持 `hidden` + 原生红绿灯浮在应用自己的顶栏上（顶栏由 fork-ui.css 的
+  // drag 区域负责拖动，lib/desktop-shell.ts 给 darwin 预留 64px 让位）。
+  //
+  // Windows 上不能用同一套：`titleBarStyle: "hidden"` 会连最小化/最大化/关闭一起
+  // 去掉，而 `titleBarOverlay` 画出来的系统按钮区（约 138px）正好压在顶栏右侧的
+  // 面板切换按钮上，应用又没有用 `env(titlebar-area-*)` 让位——结果是"能看见窗口
+  // 但关不掉"。所以 Windows 保留系统原生边框：按钮一定可用，顶栏整体下移一条，
+  // 拖动/双击最大化也由系统负责。`desktopTrafficLightInset()` 对非 darwin 返回 0，
+  // 顶栏不会被多推一段空白。
+  const isMac = process.platform === "darwin";
   mainWindow = new BrowserWindow({
     width: state.width,
     height: state.height,
@@ -165,12 +177,16 @@ function createWindow() {
     minWidth: 940,
     minHeight: 600,
     title: APP_NAME,
-    // macOS keeps the native traffic lights and native fullscreen; the web app draws
-    // its own bar, so the title bar stays hidden. `movable` is on and the renderer
-    // marks the bar as a drag region (see lib/desktop-shell.ts + fork-ui.css) —
-    // without that region a hidden-title-bar window cannot be dragged at all.
-    titleBarStyle: "hidden",
-    trafficLightPosition: { x: 14, y: 16 },
+    ...(isMac
+      ? {
+        // macOS keeps the native traffic lights and native fullscreen; the web app draws
+        // its own bar, so the title bar stays hidden. `movable` is on and the renderer
+        // marks the bar as a drag region (see lib/desktop-shell.ts + fork-ui.css) —
+        // without that region a hidden-title-bar window cannot be dragged at all.
+        titleBarStyle: "hidden",
+        trafficLightPosition: { x: 14, y: 16 },
+      }
+      : { titleBarStyle: "default" }),
     movable: true,
     fullscreenable: true,
     backgroundColor: "#0f1117",
@@ -305,16 +321,21 @@ function showWindow() {
 }
 
 function setupTray() {
+  const isMac = process.platform === "darwin";
+  // fork:desktop-win — macOS 用 template 图标（单色遮罩，系统按亮/暗自动反白）；
+  // Windows 托盘铺在深色任务栏上，同一个黑色字形等于看不见，所以改用彩色应用图标
+  // 并缩到 16px。extraResources 里的 appIcon.png 与 build/icon.png 是同一张图。
   const iconPath = app.isPackaged
-    ? path.join(process.resourcesPath, "trayTemplate.png")
-    : path.join(getAppRoot(), "build", "trayTemplate.png");
+    ? path.join(process.resourcesPath, isMac ? "trayTemplate.png" : "appIcon.png")
+    : path.join(getAppRoot(), "build", isMac ? "trayTemplate.png" : "icon.png");
   if (!fs.existsSync(iconPath)) return;
 
   // Template image must be set on the nativeImage, not on the Tray (Tray has no
   // setTemplateImage — calling it throws an unhandled rejection and the menu bar
   // icon keeps its original colours).
-  const trayIcon = nativeImage.createFromPath(iconPath);
-  trayIcon.setTemplateImage(true);
+  let trayIcon = nativeImage.createFromPath(iconPath);
+  if (isMac) trayIcon.setTemplateImage(true);
+  else trayIcon = trayIcon.resize({ width: 16, height: 16 });
   tray = new Tray(trayIcon);
   tray.setToolTip(APP_NAME);
   tray.on("click", showWindow);
@@ -432,7 +453,9 @@ if (!gotLock) {
     });
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
-        { role: "appMenu" },
+        // fork:desktop-win — `appMenu` 是 macOS 专有 role。Windows 上它不报错，
+        // 但会留下一个空的顶级菜单项（"应用" 点了没东西），所以只在 darwin 加。
+        ...(process.platform === "darwin" ? [{ role: "appMenu" }] : []),
         { role: "fileMenu" },
         { role: "editMenu" },
         {

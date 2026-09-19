@@ -376,6 +376,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
     handleRecallQueue,
+    // fork:proma-04-rewind
+    handleRewind, rewinding,
+    // fork:proma-02-mode
+    permissionMode, handlePermissionModeChange,
+    // fork:gap04-queue
+    handleQueueRemove, handleQueueMove, handleQueuePromote,
     handleBuiltinSlashCommand,
     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollUserMsgToTop,
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
@@ -906,7 +912,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
 
   const onDrop = useCallback((files: File[]) => {
-    chatInputRef?.current?.addImages(files);
+    // fork:gap07-attachments — 拖拽入口与其他入口统一：图片内联，其余落盘后插路径引用
+    chatInputRef?.current?.addFiles(files);
   }, [chatInputRef]);
 
   const { isDragOver, isRejectedDrag, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
@@ -953,6 +960,27 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const todoSummary = useMemo(() => extractTodoState(messages), [messages]);
   const hasChatMinimap = !isEmptyNew && !isMobile && !pendingScrollRestore;
   const hasStreamingContent = Boolean(streamState.streamingMessage?.content.length);
+  // fork:process-live-2 — the in-flight message's process blocks, converted once.
+  // The running turn's timeline is assembled from two sources (the committed
+  // messages of the turn and this partial one), so both call sites read the same
+  // memo instead of converting the streaming message twice.
+  const streamingProcess = useMemo(() => {
+    if (processDisplayMode === "legacy") return null;
+    const live = streamState.streamingMessage as AgentMessage | undefined;
+    if (!streamState.isStreaming || !live || live.role !== "assistant") return null;
+    const split = splitFinalAssistantBlocks(live);
+    return {
+      answerBlocks: split.answerBlocks,
+      blocks: messageToProcessContentBlocks(
+        { ...live, content: split.processBlocks } as AgentMessage,
+        { messageIndex: messages.length, phase: "process", toolResults: toolResultsMap, isStreaming: true },
+      ),
+    };
+  }, [processDisplayMode, streamState.isStreaming, streamState.streamingMessage, messages.length, toolResultsMap]);
+  // Set by the render pass below when the grouped renderer already emitted the
+  // running turn's timeline; the streaming block at the bottom of the list then
+  // contributes only the answer half instead of opening a second group.
+  let liveTurnTimeline = false;
   const messageCwd = session?.cwd ?? newSessionCwd ?? undefined;
   const promptAnchorSpacerRef = useRef<HTMLDivElement | null>(null);
   const promptAnchorSpacerHeightRef = useRef(0);
@@ -1084,6 +1112,9 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       compactResult={compactResult}
       toolPreset={toolPreset}
       onToolPresetChange={session || isNew ? handleToolPresetChange : undefined}
+      // fork:proma-02-mode — 权限档位控件（Chat-only 会话由 ChatInput 自行隐藏）
+      permissionMode={permissionMode}
+      onPermissionModeChange={handlePermissionModeChange}
       thinkingLevel={thinkingLevel}
       onThinkingLevelChange={session || isNew ? handleThinkingLevelChange : undefined}
       availableThinkingLevels={availableThinkingLevels}
@@ -1092,11 +1123,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
       queuedMessages={queuedMessages}
       inputHistory={inputHistory}
       onRecallQueue={handleRecallQueue}
+      // fork:gap04-queue — 队列逐条操控
+      onQueueRemove={handleQueueRemove}
+      onQueueMove={handleQueueMove}
+      onQueuePromote={handleQueuePromote}
       slashCommands={slashCommands}
       slashCommandsLoading={slashCommandsLoading}
       onLoadSlashCommands={loadSlashCommands}
       onBuiltinCommand={handleBuiltinSlashCommand}
       todoSummary={todoSummary}
+      // fork:gap06-references — 让 `&` 建议列表知道当前会话，把它自己剔除
+      currentSessionId={session?.id ?? null}
       soundEnabled={soundEnabled}
       onSoundToggle={onSoundToggle}
       onAudioUnlock={unlockAudio}
@@ -1154,7 +1191,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             boxShadow: "var(--shadow-md)",
           }}
         >
-          {t("chat.dropImagesOnly")}
+          {t("chat.dropFilesOnly")}
         </div>
       )}
       {isDragOver && (
@@ -1307,6 +1344,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     entryId={entryIds[idx]}
                     searchBlock={entryIds[idx] === pendingSearchScroll?.entryId ? searchBlock : undefined}
                     onFork={sessionBusy || isNew ? undefined : handleFork}
+      // fork:proma-04-rewind — 回退是破坏性操作，先弹一道警示确认（回退不可撤销）
+      onRewind={sessionBusy || isNew ? undefined : (entryId) => {
+        if (!window.confirm(t("rewind.confirm"))) return;
+        void handleRewind(entryId);
+      }}
+      rewinding={rewinding}
                     forking={forkingEntryId === entryIds[idx]}
                     onNavigate={sessionBusy ? undefined : handleNavigate}
                     onEditContent={handleEditContent}
@@ -1349,10 +1392,77 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   continue;
                 }
 
+                const grouped = processDisplayMode !== "legacy";
+
+                // fork:process-live-2 — a running turn used to render flat here, and
+                // only the in-flight message reached the grouped renderer. The timeline
+                // therefore vanished the moment the turn's first tool call was committed
+                // to `messages` and only came back once the turn finished — the "it
+                // flips back to the flat list" report. The whole running turn is now one
+                // timeline: its committed steps and the in-flight blocks share a group.
                 const isLiveTail = (sessionBusy || streamState.isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
                 if (isLiveTail) {
-                  for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
-                    rendered.push(renderMessage(renderIdx));
+                  if (!grouped) {
+                    for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
+                      rendered.push(renderMessage(renderIdx));
+                    }
+                    idx = endIdx;
+                    continue;
+                  }
+
+                  rendered.push(renderMessage(userIdx));
+
+                  const liveBlocks: ProcessContentBlock[] = [];
+                  let liveToolCalls = 0;
+                  let liveRefIdx: number | undefined;
+                  for (let processIdx = userIdx + 1; processIdx < endIdx; processIdx++) {
+                    const processMessage = messages[processIdx];
+                    if (processMessage.role !== "assistant" && processMessage.role !== "custom") continue;
+                    const blocks = processMessage.role === "assistant"
+                      ? getDisplayableAssistantBlocks(processMessage)
+                      : [];
+                    if (processMessage.role === "assistant" && blocks.length === 0) continue;
+                    liveRefIdx ??= visibleRefIndexByMessage.get(processIdx);
+                    if (processMessage.role === "assistant") liveToolCalls += countToolCallBlocks(blocks);
+                    liveBlocks.push(...messageToProcessContentBlocks(processMessage, {
+                      messageIndex: processIdx,
+                      entryId: entryIds[processIdx],
+                      phase: "process",
+                      toolResults: toolResultsMap,
+                    }));
+                  }
+                  if (streamingProcess) {
+                    liveBlocks.push(...streamingProcess.blocks);
+                    liveToolCalls += streamingProcess.blocks.filter((block) => block.type === "toolCall").length;
+                  }
+
+                  if (liveBlocks.length > 0) {
+                    const liveRefIndex = liveRefIdx;
+                    rendered.push(
+                      <div
+                        key="process-group-live"
+                        ref={liveRefIndex === undefined ? undefined : (el) => { messageRefs.current[liveRefIndex] = el; }}
+                      >
+                        <ProcessDetailsGroup
+                          messageCount={Math.max(1, liveToolCalls)}
+                          toolCallCount={liveToolCalls}
+                          // Open while the model is still working, collapse once the answer
+                          // starts — the same rule the finalized group uses.
+                          defaultExpanded={!streamingProcess || streamingProcess.answerBlocks.length === 0}
+                          summaryText={summarizeProcessBlocks(liveBlocks, (key, params) => t(key, params), (key) => t(key))}
+                          t={t}
+                        >
+                          <ProcessGroup
+                            blocks={liveBlocks}
+                            isStreaming={streamState.isStreaming}
+                            toolResults={toolResultsMap}
+                            onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
+                            onOpenSession={onOpenSession}
+                          />
+                        </ProcessDetailsGroup>
+                      </div>,
+                    );
+                    liveTurnTimeline = true;
                   }
                   idx = endIdx;
                   continue;
@@ -1375,7 +1485,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 let processToolCount = 0;
                 let processRefIdx: number | undefined;
                 let revealProcess = false;
-                const grouped = processDisplayMode !== "legacy";
 
                 for (let processIdx = userIdx + 1; processIdx <= finalAssistantIdx; processIdx++) {
                   const processMessage = messages[processIdx];
@@ -1502,23 +1611,32 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 // nothing until the turn finished and the finalized message reached the
                 // grouped path below. Build the same group from the streaming message and
                 // keep the flat renderer only for `legacy`.
+                //
+                // fork:process-live-2 — when the running turn's timeline has already been
+                // emitted above (`liveTurnTimeline`), these process blocks are part of it
+                // and only the answer half is still owed here.
                 const live = streamState.streamingMessage as AgentMessage;
-                const liveSplit = processDisplayMode === "legacy" || live.role !== "assistant"
-                  ? null
-                  : splitFinalAssistantBlocks(live);
-                const liveProcessBlocks = liveSplit
-                  ? messageToProcessContentBlocks(
-                      { ...live, content: liveSplit.processBlocks } as AgentMessage,
-                      { messageIndex: messages.length, phase: "process", toolResults: toolResultsMap, isStreaming: true },
-                    )
-                  : [];
-                if (liveProcessBlocks.length === 0) {
+                if (!streamingProcess || (streamingProcess.blocks.length === 0 && !liveTurnTimeline)) {
                   // Unchanged flat renderer (and unchanged expression): the streaming
                   // message must keep receiving `toolResultsMap` so live shell output
                   // stays attached to its tool call.
                   return <MessageView message={streamState.streamingMessage as AgentMessage} toolResults={toolResultsMap} isStreaming modelNames={modelNames} cwd={messageCwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} expandedToolIds={expandedToolIds} onToggleTool={handleToggleTool} />;
                 }
-                const liveToolCalls = liveProcessBlocks.filter((block) => block.type === "toolCall").length;
+                const answerView = streamingProcess.answerBlocks.length > 0 ? (
+                  <MessageView
+                    message={{ ...live, content: streamingProcess.answerBlocks } as AgentMessage}
+                    toolResults={toolResultsMap}
+                    isStreaming
+                    modelNames={modelNames}
+                    cwd={messageCwd}
+                    onOpenFile={onOpenFile}
+                    onOpenSession={onOpenSession}
+                    expandedToolIds={expandedToolIds}
+                    onToggleTool={handleToggleTool}
+                  />
+                ) : null;
+                if (liveTurnTimeline) return answerView;
+                const liveToolCalls = streamingProcess.blocks.filter((block) => block.type === "toolCall").length;
                 return (
                   <>
                     <div key="process-group-live">
@@ -1527,12 +1645,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                         toolCallCount={liveToolCalls}
                         // Open while the model is still working, collapse once the answer
                         // starts — the same rule the finalized group uses.
-                        defaultExpanded={liveSplit!.answerBlocks.length === 0}
-                        summaryText={summarizeProcessBlocks(liveProcessBlocks, (key, params) => t(key, params), (key) => t(key))}
+                        defaultExpanded={streamingProcess.answerBlocks.length === 0}
+                        summaryText={summarizeProcessBlocks(streamingProcess.blocks, (key, params) => t(key, params), (key) => t(key))}
                         t={t}
                       >
                         <ProcessGroup
-                          blocks={liveProcessBlocks}
+                          blocks={streamingProcess.blocks}
                           isStreaming
                           toolResults={toolResultsMap}
                           onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
@@ -1540,19 +1658,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                         />
                       </ProcessDetailsGroup>
                     </div>
-                    {liveSplit!.answerBlocks.length > 0 && (
-                      <MessageView
-                        message={{ ...live, content: liveSplit!.answerBlocks } as AgentMessage}
-                        toolResults={toolResultsMap}
-                        isStreaming
-                        modelNames={modelNames}
-                        cwd={messageCwd}
-                        onOpenFile={onOpenFile}
-                        onOpenSession={onOpenSession}
-                        expandedToolIds={expandedToolIds}
-                        onToggleTool={handleToggleTool}
-                      />
-                    )}
+                    {answerView}
                   </>
                 );
               })()

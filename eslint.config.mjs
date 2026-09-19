@@ -2,6 +2,8 @@ import coreWebVitals from "eslint-config-next/core-web-vitals";
 import typescript from "eslint-config-next/typescript";
 
 const eslintConfig = [
+  // 产物 / 一次性脚本目录（gitignored）；里面的补丁基线是源文件副本，只会产生重复告警
+  { ignores: ["test-results/**"] },
   {
     // Reference checkouts and build output are not part of this project's source.
     ignores: ["release/**", "参考项目/**", "pi参考项目/**", "家里电脑跑的/**"],

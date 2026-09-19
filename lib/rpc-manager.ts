@@ -5,6 +5,26 @@ import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
+// fork:proma-01-approval / proma-02-mode — 工具审批引擎与会话权限模式
+import { createApprovalExtension } from "./approval-extension";
+// fork:proma-03-plan — 计划模式扩展
+import { createPlanModeExtension } from "./plan-mode-extension";
+import {
+  DEFAULT_PERMISSION_MODE,
+  appendPermissionMode,
+  approvalModeForPlanAwareMode,
+  isPermissionMode,
+  readPermissionMode,
+  type PermissionMode,
+} from "./permission-mode";
+// fork:gap04-queue — 队列逐条操控的纯逻辑与类型
+import {
+  applyQueueOperation,
+  sameQueue,
+  type QueueKind,
+  type QueueOperation,
+  type QueueState,
+} from "./queue-surgery";
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import {
@@ -116,6 +136,15 @@ type AgentSessionWrapperOptions = {
   chatOnly?: boolean;
   onAgentRunComplete?: AgentRunCompleteListener;
   suppressCompletionNotifications?: boolean;
+  /**
+   * fork:proma-02-mode — 会话权限模式的读写桥。
+   *
+   * 为什么不直接放在 wrapper 字段里：模式要在**创建扩展之前**就知道（审批扩展的
+   * `getMode` 闭包），而扩展是在 `createAgentSessionFromServices` 里实例化的 —— 比
+   * wrapper 构造还早。所以用一对回调把 startRpcSession 里的闭包变量接到 wrapper 上。
+   */
+  getPermissionMode?: () => PermissionMode;
+  setPermissionMode?: (mode: PermissionMode) => void;
 };
 
 const IDLE_RESET_EVENT_TYPES = new Set([
@@ -239,7 +268,12 @@ export class AgentSessionWrapper {
   private readonly chatOnly: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly suppressCompletionNotifications: boolean;
+  /** fork:proma-02-mode — 会话权限模式（读/写都走 startRpcSession 里的闭包）。 */
+  private readonly getPermissionMode?: () => PermissionMode;
+  private readonly setPermissionMode?: (mode: PermissionMode) => void;
   private unsubscribe: (() => void) | null = null;
+  /** fork:gap04-queue — 队列编辑的串行化尾巴（见 withQueueLock）。 */
+  private queueLock: Promise<void> = Promise.resolve();
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private onDestroyCallback: (() => void) | null = null;
   private shutdownPromise: Promise<void> | null = null;
@@ -255,6 +289,8 @@ export class AgentSessionWrapper {
     this.chatOnly = options.chatOnly ?? false;
     this.onAgentRunComplete = options.onAgentRunComplete;
     this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
+    this.getPermissionMode = options.getPermissionMode;
+    this.setPermissionMode = options.setPermissionMode;
     this.installExactSystemPromptContinuation();
     this.applyExactSystemPrompt();
   }
@@ -508,6 +544,123 @@ export class AgentSessionWrapper {
     cacheSessionPath(this.inner.sessionId, sessionFile);
   }
 
+  // ---------------------------------------------------------------------------
+  // fork:gap04-queue — 队列编辑的两层读写
+  // ---------------------------------------------------------------------------
+
+  /** 当前队列的文本视图（以 SDK 的镜像为准，就是 UI 看到的那个）。 */
+  private readQueueState(): QueueState {
+    return {
+      steering: [...this.inner.getSteeringMessages()],
+      followUp: [...this.inner.getFollowUpMessages()],
+    };
+  }
+
+  /** 把 `{content}` 里的文本拼出来；核心队列存的是消息对象，要与镜像对得上。 */
+  private static messageText(message: unknown): string {
+    const content = (message as { content?: unknown } | null)?.content;
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content
+      .map((block) => (
+        block && typeof block === "object" && (block as { type?: unknown }).type === "text"
+          ? String((block as { text?: unknown }).text ?? "")
+          : ""
+      ))
+      .join("");
+  }
+
+  /** SDK 的两层：`_steeringMessages` / `_followUpMessages` 镜像 + `PendingMessageQueue`。 */
+  private queueLayers(): {
+    mirror: { steering: string[]; followUp: string[] };
+    core: { steering: unknown[]; followUp: unknown[] };
+  } {
+    const session = this.inner as unknown as {
+      _steeringMessages?: string[];
+      _followUpMessages?: string[];
+    };
+    const agent = this.inner.agent as unknown as {
+      steeringQueue?: { messages?: unknown[] };
+      followUpQueue?: { messages?: unknown[] };
+    };
+    return {
+      mirror: {
+        steering: session._steeringMessages ?? [...this.inner.getSteeringMessages()],
+        followUp: session._followUpMessages ?? [...this.inner.getFollowUpMessages()],
+      },
+      core: {
+        steering: agent.steeringQueue?.messages ?? [],
+        followUp: agent.followUpQueue?.messages ?? [],
+      },
+    };
+  }
+
+  /**
+   * 把新状态提交到两层。**两层一致才允许写** ——
+   * 不一致说明中间发生了交付（agent loop 把某条 drain 走了），此时按旧下标改会误删。
+   */
+  private writeQueueState(next: QueueState): void {
+    const { mirror, core } = this.queueLayers();
+    const coreSteering = core.steering.map((message) => AgentSessionWrapper.messageText(message));
+    const coreFollowUp = core.followUp.map((message) => AgentSessionWrapper.messageText(message));
+    if (!sameQueue(mirror.steering, coreSteering) || !sameQueue(mirror.followUp, coreFollowUp)) {
+      throw new Error("Queue mirror and core disagree; refusing to edit the queue");
+    }
+
+    // 两个队列**共用一个对象池**：`promote` 会把消息跨队列搬，只在本队列里取对象是找不到的。
+    const pool = [
+      ...core.steering.map((item, index) => ({ item, text: coreSteering[index]! })),
+      ...core.followUp.map((item, index) => ({ item, text: coreFollowUp[index]! })),
+    ];
+    const taken = new Array<boolean>(pool.length).fill(false);
+    const take = (text: string): unknown => {
+      const index = pool.findIndex((entry, candidate) => !taken[candidate] && entry.text === text);
+      if (index === -1) throw new Error("Queue layer mismatch while reordering");
+      taken[index] = true;
+      return pool[index]!.item;
+    };
+    // **先把两边都算完，再写入**：否则镜像已经改了、核心那步失败，两层会永久漂移
+    const nextCoreSteering = next.steering.map(take);
+    const nextCoreFollowUp = next.followUp.map(take);
+
+    const session = this.inner as unknown as {
+      _steeringMessages: string[];
+      _followUpMessages: string[];
+      _emitQueueUpdate?: () => void;
+    };
+    const agent = this.inner.agent as unknown as {
+      steeringQueue?: { messages: unknown[] };
+      followUpQueue?: { messages: unknown[] };
+    };
+
+    session._steeringMessages = [...next.steering];
+    session._followUpMessages = [...next.followUp];
+    if (agent.steeringQueue) agent.steeringQueue.messages = nextCoreSteering;
+    if (agent.followUpQueue) agent.followUpQueue.messages = nextCoreFollowUp;
+
+    // 先让 SDK 自己广播（其他消费者如 CLI 保持同步），再由本包装层推一次给浏览器：
+    // 后者不依赖 SDK 的私有方法名，即使它改名也对 UI 生效。
+    try {
+      session._emitQueueUpdate?.();
+    } catch {
+      // 私有方法：失败不影响下面自己的广播
+    }
+    this.emit({ type: "queue_update", steering: [...next.steering], followUp: [...next.followUp] } as AgentEvent);
+  }
+
+  /** 同一个会话内的队列编辑串行化：两次操作交错会读到中间态。 */
+  private async withQueueLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.queueLock;
+    let release!: () => void;
+    this.queueLock = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
   onEvent(listener: EventListener): () => void {
     this.listeners.push(listener);
     for (const event of this.pendingUiRequests.values()) listener(event);
@@ -705,6 +858,8 @@ export class AgentSessionWrapper {
             steering: [...this.inner.getSteeringMessages()],
             followUp: [...this.inner.getFollowUpMessages()],
           },
+          // fork:proma-02-mode — 前端控件行据此显示当前档位（刷新/换机器后也能恢复）
+          permissionMode: this.getPermissionMode?.() ?? DEFAULT_PERMISSION_MODE,
           contextUsage: contextUsage
             ? { percent: contextUsage.percent, contextWindow: contextUsage.contextWindow, tokens: contextUsage.tokens }
             : null,
@@ -884,10 +1039,74 @@ export class AgentSessionWrapper {
         return null;
       }
 
+      case "set_permission_mode": {
+        // fork:proma-02-mode — 会话级权限模式：写 custom entry（跟着会话走）+ 更新
+        // 闭包变量（审批扩展立刻生效，不必重建会话）。
+        const mode = command.mode;
+        if (!isPermissionMode(mode)) throw new Error(`Invalid permission mode: ${String(mode)}`);
+        this.setPermissionMode?.(mode);
+        appendPermissionMode(this.inner.sessionManager as unknown as SessionManager, mode);
+        return { mode: this.getPermissionMode?.() ?? mode };
+      }
+
       case "clear_queue": {
         // Full clear only: pi has no single-item dequeue, and clear+requeue
         // races against the agent loop pulling messages mid-flight.
         return this.inner.clearQueue();
+      }
+
+      // ---------------------------------------------------------------------
+      // fork:gap04-queue — 逐条操控（撤回 / 删除 / 拖拽排序 / 立即发送）
+      //
+      // SDK 没有单条出队 API，所以这里直接改它自己的两层队列（文本镜像 +
+      // PendingMessageQueue）。安全性靠三件事：
+      //   1. 两层**逐个文本比对**，不一致就拒绝（说明中间发生了交付，UI 的下标已过期）；
+      //   2. 每个会话内串行化（`withQueueLock`），不让两次操作交错；
+      //   3. 纯逻辑在 lib/queue-surgery.ts 里单测覆盖（越界/过期/重复文本/提升）。
+      // ---------------------------------------------------------------------
+      case "queue_remove":
+      case "queue_move":
+      case "queue_promote": {
+        const operation: QueueOperation = type === "queue_remove"
+          ? {
+            type: "remove",
+            kind: command.kind as QueueKind,
+            index: command.index as number,
+            ...(typeof command.expect === "string" ? { expect: command.expect } : {}),
+          }
+          : type === "queue_move"
+            ? {
+              type: "move",
+              kind: command.kind as QueueKind,
+              from: command.index as number,
+              to: command.to as number,
+              ...(typeof command.expect === "string" ? { expect: command.expect } : {}),
+            }
+            : {
+              type: "promote",
+              index: command.index as number,
+              ...(typeof command.expect === "string" ? { expect: command.expect } : {}),
+            };
+        return this.withQueueLock(async () => {
+          const before = this.readQueueState();
+          const result = applyQueueOperation(before, operation);
+          if (!result.ok) {
+            // 不抛异常：过期/越界要让 UI 能显示原因并刷新到当前状态。
+            return { applied: false as const, reason: result.reason, message: result.message, queue: before };
+          }
+          try {
+            this.writeQueueState(result.state);
+          } catch (error) {
+            // 两层已经漂移（中间发生了交付）→ 拒绝并把当前镜像还给 UI
+            return {
+              applied: false as const,
+              reason: "stale" as const,
+              message: error instanceof Error ? error.message : String(error),
+              queue: this.readQueueState(),
+            };
+          }
+          return { applied: true as const, moved: result.moved, queue: result.state };
+        });
       }
 
       case "steer": {
@@ -1984,6 +2203,11 @@ export async function startRpcSession(
   const persistedToolNames = subagentResources
     ? undefined
     : readSessionToolSelection(sessionManager.getEntries() as unknown as SessionEntry[]);
+  // fork:proma-02-mode — 权限模式也是会话级的（custom entry，不是 localStorage），
+  // 所以会话文件拷到别的机器/浏览器，模式跟着一起走。
+  let permissionMode: PermissionMode = subagentResources
+    ? DEFAULT_PERMISSION_MODE
+    : readPermissionMode(sessionManager.getEntries());
   const selectedToolNames = subagentResources?.tools ?? persistedToolNames ?? requestedToolNames;
   if (!subagentResources && persistedToolNames === undefined && requestedToolNames !== undefined) {
     appendSessionToolSelection(sessionManager, requestedToolNames);
@@ -2058,6 +2282,13 @@ export async function startRpcSession(
               ),
               // fork:ui-todo — the session's task list (see lib/todo-extension.ts).
               createTodoExtension(),
+              // fork:proma-01-approval — 工具审批。默认档是 bypass，所以这个扩展在默认
+              // 配置下等价于不存在（`decideApproval` 直接放行）—— 只有用户显式把会话
+              // 设成 ask/plan 才会弹卡。
+              createApprovalExtension(() => approvalModeForPlanAwareMode(permissionMode)),
+              // fork:proma-03-plan — 计划档：先调研、给编号计划，非只读动作一律拦。
+              // 与审批扩展共存：审批管「问不问」，计划管「允不允许写」。
+              createPlanModeExtension(() => permissionMode),
             ],
             extensionsOverride: (base) => preferUserBashExtension(preferPiWebSubagentExtension(base)),
           },
@@ -2136,6 +2367,10 @@ export async function startRpcSession(
     const wrapper = new AgentSessionWrapper(inner, {
       exactSystemPrompt,
       chatOnly,
+      // fork:proma-02-mode — 模式读/写的桥（startRpcSession 里的闭包变量，
+      // 所以在审批扩展创建之前就已经存在）
+      getPermissionMode: () => permissionMode,
+      setPermissionMode: (mode) => { permissionMode = mode; },
       onAgentRunComplete: (completedSessionId) => {
         void notifySessionComplete(completedSessionId).catch((error) => {
           console.error("[pi-web] failed to send completion push:", error instanceof Error ? error.message : error);

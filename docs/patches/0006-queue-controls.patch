@@ -1,0 +1,816 @@
+--- a/lib/queue-surgery.ts
++++ b/lib/queue-surgery.ts
+@@ -0,0 +1,138 @@
++/**
++ * fork:gap04-queue — 队列逐条操控（撤回 / 删除 / 拖拽排序 / 立即发送）的纯逻辑。
++ *
++ * ## 为什么不能只改一侧
++ *
++ * pi 的队列是**两层**的：
++ *
++ * 1. `AgentSession._steeringMessages` / `_followUpMessages` —— 文本镜像，给 UI 看的
++ *    （`agent-session.js` 的 `getSteeringMessages()` 就返回它）；
++ * 2. `Agent.steeringQueue` / `followUpQueue`（`PendingMessageQueue`）—— 真正被 drain 的队列。
++ *
++ * 交付时，SDK 在 `message_start` 里按**文本**从镜像里删掉**第一条**匹配项：
++ *
++ * ```js
++ * const steeringIndex = this._steeringMessages.indexOf(messageText);
++ * if (steeringIndex !== -1) this._steeringMessages.splice(steeringIndex, 1);
++ * ```
++ *
++ * 于是：
++ * - 只改一层 → 镜像与真队列漂移，之后新入队的同文本消息会被镜像当成“已交付”而提前消失；
++ * - 按文本删 → 两条一样的消息永远删到第一条（用户点第二条的 ✕，第一条消失）。
++ *
++ * 所以这个模块一律**按下标**算增量，并且要求调用方在提交前校验两层一致。
++ * 这里不碰任何对象/网络（`QueueState` 就是两个字符串数组），
++ * 于是越界、过期、重复文本、跨队列提升这些边界都能用 node:test 直接覆盖。
++ */
++
++export type QueueKind = "steer" | "followUp";
++
++export interface QueueState {
++  steering: string[];
++  followUp: string[];
++}
++
++export type QueueOperation =
++  /** 从队列里删掉一条。 */
++  | { type: "remove"; kind: QueueKind; index: number; expect?: string }
++  /** 队列内重排（拖拽）。`to` 是插入位置（按删除后的数组计）。 */
++  | { type: "move"; kind: QueueKind; from: number; to: number; expect?: string }
++  /** 立即发送：把 followUp 提升为 steer，下一个回合边界就送达，而不是等整轮结束。 */
++  | { type: "promote"; index: number; expect?: string };
++
++export type QueueFailureReason = "out-of-range" | "stale";
++
++export interface QueueFailure {
++  ok: false;
++  reason: QueueFailureReason;
++  message: string;
++}
++
++export interface QueueSuccess {
++  ok: true;
++  state: QueueState;
++  /** 被操作的那条文本（回执用）。 */
++  moved: string;
++}
++
++export const QUEUE_KIND_LABELS: Record<QueueKind, string> = {
++  steer: "steering",
++  followUp: "follow-up",
++};
++
++export function queueItems(state: QueueState, kind: QueueKind): string[] {
++  return kind === "steer" ? state.steering : state.followUp;
++}
++
++/** 两层一致性校验：调用方在提交前用它判断「镜像与真队列是否还同步」。 */
++export function sameQueue(a: readonly string[], b: readonly string[]): boolean {
++  return a.length === b.length && a.every((value, index) => value === b[index]);
++}
++
++function clone(state: QueueState): QueueState {
++  return { steering: [...state.steering], followUp: [...state.followUp] };
++}
++
++function fail(reason: QueueFailureReason, message: string): QueueFailure {
++  return { ok: false, reason, message };
++}
++
++/**
++ * 过期检测：UI 传来的下标必须指向它以为的那条文本。
++ *
++ * 队列随时可能因为交付而前移（另一条消息被 drain 掉），所以「下标 + 文本」一起校验 ——
++ * 只校验下标的操作会把误删一条用户没打算删的消息。
++ */
++function itemAt(items: readonly string[], index: number, expect: string | undefined, kind: QueueKind): string | QueueFailure {
++  if (!Number.isInteger(index) || index < 0 || index >= items.length) {
++    return fail("out-of-range", `${QUEUE_KIND_LABELS[kind]} index ${index} is out of range (0..${items.length - 1})`);
++  }
++  const value = items[index]!;
++  if (expect !== undefined && expect !== value) {
++    return fail("stale", `${QUEUE_KIND_LABELS[kind]} index ${index} no longer holds the expected message`);
++  }
++  return value;
++}
++
++export function applyQueueOperation(
++  state: QueueState,
++  operation: QueueOperation,
++): QueueSuccess | QueueFailure {
++  const next = clone(state);
++
++  if (operation.type === "remove") {
++    const items = queueItems(next, operation.kind);
++    const current = itemAt(items, operation.index, operation.expect, operation.kind);
++    if (typeof current !== "string") return current;
++    items.splice(operation.index, 1);
++    return { ok: true, state: next, moved: current };
++  }
++
++  if (operation.type === "move") {
++    const items = queueItems(next, operation.kind);
++    const current = itemAt(items, operation.from, operation.expect, operation.kind);
++    if (typeof current !== "string") return current;
++    // `to` 允许等于 items.length（拖到末尾）；删除后数组短了一位，所以用 >= 收敛。
++    if (!Number.isInteger(operation.to) || operation.to < 0 || operation.to > items.length) {
++      return fail("out-of-range", `${QUEUE_KIND_LABELS[operation.kind]} target ${operation.to} is out of range (0..${items.length})`);
++    }
++    items.splice(operation.from, 1);
++    const target = operation.to > operation.from ? operation.to - 1 : operation.to;
++    items.splice(target, 0, current);
++    return { ok: true, state: next, moved: current };
++  }
++
++  const followUp = next.followUp;
++  const current = itemAt(followUp, operation.index, operation.expect, "followUp");
++  if (typeof current !== "string") return current;
++  followUp.splice(operation.index, 1);
++  // 提升到 steering 的**队首**：下一个回合边界就送达（steering 的语义），
++  // 而不是排在本轮已经入队的 steer 后面等更久。
++  next.steering.unshift(current);
++  return { ok: true, state: next, moved: current };
++}
++
++/** 一次入队的文本是否已经在队列里（UI 用来给出「已排队」提示，不参与增删）。 */
++export function queueContains(state: QueueState, text: string): boolean {
++  return state.steering.includes(text) || state.followUp.includes(text);
++}
+--- a/lib/queue-surgery.test.mjs
++++ b/lib/queue-surgery.test.mjs
+@@ -0,0 +1,122 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++async function loadSubject() {
++  return import("./queue-surgery.ts");
++}
++
++const state = (steering = [], followUp = []) => ({ steering, followUp });
++
++test("删除按下标，而不是按文本匹配第一条", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  // 两条一模一样的消息：SDK 内部的交付逻辑会 indexOf → 永远删第一条；
++  // 逐条操控必须能删掉用户点的那一条（下标 1）。
++  const result = applyQueueOperation(state([], ["重复", "重复"]), { type: "remove", kind: "followUp", index: 1, expect: "重复" });
++  assert.equal(result.ok, true);
++  assert.deepEqual(result.state.followUp, ["重复"]);
++  assert.equal(result.moved, "重复");
++});
++
++test("下标越界被拒，并说明范围", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  const result = applyQueueOperation(state(["a"]), { type: "remove", kind: "steer", index: 3, expect: "a" });
++  assert.equal(result.ok, false);
++  assert.equal(result.reason, "out-of-range");
++  assert.match(result.message, /0\.\.0/);
++});
++
++test("过期请求被拒：下标还在，但已经不是那条文本", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  // 用户看到的是「第二条 = B」，但队列已经前移成 [B, C] → 必须拒绝而不是误删 B。
++  const result = applyQueueOperation(state(["B", "C"]), { type: "remove", kind: "steer", index: 1, expect: "B" });
++  assert.equal(result.ok, false);
++  assert.equal(result.reason, "stale");
++});
++
++test("不带 expect 时也能删（兼容只传下标的调用）", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  const result = applyQueueOperation(state(["a", "b"]), { type: "remove", kind: "steer", index: 0 });
++  assert.equal(result.ok, true);
++  assert.deepEqual(result.state.steering, ["b"]);
++});
++
++test("队列内重排：向后拖、向前拖、拖到末尾都对得上", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  const base = state([], ["a", "b", "c"]);
++
++  const down = applyQueueOperation(base, { type: "move", kind: "followUp", from: 0, to: 2, expect: "a" });
++  assert.equal(down.ok, true);
++  assert.deepEqual(down.state.followUp, ["b", "a", "c"]);
++
++  const up = applyQueueOperation(base, { type: "move", kind: "followUp", from: 2, to: 0, expect: "c" });
++  assert.equal(up.ok, true);
++  assert.deepEqual(up.state.followUp, ["c", "a", "b"]);
++
++  // 拖到列表末尾：to 可以等于长度
++  const tail = applyQueueOperation(base, { type: "move", kind: "followUp", from: 0, to: 3, expect: "a" });
++  assert.equal(tail.ok, true);
++  assert.deepEqual(tail.state.followUp, ["b", "c", "a"]);
++});
++
++test("重排不改变条数，也不动另一个队列", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  const before = state(["s1", "s2"], ["f1", "f2"]);
++  const result = applyQueueOperation(before, { type: "move", kind: "steer", from: 0, to: 2, expect: "s1" });
++  assert.equal(result.ok, true);
++  assert.deepEqual(result.state.steering, ["s2", "s1"]);
++  assert.deepEqual(result.state.followUp, ["f1", "f2"]);
++  // 原状态不被就地修改（调用方可能还要拿它做两层校验）
++  assert.deepEqual(before.steering, ["s1", "s2"]);
++});
++
++test("重排的目标下标越界被拒", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  const result = applyQueueOperation(state([], ["a"]), { type: "move", kind: "followUp", from: 0, to: 5, expect: "a" });
++  assert.equal(result.ok, false);
++  assert.equal(result.reason, "out-of-range");
++});
++
++test("立即发送：followUp 提升到 steering 队首", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  const result = applyQueueOperation(
++    state(["已有的引导"], ["晚点再说", "最后一条"]),
++    { type: "promote", index: 0, expect: "晚点再说" },
++  );
++  assert.equal(result.ok, true);
++  assert.deepEqual(result.state.steering, ["晚点再说", "已有的引导"]);
++  assert.deepEqual(result.state.followUp, ["最后一条"]);
++});
++
++test("提升同样遵守过期与越界检查", async () => {
++  const { applyQueueOperation } = await loadSubject();
++
++  assert.equal(applyQueueOperation(state([], []), { type: "promote", index: 0 }).ok, false);
++  const stale = applyQueueOperation(state([], ["x"]), { type: "promote", index: 0, expect: "y" });
++  assert.equal(stale.ok, false);
++  assert.equal(stale.reason, "stale");
++});
++
++test("sameQueue 用于两层一致性校验", async () => {
++  const { sameQueue } = await loadSubject();
++
++  assert.equal(sameQueue(["a", "b"], ["a", "b"]), true);
++  assert.equal(sameQueue(["a"], ["a", "b"]), false);
++  assert.equal(sameQueue(["a", "b"], ["b", "a"]), false);
++  assert.equal(sameQueue([], []), true);
++});
++
++test("queueContains 覆盖两个队列", async () => {
++  const { queueContains } = await loadSubject();
++
++  assert.equal(queueContains(state(["a"]), "a"), true);
++  assert.equal(queueContains(state([], ["b"]), "b"), true);
++  assert.equal(queueContains(state(["a"], ["b"]), "c"), false);
++});
+--- a/lib/rpc-manager.ts
++++ b/lib/rpc-manager.ts
+@@ -5,6 +5,14 @@
+ import { existsSync, realpathSync, writeFileSync } from "fs";
+ import { resolve } from "path";
+ import { validateAgentImages } from "./image-attachments";
++// fork:gap04-queue — 队列逐条操控的纯逻辑与类型
++import {
++  applyQueueOperation,
++  sameQueue,
++  type QueueKind,
++  type QueueOperation,
++  type QueueState,
++} from "./queue-surgery";
+ import { invalidateModelsCache } from "./models-cache";
+ import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
+ import {
+@@ -240,6 +248,8 @@
+   private readonly onAgentRunComplete?: AgentRunCompleteListener;
+   private readonly suppressCompletionNotifications: boolean;
+   private unsubscribe: (() => void) | null = null;
++  /** fork:gap04-queue — 队列编辑的串行化尾巴（见 withQueueLock）。 */
++  private queueLock: Promise<void> = Promise.resolve();
+   private idleTimer: ReturnType<typeof setTimeout> | null = null;
+   private onDestroyCallback: (() => void) | null = null;
+   private shutdownPromise: Promise<void> | null = null;
+@@ -508,6 +518,123 @@
+     cacheSessionPath(this.inner.sessionId, sessionFile);
+   }
+ 
++  // ---------------------------------------------------------------------------
++  // fork:gap04-queue — 队列编辑的两层读写
++  // ---------------------------------------------------------------------------
++
++  /** 当前队列的文本视图（以 SDK 的镜像为准，就是 UI 看到的那个）。 */
++  private readQueueState(): QueueState {
++    return {
++      steering: [...this.inner.getSteeringMessages()],
++      followUp: [...this.inner.getFollowUpMessages()],
++    };
++  }
++
++  /** 把 `{content}` 里的文本拼出来；核心队列存的是消息对象，要与镜像对得上。 */
++  private static messageText(message: unknown): string {
++    const content = (message as { content?: unknown } | null)?.content;
++    if (typeof content === "string") return content;
++    if (!Array.isArray(content)) return "";
++    return content
++      .map((block) => (
++        block && typeof block === "object" && (block as { type?: unknown }).type === "text"
++          ? String((block as { text?: unknown }).text ?? "")
++          : ""
++      ))
++      .join("");
++  }
++
++  /** SDK 的两层：`_steeringMessages` / `_followUpMessages` 镜像 + `PendingMessageQueue`。 */
++  private queueLayers(): {
++    mirror: { steering: string[]; followUp: string[] };
++    core: { steering: unknown[]; followUp: unknown[] };
++  } {
++    const session = this.inner as unknown as {
++      _steeringMessages?: string[];
++      _followUpMessages?: string[];
++    };
++    const agent = this.inner.agent as unknown as {
++      steeringQueue?: { messages?: unknown[] };
++      followUpQueue?: { messages?: unknown[] };
++    };
++    return {
++      mirror: {
++        steering: session._steeringMessages ?? [...this.inner.getSteeringMessages()],
++        followUp: session._followUpMessages ?? [...this.inner.getFollowUpMessages()],
++      },
++      core: {
++        steering: agent.steeringQueue?.messages ?? [],
++        followUp: agent.followUpQueue?.messages ?? [],
++      },
++    };
++  }
++
++  /**
++   * 把新状态提交到两层。**两层一致才允许写** ——
++   * 不一致说明中间发生了交付（agent loop 把某条 drain 走了），此时按旧下标改会误删。
++   */
++  private writeQueueState(next: QueueState): void {
++    const { mirror, core } = this.queueLayers();
++    const coreSteering = core.steering.map((message) => AgentSessionWrapper.messageText(message));
++    const coreFollowUp = core.followUp.map((message) => AgentSessionWrapper.messageText(message));
++    if (!sameQueue(mirror.steering, coreSteering) || !sameQueue(mirror.followUp, coreFollowUp)) {
++      throw new Error("Queue mirror and core disagree; refusing to edit the queue");
++    }
++
++    // 两个队列**共用一个对象池**：`promote` 会把消息跨队列搬，只在本队列里取对象是找不到的。
++    const pool = [
++      ...core.steering.map((item, index) => ({ item, text: coreSteering[index]! })),
++      ...core.followUp.map((item, index) => ({ item, text: coreFollowUp[index]! })),
++    ];
++    const taken = new Array<boolean>(pool.length).fill(false);
++    const take = (text: string): unknown => {
++      const index = pool.findIndex((entry, candidate) => !taken[candidate] && entry.text === text);
++      if (index === -1) throw new Error("Queue layer mismatch while reordering");
++      taken[index] = true;
++      return pool[index]!.item;
++    };
++    // **先把两边都算完，再写入**：否则镜像已经改了、核心那步失败，两层会永久漂移
++    const nextCoreSteering = next.steering.map(take);
++    const nextCoreFollowUp = next.followUp.map(take);
++
++    const session = this.inner as unknown as {
++      _steeringMessages: string[];
++      _followUpMessages: string[];
++      _emitQueueUpdate?: () => void;
++    };
++    const agent = this.inner.agent as unknown as {
++      steeringQueue?: { messages: unknown[] };
++      followUpQueue?: { messages: unknown[] };
++    };
++
++    session._steeringMessages = [...next.steering];
++    session._followUpMessages = [...next.followUp];
++    if (agent.steeringQueue) agent.steeringQueue.messages = nextCoreSteering;
++    if (agent.followUpQueue) agent.followUpQueue.messages = nextCoreFollowUp;
++
++    // 先让 SDK 自己广播（其他消费者如 CLI 保持同步），再由本包装层推一次给浏览器：
++    // 后者不依赖 SDK 的私有方法名，即使它改名也对 UI 生效。
++    try {
++      session._emitQueueUpdate?.();
++    } catch {
++      // 私有方法：失败不影响下面自己的广播
++    }
++    this.emit({ type: "queue_update", steering: [...next.steering], followUp: [...next.followUp] } as AgentEvent);
++  }
++
++  /** 同一个会话内的队列编辑串行化：两次操作交错会读到中间态。 */
++  private async withQueueLock<T>(operation: () => Promise<T>): Promise<T> {
++    const previous = this.queueLock;
++    let release!: () => void;
++    this.queueLock = new Promise<void>((resolve) => { release = resolve; });
++    await previous;
++    try {
++      return await operation();
++    } finally {
++      release();
++    }
++  }
++
+   onEvent(listener: EventListener): () => void {
+     this.listeners.push(listener);
+     for (const event of this.pendingUiRequests.values()) listener(event);
+@@ -890,6 +1017,60 @@
+         return this.inner.clearQueue();
+       }
+ 
++      // ---------------------------------------------------------------------
++      // fork:gap04-queue — 逐条操控（撤回 / 删除 / 拖拽排序 / 立即发送）
++      //
++      // SDK 没有单条出队 API，所以这里直接改它自己的两层队列（文本镜像 +
++      // PendingMessageQueue）。安全性靠三件事：
++      //   1. 两层**逐个文本比对**，不一致就拒绝（说明中间发生了交付，UI 的下标已过期）；
++      //   2. 每个会话内串行化（`withQueueLock`），不让两次操作交错；
++      //   3. 纯逻辑在 lib/queue-surgery.ts 里单测覆盖（越界/过期/重复文本/提升）。
++      // ---------------------------------------------------------------------
++      case "queue_remove":
++      case "queue_move":
++      case "queue_promote": {
++        const operation: QueueOperation = type === "queue_remove"
++          ? {
++            type: "remove",
++            kind: command.kind as QueueKind,
++            index: command.index as number,
++            ...(typeof command.expect === "string" ? { expect: command.expect } : {}),
++          }
++          : type === "queue_move"
++            ? {
++              type: "move",
++              kind: command.kind as QueueKind,
++              from: command.index as number,
++              to: command.to as number,
++              ...(typeof command.expect === "string" ? { expect: command.expect } : {}),
++            }
++            : {
++              type: "promote",
++              index: command.index as number,
++              ...(typeof command.expect === "string" ? { expect: command.expect } : {}),
++            };
++        return this.withQueueLock(async () => {
++          const before = this.readQueueState();
++          const result = applyQueueOperation(before, operation);
++          if (!result.ok) {
++            // 不抛异常：过期/越界要让 UI 能显示原因并刷新到当前状态。
++            return { applied: false as const, reason: result.reason, message: result.message, queue: before };
++          }
++          try {
++            this.writeQueueState(result.state);
++          } catch (error) {
++            // 两层已经漂移（中间发生了交付）→ 拒绝并把当前镜像还给 UI
++            return {
++              applied: false as const,
++              reason: "stale" as const,
++              message: error instanceof Error ? error.message : String(error),
++              queue: this.readQueueState(),
++            };
++          }
++          return { applied: true as const, moved: result.moved, queue: result.state };
++        });
++      }
++
+       case "steer": {
+         const steerImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
+         await this.inner.steer(command.message as string, steerImages?.length ? steerImages : undefined);
+--- a/hooks/useAgentSession.ts
++++ b/hooks/useAgentSession.ts
+@@ -37,6 +37,8 @@
+   type ClientAssistantMessageEvent,
+ } from "@/lib/streaming-message";
+ import type { SelectionContext, SessionReference } from "@/lib/composer-context";
++// fork:gap04-queue — 队列逐条操控的操作类型
++import type { QueueKind } from "@/lib/queue-surgery";
+ 
+ export interface SessionData {
+   sessionId: string;
+@@ -1962,6 +1964,60 @@
+     }
+   }, [opts.chatInputRef, addNotice]);
+ 
++  /**
++   * fork:gap04-queue — 队列逐条操控。
++   *
++   * 服务端返回的是**权威队列**（两层一致时提交后的快照，不一致时是当前镜像），
++   * 所以这里不做乐观更新，直接拿返回值覆盖本地状态；`applied: false` 时
++   * 额外说一句原因（过期 / 越界），让用户知道为什么操作没生效。
++   */
++  const runQueueOperation = useCallback(async (
++    command: Record<string, unknown>,
++    describe: string,
++  ) => {
++    const sid = sessionIdRef.current;
++    if (!sid) return;
++    try {
++      const result = await sendAgentCommand<{
++        applied?: boolean;
++        reason?: string;
++        moved?: string;
++        queue?: { steering?: string[]; followUp?: string[] };
++      }>(sid, command);
++      if (result?.queue) setQueuedMessages(normalizeQueuedMessages(result.queue));
++      if (result && result.applied === false) {
++        // 队列在用户操作期间前移了（某条被交付）—— 服务端已把当前状态还回来。
++        addNotice({ type: "warning", message: "Queue changed while you were editing; list refreshed" });
++      } else if (describe === "recall") {
++        const moved = result?.moved;
++        if (moved) opts.chatInputRef?.current?.prependText(moved);
++      }
++    } catch (error) {
++      console.error("Queue operation failed:", error);
++      addNotice({ type: "error", message: "Queue operation failed" });
++      // 失败后向服务端要一次真实状态，避免 UI 停在一个不存在的队列上。
++      try {
++        const state = await sendAgentCommand<{ queuedMessages?: { steering?: string[]; followUp?: string[] } }>(sid, { type: "get_state" });
++        if (state?.queuedMessages) setQueuedMessages(normalizeQueuedMessages(state.queuedMessages));
++      } catch {
++        // 忽略：下一次 queue_update 会纠正
++      }
++    }
++  }, [addNotice, opts.chatInputRef]);
++
++  const handleQueueRemove = useCallback((kind: QueueKind, index: number, expect: string) => (
++    runQueueOperation({ type: "queue_remove", kind, index, expect }, "remove")
++  ), [runQueueOperation]);
++
++  const handleQueueMove = useCallback((kind: QueueKind, from: number, to: number, expect: string) => (
++    runQueueOperation({ type: "queue_move", kind, index: from, to, expect }, "move")
++  ), [runQueueOperation]);
++
++  /** 立即发送：把 followUp 提升为 steering，下一个回合边界就送达。 */
++  const handleQueuePromote = useCallback((index: number, expect: string) => (
++    runQueueOperation({ type: "queue_promote", index, expect }, "promote")
++  ), [runQueueOperation]);
++
+   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
+     setThinkingLevel(level);
+     if (isNew && !sessionIdRef.current) {
+@@ -2272,6 +2328,8 @@
+     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
+     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+     handleRecallQueue,
++    // fork:gap04-queue
++    handleQueueRemove, handleQueueMove, handleQueuePromote,
+     handleBuiltinSlashCommand,
+     setNoticePaused: setPausedNoticeId,
+     handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages, loadContext,
+--- a/components/ChatInput.tsx
++++ b/components/ChatInput.tsx
+@@ -111,6 +111,10 @@
+   onThinkingLevelChange?: (level: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
+   availableThinkingLevels?: string[] | null;
+   thinkingLevelMap?: Record<string, string | null> | null;
++  /** fork:gap04-queue — 队列逐条操控（移除 / 拖拽排序 / 立即发送）。 */
++  onQueueRemove?: (kind: "steer" | "followUp", index: number, expect: string) => void;
++  onQueueMove?: (kind: "steer" | "followUp", from: number, to: number, expect: string) => void;
++  onQueuePromote?: (index: number, expect: string) => void;
+   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
+   queuedMessages?: QueuedMessages | null;
+   /** fork:ui-todo — task list of this session, derived from the transcript. */
+@@ -485,10 +489,63 @@
+   }
+ }
+ 
+-function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: string }) {
++/**
++ * fork:gap04-queue — 队列里的一行：可拖拽排序，带「立即发送」（仅 follow-up）与「移除」。
++ *
++ * 控件的可见性靠 `:hover`（用 style 手写，仓库不引 CSS-in-JS 库），
++ * 但键盘用户也能拿到（button 本身可聚焦，hover 时显现不影响 tab 顺序）。
++ */
++function QueuedMessageRow({
++  kind,
++  text,
++  index,
++  promoteTitle,
++  removeTitle,
++  onRemove,
++  onPromote,
++  onDragStart,
++  onDropOn,
++  dragging,
++}: {
++  kind: "steer" | "follow-up";
++  text: string;
++  index: number;
++  promoteTitle: string;
++  removeTitle: string;
++  onRemove: () => void;
++  onPromote?: () => void;
++  onDragStart?: () => void;
++  onDropOn?: () => void;
++  dragging?: boolean;
++}) {
++  const [hover, setHover] = useState(false);
++  const controlStyle: React.CSSProperties = {
++    flexShrink: 0,
++    display: "flex",
++    alignItems: "center",
++    justifyContent: "center",
++    width: 20,
++    height: 20,
++    padding: 0,
++    border: "none",
++    borderRadius: "var(--radius-xs)",
++    background: "transparent",
++    color: "var(--text-dim)",
++    cursor: "pointer",
++    opacity: hover ? 1 : 0,
++    transition: "opacity 0.12s",
++  };
+   return (
+     <div
+       title={text}
++      draggable={Boolean(onDragStart)}
++      onMouseEnter={() => setHover(true)}
++      onMouseLeave={() => setHover(false)}
++      onFocusCapture={() => setHover(true)}
++      onBlurCapture={() => setHover(false)}
++      onDragStart={onDragStart}
++      onDragOver={(event) => { if (onDropOn) event.preventDefault(); }}
++      onDrop={(event) => { if (onDropOn) { event.preventDefault(); onDropOn(); } }}
+       style={{
+         display: "flex",
+         alignItems: "center",
+@@ -497,6 +554,8 @@
+         fontSize: TEXT.sm,
+         color: "var(--text-muted)",
+         minWidth: 0,
++        opacity: dragging ? 0.4 : 1,
++        cursor: onDragStart ? "grab" : "default",
+       }}
+     >
+       <span
+@@ -513,6 +572,32 @@
+         {kind}
+       </span>
+       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
++      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 2 }}>
++        {onPromote && (
++          <button
++            type="button"
++            onClick={onPromote}
++            title={promoteTitle}
++            aria-label={promoteTitle}
++            style={controlStyle}
++          >
++            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
++              <path d="M12 19V5" /><polyline points="5 12 12 5 19 12" />
++            </svg>
++          </button>
++        )}
++        <button
++          type="button"
++          onClick={onRemove}
++          title={removeTitle}
++          aria-label={`${removeTitle} #${index + 1}`}
++          style={controlStyle}
++        >
++          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
++            <path d="M18 6 6 18M6 6l12 12" />
++          </svg>
++        </button>
++      </div>
+     </div>
+   );
+ }
+@@ -617,6 +702,7 @@
+   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
+   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
+   retryInfo, queuedMessages, inputHistory = [], onRecallQueue, todoSummary, currentSessionId,
++  onQueueRemove, onQueueMove, onQueuePromote,
+   slashCommands, slashCommandsLoading, onLoadSlashCommands,
+   onBuiltinCommand,
+   soundEnabled, onSoundToggle, onAudioUnlock,
+@@ -678,6 +764,25 @@
+   /** 防止同一个数据源被并发拉取。 */
+   const referenceFetchRef = useRef<{ sessions: boolean; mcp: string | null }>({ sessions: false, mcp: null });
+   const [imageWarningDismissed, setImageWarningDismissed] = useState(false);
++  /**
++   * fork:gap04-queue — 正在拖拽的队列行。
++   *
++   * 载荷用 **ref** 存：drop 可能在 dragstart 的同一个 tick 里发生（真实拖拽里也有极快的
++   * 甩拖），这时 React 还没重渲染，state 读到的是旧值（null）→ 拖拽会静默失效。
++   * state 只负责置灰的视觉效果。
++   */
++  const [draggingQueue, setDraggingQueue] = useState<{ kind: "steer" | "followUp"; index: number } | null>(null);
++  const draggingQueueRef = useRef<{ kind: "steer" | "followUp"; index: number } | null>(null);
++  const beginQueueDrag = (kind: "steer" | "followUp", index: number) => {
++    draggingQueueRef.current = { kind, index };
++    setDraggingQueue({ kind, index });
++  };
++  const endQueueDrag = () => {
++    draggingQueueRef.current = null;
++    setDraggingQueue(null);
++  };
++  /** 拖拽落点 → 插入下标：往下拖落在目标行之后，往上拖落在它之前（“所见即所得”）。 */
++  const queueDropTarget = (from: number, hovered: number) => (from < hovered ? hovered + 1 : hovered);
+   /** fork:gap07-attachments — 附件落盘结果提示；每一次拖入都有可见交代，不静默丢。 */
+   const [attachmentNotice, setAttachmentNotice] = useState<{
+     added: string[];
+@@ -2375,10 +2480,43 @@
+               )}
+             </div>
+             {queuedMessages?.steering.map((text, i) => (
+-              <QueuedMessageRow key={`steer-${i}`} kind="steer" text={text} />
++              <QueuedMessageRow
++                key={`steer-${i}`}
++                kind="steer"
++                text={text}
++                index={i}
++                promoteTitle={t("chat.queueSendNow")}
++                removeTitle={t("chat.queueRemove")}
++                dragging={draggingQueue?.kind === "steer" && draggingQueue.index === i}
++                onRemove={() => onQueueRemove?.("steer", i, text)}
++                onDragStart={onQueueMove ? () => beginQueueDrag("steer", i) : undefined}
++                onDropOn={onQueueMove ? () => {
++                  const drag = draggingQueueRef.current;
++                  if (drag?.kind !== "steer" || drag.index === i) { endQueueDrag(); return; }
++                  onQueueMove("steer", drag.index, queueDropTarget(drag.index, i), queuedMessages.steering[drag.index] ?? "");
++                  endQueueDrag();
++                } : undefined}
++              />
+             ))}
+             {queuedMessages?.followUp.map((text, i) => (
+-              <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
++              <QueuedMessageRow
++                key={`followup-${i}`}
++                kind="follow-up"
++                text={text}
++                index={i}
++                promoteTitle={t("chat.queueSendNow")}
++                removeTitle={t("chat.queueRemove")}
++                dragging={draggingQueue?.kind === "followUp" && draggingQueue.index === i}
++                onRemove={() => onQueueRemove?.("followUp", i, text)}
++                onPromote={onQueuePromote ? () => onQueuePromote(i, text) : undefined}
++                onDragStart={onQueueMove ? () => beginQueueDrag("followUp", i) : undefined}
++                onDropOn={onQueueMove ? () => {
++                  const drag = draggingQueueRef.current;
++                  if (drag?.kind !== "followUp" || drag.index === i) { endQueueDrag(); return; }
++                  onQueueMove("followUp", drag.index, queueDropTarget(drag.index, i), queuedMessages.followUp[drag.index] ?? "");
++                  endQueueDrag();
++                } : undefined}
++              />
+             ))}
+           </div>
+         )}
+--- a/components/ChatWindow.tsx
++++ b/components/ChatWindow.tsx
+@@ -376,6 +376,8 @@
+     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
+     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+     handleRecallQueue,
++    // fork:gap04-queue
++    handleQueueRemove, handleQueueMove, handleQueuePromote,
+     handleBuiltinSlashCommand,
+     handleToolPresetChange, handleThinkingLevelChange, loadSlashCommands, scrollUserMsgToTop,
+     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
+@@ -1114,6 +1116,10 @@
+       queuedMessages={queuedMessages}
+       inputHistory={inputHistory}
+       onRecallQueue={handleRecallQueue}
++      // fork:gap04-queue — 队列逐条操控
++      onQueueRemove={handleQueueRemove}
++      onQueueMove={handleQueueMove}
++      onQueuePromote={handleQueuePromote}
+       slashCommands={slashCommands}
+       slashCommandsLoading={slashCommandsLoading}
+       onLoadSlashCommands={loadSlashCommands}
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -702,6 +702,9 @@
+     "chat.sessionReferenceLabel": "Session {count}",
+     "chat.removeSessionReference": "Remove session reference",
+     "chat.attachImage": "Attach image",
++    // fork:gap04-queue — 队列逐条操控
++    "chat.queueRemove": "Remove from queue",
++    "chat.queueSendNow": "Send now (move to steering)",
+     // fork:gap07-attachments — 附件不再限定图片
+     "chat.attachFile": "Attach file",
+     "chat.attachmentAdded": "Added as a reference: {names}",
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -701,6 +701,9 @@
+     "chat.sessionReferenceLabel": "会话{count}",
+     "chat.removeSessionReference": "移除会话引用",
+     "chat.attachImage": "附加图片",
++    // fork:gap04-queue — 队列逐条操控
++    "chat.queueRemove": "从队列移除",
++    "chat.queueSendNow": "立即发送（提升为引导消息）",
+     // fork:gap07-attachments — 附件不再限定图片
+     "chat.attachFile": "添加附件",
+     "chat.attachmentAdded": "已作为引用加入：{names}",
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -701,6 +701,9 @@
+     "chat.sessionReferenceLabel": "工作階段{count}",
+     "chat.removeSessionReference": "移除工作階段引用",
+     "chat.attachImage": "附加圖片",
++    // fork:gap04-queue — 隊列逐條操控
++    "chat.queueRemove": "從佇列移除",
++    "chat.queueSendNow": "立即傳送（提升為引導訊息）",
+     // fork:gap07-attachments — 附件不再限定圖片
+     "chat.attachFile": "加入附件",
+     "chat.attachmentAdded": "已作為引用加入：{names}",

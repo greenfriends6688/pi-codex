@@ -17,8 +17,10 @@ export function useDragDrop(onDrop: (files: File[]) => void) {
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     const items = Array.from(e.dataTransfer.items);
     if (items.length === 0) return;
-    const hasImages = items.some((item) => item.type.startsWith("image/"));
-    if (!hasImages) {
+    // fork:gap07-attachments — 任意文件都可拖入（之前非图片直接标为“拒收”）。
+    // `kind === "file"` 才是文件；拖选中的文本/HTML 仍然不算。
+    const hasFiles = items.some((item) => item.kind === "file");
+    if (!hasFiles) {
       flagRejected();
       return;
     }
@@ -28,8 +30,8 @@ export function useDragDrop(onDrop: (files: File[]) => void) {
   }, [flagRejected]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
-    const hasImages = Array.from(e.dataTransfer.items).some((item) => item.type.startsWith("image/"));
-    if (!hasImages) return;
+    const hasFiles = Array.from(e.dataTransfer.items).some((item) => item.kind === "file");
+    if (!hasFiles) return;
     e.preventDefault();
   }, []);
 

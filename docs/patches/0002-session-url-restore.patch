@@ -1,0 +1,93 @@
+--- a/components/SessionSidebar.initial-session.test.mjs
++++ b/components/SessionSidebar.initial-session.test.mjs
+@@ -0,0 +1,47 @@
++import assert from "node:assert/strict";
++import { readFile } from "node:fs/promises";
++import test from "node:test";
++
++const source = await readFile(new URL("./SessionSidebar.tsx", import.meta.url), "utf8");
++
++const restoreStart = source.indexOf("// Auto-select cwd and restore session from URL on first load");
++const restoreEnd = source.indexOf("// Prefer an exact UI selection while a refetch is in flight", restoreStart);
++const restoreSource = source.slice(restoreStart, restoreEnd);
++
++const loadStart = source.indexOf("const loadSessions = useCallback");
++const loadEnd = source.indexOf("}, []);", loadStart);
++const loadSource = source.slice(loadStart, loadEnd);
++
++test("a `?session=` restore waits for the session list before spending its one shot", () => {
++  assert.notEqual(restoreStart, -1);
++  assert.notEqual(restoreEnd, -1);
++
++  // The attempt is only consumed once the target was found, or once the list
++  // has actually answered. Burning it on the first pass (empty `allSessions`
++  // because `/api/chat-workspace` resolved first) left `?session=<id>` on the
++  // welcome page for every install that has a chat workspace.
++  const branch = restoreSource.indexOf("initialSessionId && !restoredRef.current");
++  const loadedGate = restoreSource.indexOf("if (!sessionsLoadedRef.current) return;");
++  const missingPathSpendsAttempt = restoreSource.indexOf("restoredRef.current = true;", loadedGate);
++  const placeholder = restoreSource.indexOf("onInitialRestoreDone?.();");
++  assert.ok(branch >= 0, "the restore branch exists");
++  assert.ok(loadedGate > branch, "the retry gate sits inside the restore branch");
++  assert.ok(missingPathSpendsAttempt > loadedGate, "the attempt is spent only after the list has loaded");
++  assert.ok(placeholder > missingPathSpendsAttempt, "the placeholder is only reported for a truly missing session");
++  assert.match(restoreSource, /const target = allSessions\.find\(\(s\) => s\.id === initialSessionId\);/);
++});
++
++test("the list-loaded flag is raised when /api/sessions answers, not when it fails", () => {
++  assert.notEqual(loadStart, -1);
++  assert.notEqual(loadEnd, -1);
++  assert.match(loadSource, /sessionsLoadedRef\.current = true;/);
++
++  // A stale response must not mark the list as loaded …
++  const staleGuard = loadSource.indexOf("if (loadId !== sessionLoadIdRef.current) return;");
++  const flag = loadSource.indexOf("sessionsLoadedRef.current = true;");
++  assert.ok(staleGuard >= 0 && flag > staleGuard, "only the current response raises the flag");
++  // … and the catch branch must not, or a failed fetch would look like "no such session".
++  const catchIndex = loadSource.indexOf("} catch (e) {");
++  assert.ok(catchIndex > flag, "the flag is raised before the catch branch");
++  assert.doesNotMatch(loadSource.slice(catchIndex), /sessionsLoadedRef\.current = true;/);
++});
+--- a/components/SessionSidebar.tsx
++++ b/components/SessionSidebar.tsx
+@@ -489,6 +489,10 @@
+   const [sessionListVersion, setSessionListVersion] = useState<number | null>(null);
+   const sessionListVersionRef = useRef<number | null>(null);
+   const sessionLoadIdRef = useRef(0);
++  // fork:fix-url-session-restore — whether /api/sessions has answered at least once.
++  // The `?session=` restore is one-shot, and it must not be spent while the list is
++  // still empty-but-coming (see the restore effect below).
++  const sessionsLoadedRef = useRef(false);
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState<string | null>(null);
+   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
+@@ -590,6 +594,7 @@
+       };
+       if (loadId !== sessionLoadIdRef.current) return;
+       sessionListVersionRef.current = data.sessionListVersion;
++      sessionsLoadedRef.current = true;
+       setSessionListVersion(data.sessionListVersion);
+       setAllSessions(data.sessions);
+       // Treat the fetched running set as an initial fallback only. Once the
+@@ -897,13 +902,15 @@
+           onSelectSession(target, true);
+           return;
+         }
++        // fork:fix-url-session-restore — this effect can run before /api/sessions
++        // lands: the `/api/chat-workspace` fetch resolves first, which clears the
++        // `allSessions.length === 0` guard above and opens this branch with an
++        // empty list. Spending the one-shot attempt there made `?session=<id>`
++        // open the welcome page instead of the session on every install that has
++        // a chat workspace — the e2e fixtures have none, which is why it stayed
++        // invisible. Wait for the list: the effect re-runs when it arrives.
++        if (!sessionsLoadedRef.current) return;
+         restoredRef.current = true;
+-        const target = allSessions.find((s) => s.id === initialSessionId);
+-        if (target) {
+-          setSelectedCwd(target.cwd);
+-          onSelectSession(target, true);
+-          return;
+-        }
+         // Session not found — notify parent so it can show the placeholder
+         onInitialRestoreDone?.();
+       }

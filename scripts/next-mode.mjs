@@ -13,10 +13,11 @@
  *   node scripts/next-mode.mjs status  # 只看当前 .next 是什么模式
  */
 
-import { existsSync, renameSync, statSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { createRequire } from "node:module";
 
 const ROOT = process.cwd();
 const NEXT_DIR = join(ROOT, ".next");
@@ -32,6 +33,22 @@ function currentMode() {
   if (isDev && !isProd) return "dev";
   if (isProd && isDev) return "mixed";
   return "unknown";
+}
+
+/**
+ * 直接调用 next 的 JS 入口，不要 spawn "next" 这个命令名。
+ * Windows 上 `next` 只是 next.cmd，spawn(..., { shell: false }) 会直接 ENOENT
+ * 让构建静默失败；走 JS 入口则在三个平台上都稳定。
+ */
+function nextCli() {
+  const pkgPath = createRequire(import.meta.url).resolve("next/package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+  const bin = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.next;
+  return join(dirname(pkgPath), bin ?? "dist/bin/next");
+}
+
+function runNext(args) {
+  return spawnSync(process.execPath, [nextCli(), ...args], { stdio: "inherit", cwd: ROOT });
 }
 
 function stash(label) {
@@ -55,7 +72,7 @@ if (mode === "dev") {
   console.log(`[dev] 当前 .next: ${cur}`);
   if (cur === "prod" || cur === "mixed") stash("prod-cache");
   console.log("[dev] 启动 next dev ...");
-  const r = spawnSync("next", ["dev", "-H", HOST, "-p", PORT], { stdio: "inherit", shell: false });
+  const r = runNext(["dev", "-H", HOST, "-p", PORT]);
   process.exit(r.status ?? 1);
 }
 
@@ -65,14 +82,14 @@ if (mode === "prod") {
   if (cur === "dev" || cur === "mixed") stash("dev-cache");
 
   console.log("[prod] 构建中 ...");
-  const b = spawnSync("next", ["build", "--webpack"], { stdio: "inherit", shell: false });
+  const b = runNext(["build", "--webpack"]);
   if (b.status !== 0) {
     console.error("[prod] 构建失败，未启动服务");
     process.exit(b.status ?? 1);
   }
 
   console.log(`[prod] 启动 next start（http://${HOST}:${PORT}）...`);
-  const s = spawnSync("next", ["start", "-H", HOST, "-p", PORT], { stdio: "inherit", shell: false });
+  const s = runNext(["start", "-H", HOST, "-p", PORT]);
   process.exit(s.status ?? 1);
 }
 

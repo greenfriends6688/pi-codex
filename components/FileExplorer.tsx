@@ -13,6 +13,12 @@ import {
 import type { GitFileStatus, GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
 import type { FileIndexEntry } from "@/lib/file-fuzzy";
 import { buildSearchTree, type SearchTreeNode } from "@/lib/search-tree";
+// fork:gap08-roots — 多根（会话 cwd + 项目根并存 + 作用域徽标）
+import {
+  buildFileBrowserRoots,
+  fileBrowserRootName,
+  type FileBrowserRoot,
+} from "@/lib/file-browser-roots";
 import { useI18n } from "@/hooks/useI18n";
 import { TEXT } from "@/lib/typography";
 type Translate = ReturnType<typeof useI18n>["t"];
@@ -35,6 +41,8 @@ interface FileNode {
 
 interface Props {
   cwd: string;
+  /** fork:gap08-roots — 会话所属项目的根；与 cwd 不同时（worktree 会话）多出一个「项目」根。 */
+  projectRoot?: string | null;
   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
   refreshKey?: number;
   onAtMention?: (relativePath: string, isDir: boolean) => void;
@@ -231,6 +239,7 @@ function TreeNode({
   highlightedPaths,
   gitStatusByPath,
   changedDirectoryPaths,
+  scrollToPath,
   t,
 }: {
   node: FileNode;
@@ -244,6 +253,8 @@ function TreeNode({
   highlightedPaths: Set<string>;
   gitStatusByPath: Map<string, GitFileStatus>;
   changedDirectoryPaths: Set<string>;
+  /** fork:gap10-search-scroll — 非空时，与它相等的行会滚到视口中间。 */
+  scrollToPath?: string | null;
   t: Translate;
 }) {
   const open = expandedPaths.has(node.fullPath);
@@ -257,20 +268,39 @@ function TreeNode({
   const [loaded, setLoaded] = useState(node.loaded ?? false);
   const [loading, setLoading] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const emptyRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadChildren = useCallback(async (force = false) => {
+  const loadChildren = useCallback(async (force = false, isRetry = false) => {
     if (loaded && !force) return;
     setLoading(true);
     try {
       const entries = await fetchEntries(node.fullPath);
       setChildren(entries);
       setLoaded(true);
+      // fork:gap10-tree-retry — 空目录 800ms 后重试一次。agent 刚 mkdir / 刚写文件时，
+      // 列表很容易在它落盘前返回空，而用户看到的就是一个永远空着的目录。
+      if (entries.length === 0 && !isRetry) {
+        if (emptyRetryRef.current) clearTimeout(emptyRetryRef.current);
+        emptyRetryRef.current = setTimeout(() => { void loadChildren(true, true); }, 800);
+      }
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
   }, [loaded, node.fullPath]);
+
+  // 卸载时收掉重试定时器，避免对已卸载的组件 setState
+  useEffect(() => () => {
+    if (emptyRetryRef.current) clearTimeout(emptyRetryRef.current);
+  }, []);
+
+  // fork:gap10-search-scroll — 搜索命中后把它带到视口中间
+  useEffect(() => {
+    if (!scrollToPath || scrollToPath !== node.fullPath) return;
+    rowRef.current?.scrollIntoView({ block: "center" });
+  }, [scrollToPath, node.fullPath]);
 
   // Re-fetch children when the tree refreshes and the directory is open.
   useEffect(() => {
@@ -293,6 +323,7 @@ function TreeNode({
   return (
     <div>
       <div
+        ref={rowRef}
         role="treeitem"
         aria-expanded={node.isDir ? open : undefined}
         aria-selected={false}
@@ -308,7 +339,12 @@ function TreeNode({
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
         style={{
-          position: "relative",
+          // fork:gap10-sticky-dir — 展开的目录行在它自己的子项滚动时粘住。
+          // `top` 按深度错开（封顶 3 层），否则子目录会盖到父目录上；背景不透明，
+          // 否则会看穿到下面的行。
+          ...(node.isDir && open
+            ? { position: "sticky" as const, top: Math.min(depth, 3) * 24, zIndex: 5, background: "var(--bg-panel)" }
+            : { position: "relative" as const }),
           display: "flex",
           alignItems: "center",
           gap: 4,
@@ -316,7 +352,7 @@ function TreeNode({
           paddingRight: 8,
           height: 24,
           cursor: "pointer",
-          background: hovered ? "var(--bg-hover)" : "transparent",
+          background: hovered ? "var(--bg-hover)" : undefined,
           borderRadius: "var(--radius-xs)",
           userSelect: "none",
         }}
@@ -464,12 +500,13 @@ function TreeNode({
               highlightedPaths={highlightedPaths}
               gitStatusByPath={gitStatusByPath}
               changedDirectoryPaths={changedDirectoryPaths}
+              scrollToPath={scrollToPath}
               t={t}
             />
           ))}
           {children.length === 0 && loaded && (
             <div style={{ paddingLeft: 8 + (depth + 1) * 14, fontSize: TEXT.xs, color: "var(--text-dim)", height: 22, display: "flex", alignItems: "center" }}>
-              empty
+              {t("files.emptyDirectory")}
             </div>
           )}
         </div>
@@ -479,6 +516,100 @@ function TreeNode({
 }
 
 type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "preview" | "diff" };
+
+// 额外根的 TreeNode 不参与 git 徽标 / 上传高亮，用模块级空集合避免每次渲染新建引用。
+const EMPTY_PATHS: Set<string> = new Set();
+const EMPTY_GIT_STATUS: Map<string, GitFileStatus> = new Map();
+
+/**
+ * fork:gap08-roots — 除会话 cwd 之外的根（目前只有「项目」）的独立分区。
+ *
+ * 为什么不把主根也改成循环：主根的渲染缠着上传回执、git 徽标、上传高亮、刷新脉冲与搜索，
+ * 拆出来风险远大于收益；而额外根只需要「列目录 + 展开 + 打开文件」。
+ * 于是额外根走这条轻量路径，单根会话的界面与行为完全不变。
+ */
+function RootSection({
+  root,
+  onOpenFile,
+  refreshToken,
+  t,
+}: {
+  root: FileBrowserRoot;
+  onOpenFile: OpenFileHandler;
+  refreshToken: string;
+  t: Translate;
+}) {
+  const [entries, setEntries] = useState<FileNode[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchEntries(root.path)
+      .then((next) => { if (!cancelled) setEntries(next); })
+      .catch(() => { if (!cancelled) setEntries([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [root.path, refreshToken]);
+
+  return (
+    <div style={{ padding: "2px 4px" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          height: 22,
+          padding: "0 8px 0 10px",
+          fontSize: TEXT["2xs"],
+          color: "var(--text-dim)",
+        }}
+      >
+        <span
+          style={{
+            flexShrink: 0,
+            padding: "1px 6px",
+            borderRadius: 999,
+            border: "1px solid var(--border)",
+            fontFamily: "var(--font-mono)",
+          }}
+        >
+          {t(root.scope === "project" ? "files.scopeProject" : "files.scopeSession")}
+        </span>
+        <span title={root.path} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {fileBrowserRootName(root.path)}
+        </span>
+      </div>
+      {loading ? (
+        <div style={{ padding: "4px 12px", fontSize: TEXT.xs, color: "var(--text-dim)" }}>Loading files...</div>
+      ) : (
+        entries.map((node) => (
+          <TreeNode
+            key={node.fullPath}
+            node={node}
+            depth={0}
+            cwd={root.path}
+            onOpenFile={onOpenFile}
+            expandedPaths={expandedPaths}
+            onToggleExpanded={(fullPath, open) => {
+              setExpandedPaths((prev) => {
+                const next = new Set(prev);
+                if (open) next.add(fullPath); else next.delete(fullPath);
+                return next;
+              });
+            }}
+            refreshToken={refreshToken}
+            highlightedPaths={EMPTY_PATHS}
+            gitStatusByPath={EMPTY_GIT_STATUS}
+            changedDirectoryPaths={EMPTY_PATHS}
+            t={t}
+          />
+        ))
+      )}
+    </div>
+  );
+}
 
 type OpenFileHandler = (filePath: string, fileName: string, options?: OpenFileOptions) => void;
 
@@ -601,6 +732,7 @@ function ChangeRow({
 
 export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
   cwd,
+  projectRoot,
   onOpenFile,
   refreshKey,
   onAtMention,
@@ -638,10 +770,26 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const [searchExpanded, setSearchExpanded] = useState<Set<string>>(new Set());
+  // fork:gap10-search-scroll — 搜索命中后滚到它并居中（祖先展开已由上面的 effect 负责）
+  const [scrollToPath, setScrollToPath] = useState<string | null>(null);
+  /**
+   * fork:gap08-roots — 多根：会话 cwd 始终是第一个根；`projectRoot` 与它不同时
+   * （会话跑在 worktree 里）再补一个「项目」根。相同时只有一个根，界面与改动前一致。
+   */
+  const browserRoots = useMemo<FileBrowserRoot[]>(
+    () => buildFileBrowserRoots({ cwd, projectRoot }),
+    [cwd, projectRoot],
+  );
+  const extraRoots = useMemo(
+    () => browserRoots.filter((root) => root.scope === "project"),
+    [browserRoots],
+  );
   const searchInputRef = useRef<HTMLInputElement>(null);
   const prevCwdRef = useRef<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}:${watchPulse}`;
+  /** fork:gap08-roots — 额外根自己的变更脉冲（watch 必须按根建立）。 */
+  const [extraWatchPulse, setExtraWatchPulse] = useState(0);
   const uploadBusy = uploadPhase !== "idle";
   const hasSearchQuery = searchQuery.trim().length > 0;
 
@@ -893,10 +1041,21 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
     return () => source.close();
   }, [cwd]);
 
+  // fork:gap08-roots — 额外根各自订阅目录变更。主根的订阅在下面（挂在 cwd 上），
+  // 这里只负责「项目」根：FIX-08 的 watch 是**按路径**建立的，多根就必须多条订阅。
+  useEffect(() => {
+    if (extraRoots.length === 0 || typeof EventSource === "undefined") return;
+    const sources = extraRoots.map((root) => {
+      const source = new EventSource(`/api/file-watch?path=${encodeURIComponent(root.path)}`);
+      source.addEventListener("change", () => setExtraWatchPulse((pulse) => pulse + 1));
+      return source;
+    });
+    return () => { sources.forEach((source) => source.close()); };
+  }, [extraRoots]);
+
   useEffect(() => {
     let cancelled = false;
-    fetchGitStatus(cwd)
-      .then((status) => {
+    fetchGitStatus(cwd)      .then((status) => {
         if (!cancelled) {
           setGitFiles(status.isGitRepository ? status.files : []);
           setGitLineStats(status.isGitRepository
@@ -1096,10 +1255,14 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                     node={node}
                     depth={0}
                     cwd={cwd}
-                    onOpenFile={onOpenFile}
-                    onAtMention={onAtMention}
-                    expandedPaths={searchExpanded}
-                    onToggleExpanded={(fullPath, open) => {
+                onOpenFile={(filePath, fileName, options) => {
+                  // fork:gap10-search-scroll — 先把命中行滚到中间，再开文件
+                  setScrollToPath(filePath);
+                  onOpenFile(filePath, fileName, options);
+                }}
+                onAtMention={onAtMention}
+                expandedPaths={searchExpanded}
+                onToggleExpanded={(fullPath, open) => {
                       setSearchExpanded((prev) => {
                         const next = new Set(prev);
                         if (open) next.add(fullPath); else next.delete(fullPath);
@@ -1109,6 +1272,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
                     highlightedPaths={highlightedPaths}
                     gitStatusByPath={gitStatusByPath}
                     changedDirectoryPaths={changedDirectoryPaths}
+                    scrollToPath={scrollToPath}
                     t={t}
                   />
                 ))}
@@ -1173,6 +1337,16 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
               />
             ))
           )}
+          {/* fork:gap08-roots — 项目根分区（仅当会话 cwd 与项目根不同，例如 worktree 会话） */}
+          {extraRoots.map((root) => (
+            <RootSection
+              key={root.path}
+              root={root}
+              onOpenFile={onOpenFile}
+              refreshToken={`${refreshToken}:${extraWatchPulse}`}
+              t={t}
+            />
+          ))}
           {!loading && !error && roots.length === 0 && (
             <div style={{ padding: "8px 12px", fontSize: TEXT.xs, color: "var(--text-dim)" }}>
               {t("files.noFiles")}

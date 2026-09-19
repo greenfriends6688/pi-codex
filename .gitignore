@@ -53,3 +53,25 @@ e2e_*.mjs
 /.workbuddy/
 /.workbuddy-ai/
 /pi参考项目/
+
+# fork: 第三方参考项目不进仓库（只留本地；原文件里那几行中文路径是乱码，匹配不上真实目录名）
+/参考项目/
+/pi参考项目/
+/家里电脑跑的/
+
+# fork: Electron 打包资源要进仓库 —— package.json 的 build 配置与 extraResources 引用它们，
+# 忽略掉会让别人 clone 后无法 npm run desktop:dist（图标/托盘图缺失）
+!/build/
+!/build/*.png
+# fork: 规划/对比类文档只留本地，不进仓库（对齐用户的"docs 里的规划文档不用传"）
+/docs/proma-*
+/docs/musepi-*
+/docs/desktop-ui-*
+/docs/omp-web-*
+/docs/ref-projects-*
+/docs/ui-layout-*
+/docs/design-audit-*
+/docs/fork-comparison-*
+/docs/ref-comparison-*
+/docs/screenshot2.png
+/docs/pr470-*.png

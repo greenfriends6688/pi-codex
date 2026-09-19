@@ -2338,6 +2338,8 @@ export function AppShell() {
   const explorerPanel = activeCwd ? (
     <ExplorerPanel
       cwd={activeCwd}
+      // fork:gap08-roots — 会话在 worktree 里时 cwd ≠ 项目根，文件树会多出一个「项目」根
+      projectRoot={selectedSession?.projectRoot ?? null}
       onOpenFile={handleOpenFile}
       onOpenTerminal={handleOpenTerminal}
       explorerRefreshKey={explorerRefreshKey}

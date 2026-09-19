@@ -37,6 +37,10 @@ import {
   type ClientAssistantMessageEvent,
 } from "@/lib/streaming-message";
 import type { SelectionContext, SessionReference } from "@/lib/composer-context";
+// fork:gap04-queue — 队列逐条操控的操作类型
+import type { QueueKind } from "@/lib/queue-surgery";
+// fork:proma-02-mode — 会话权限模式
+import { DEFAULT_PERMISSION_MODE, isPermissionMode, type PermissionMode } from "@/lib/permission-mode";
 
 export interface SessionData {
   sessionId: string;
@@ -84,6 +88,8 @@ type AgentStateResponse = {
   extensionStatuses?: ExtensionStatusItem[];
   extensionWidgets?: ExtensionWidgetItem[];
   queuedMessages?: { steering?: string[]; followUp?: string[] } | null;
+  /** fork:proma-02-mode — 会话权限模式（bypass / ask / plan）。 */
+  permissionMode?: string | null;
 };
 
 export interface QueuedMessages {
@@ -341,6 +347,14 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [extensionStatuses, setExtensionStatuses] = useState<ExtensionStatusItem[]>([]);
   const [extensionWidgets, setExtensionWidgets] = useState<ExtensionWidgetItem[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessages>({ steering: [], followUp: [] });
+  // fork:proma-02-mode — 当前档位。默认 bypass（与改动前行为一致），
+  // 真实值从 get_state 的 permissionMode 恢复（服务端从会话 custom entry 读）。
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(DEFAULT_PERMISSION_MODE);
+  /** fork:proma-04-rewind — 回退请求进行中（按钮置灰） */
+  const [rewinding, setRewinding] = useState(false);
+  /** 供切换失败时回滚（handler 里读的是最新值，不受闭包影响）。 */
+  const permissionModeRef = useRef<PermissionMode>(DEFAULT_PERMISSION_MODE);
+  permissionModeRef.current = permissionMode;
 
   const eventConnectionRef = useRef<AgentEventConnection | null>(null);
   const eventStreamGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -540,6 +554,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           if (liveState.extensionStatuses !== undefined) setExtensionStatuses(liveState.extensionStatuses ?? []);
           if (liveState.extensionWidgets !== undefined) setExtensionWidgets(liveState.extensionWidgets ?? []);
           if (liveState.queuedMessages !== undefined) setQueuedMessages(normalizeQueuedMessages(liveState.queuedMessages));
+    if (isPermissionMode(liveState.permissionMode)) setPermissionMode(liveState.permissionMode);
           if (liveState.autoCompactionEnabled !== undefined) setAutoCompactionEnabled(liveState.autoCompactionEnabled ?? true);
         } else if (!agentState.running) {
           setQueuedMessages({ steering: [], followUp: [] });
@@ -1083,6 +1098,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setIsCompacting(state?.isCompacting ?? false);
       setAutoCompactionEnabled(state?.autoCompactionEnabled ?? true);
       setQueuedMessages(normalizeQueuedMessages(state?.queuedMessages));
+      // fork:proma-02-mode — 选会话/刷新后的档位恢复
+      if (isPermissionMode(state?.permissionMode)) setPermissionMode(state.permissionMode);
       const busy = data.running && state
         && (state.isStreaming || state.isPromptRunning || state.isCompacting);
       if (busy) {
@@ -1185,6 +1202,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
               // Aborted turns can leave messages queued in pi (delivered with the
               // next turn); dead wrapper (no state) means the queue is gone.
               setQueuedMessages(normalizeQueuedMessages(d.state?.queuedMessages));
+        // fork:proma-02-mode
+        if (isPermissionMode(d.state?.permissionMode)) setPermissionMode(d.state.permissionMode);
             })
             .catch(() => {});
         }
@@ -1962,6 +1981,126 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [opts.chatInputRef, addNotice]);
 
+  /**
+   * fork:gap04-queue — 队列逐条操控。
+   *
+   * 服务端返回的是**权威队列**（两层一致时提交后的快照，不一致时是当前镜像），
+   * 所以这里不做乐观更新，直接拿返回值覆盖本地状态；`applied: false` 时
+   * 额外说一句原因（过期 / 越界），让用户知道为什么操作没生效。
+   */
+  const runQueueOperation = useCallback(async (
+    command: Record<string, unknown>,
+    describe: string,
+  ) => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    try {
+      const result = await sendAgentCommand<{
+        applied?: boolean;
+        reason?: string;
+        moved?: string;
+        queue?: { steering?: string[]; followUp?: string[] };
+      }>(sid, command);
+      if (result?.queue) setQueuedMessages(normalizeQueuedMessages(result.queue));
+      if (result && result.applied === false) {
+        // 队列在用户操作期间前移了（某条被交付）—— 服务端已把当前状态还回来。
+        addNotice({ type: "warning", message: "Queue changed while you were editing; list refreshed" });
+      } else if (describe === "recall") {
+        const moved = result?.moved;
+        if (moved) opts.chatInputRef?.current?.prependText(moved);
+      }
+    } catch (error) {
+      console.error("Queue operation failed:", error);
+      addNotice({ type: "error", message: "Queue operation failed" });
+      // 失败后向服务端要一次真实状态，避免 UI 停在一个不存在的队列上。
+      try {
+        const state = await sendAgentCommand<{ queuedMessages?: { steering?: string[]; followUp?: string[] } }>(sid, { type: "get_state" });
+        if (state?.queuedMessages) setQueuedMessages(normalizeQueuedMessages(state.queuedMessages));
+      } catch {
+        // 忽略：下一次 queue_update 会纠正
+      }
+    }
+  }, [addNotice, opts.chatInputRef]);
+
+  const handleQueueRemove = useCallback((kind: QueueKind, index: number, expect: string) => (
+    runQueueOperation({ type: "queue_remove", kind, index, expect }, "remove")
+  ), [runQueueOperation]);
+
+  const handleQueueMove = useCallback((kind: QueueKind, from: number, to: number, expect: string) => (
+    runQueueOperation({ type: "queue_move", kind, index: from, to, expect }, "move")
+  ), [runQueueOperation]);
+
+  /** 立即发送：把 followUp 提升为 steering，下一个回合边界就送达。 */
+  const handleQueuePromote = useCallback((index: number, expect: string) => (
+    runQueueOperation({ type: "queue_promote", index, expect }, "promote")
+  ), [runQueueOperation]);
+
+  /**
+   * fork:proma-02-mode — 切换权限模式。
+   *
+   * 乐观更新 + 以服务端回执为准：切档失败（例如会话已被销毁）时把 UI 拨回去并说明原因，
+   * 绝不能出现「界面显示已受保护、实际仍是全自动」这种反向错误。
+   */
+  const handlePermissionModeChange = useCallback(async (mode: PermissionMode) => {
+    const sid = sessionIdRef.current;
+    const previous = permissionModeRef.current;
+    setPermissionMode(mode);
+    if (!sid) return;
+    try {
+      const result = await sendAgentCommand<{ mode?: string }>(sid, { type: "set_permission_mode", mode });
+      if (isPermissionMode(result?.mode)) setPermissionMode(result.mode);
+    } catch (error) {
+      console.error("Failed to change permission mode:", error);
+      setPermissionMode(previous);
+      addNotice({ type: "error", message: "Failed to change the permission mode" });
+    }
+  }, [addNotice]);
+
+  /**
+   * fork:proma-04-rewind — 「回退到此处」：截断这条之后的所有对话。
+   *
+   * 拒绝路径先在客户端拦一道（运行中 / 尚未落盘），服务端也会再判一次：客户端拦是为了即时、
+   * 可读的原因，服务端判是为了正确性（多标签页并发时客户端状态不作数）。
+   * 成功后重载上下文：回退改的是**文件**，不重载的话界面还停在回退前的消息上。
+   */
+  const handleRewind = useCallback(async (entryId: string) => {
+    const sid = sessionIdRef.current;
+    if (!sid) {
+      addNotice({ type: "error", message: "Cannot rewind a session that has not been saved yet" });
+      return;
+    }
+    if (agentRunningRef.current) {
+      addNotice({ type: "warning", message: "Session is running — stop it before rewinding" });
+      return;
+    }
+    setRewinding(true);
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/rewind`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ entryId }),
+      });
+      const body = await res.json().catch(() => null) as { error?: string; data?: { dropped?: number } } | null;
+      if (!res.ok) {
+        // 服务端的拒绝理由已经是可读的（running / entry-not-found / invalid-jsonl）
+        addNotice({ type: "error", message: body?.error ?? `Rewind failed (HTTP ${res.status})` });
+        return;
+      }
+      // 回到回退后那条分支的叶子：截断后原来的 leafId 已不存在，用 null 让服务端取当前分支
+      await loadContext(sid, null);
+      setActiveLeafId(null);
+      addNotice({
+        type: "success",
+        message: `Rewound the conversation — dropped ${body?.data?.dropped ?? 0} entries (files on disk were not reverted)`,
+      });
+    } catch (error) {
+      console.error("Rewind failed:", error);
+      addNotice({ type: "error", message: "Rewind failed" });
+    } finally {
+      setRewinding(false);
+    }
+  }, [addNotice, loadContext]);
+
   const handleThinkingLevelChange = useCallback(async (level: ThinkingLevelOption) => {
     setThinkingLevel(level);
     if (isNew && !sessionIdRef.current) {
@@ -2271,7 +2410,13 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     addNotice,
     handleSend, handleAbort, handleFork, handleNavigate, handleModelChange,
     handleCompact, handleSteer, handleFollowUp, handlePromptWithStreamingBehavior, handleAbortCompaction,
+    // fork:proma-02-mode
+    permissionMode, handlePermissionModeChange,
+    // fork:proma-04-rewind
+    handleRewind, rewinding,
     handleRecallQueue,
+    // fork:gap04-queue
+    handleQueueRemove, handleQueueMove, handleQueuePromote,
     handleBuiltinSlashCommand,
     setNoticePaused: setPausedNoticeId,
     handleToolPresetChange, handleThinkingLevelChange, loadTools, loadSlashCommands, setActiveLeafId, setData, setMessages, loadContext,

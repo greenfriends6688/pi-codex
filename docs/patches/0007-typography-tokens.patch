@@ -1,0 +1,461 @@
+--- a/lib/typography-usage.test.mjs
++++ b/lib/typography-usage.test.mjs
+@@ -0,0 +1,73 @@
++import assert from "node:assert/strict";
++import { readdirSync, readFileSync, statSync } from "node:fs";
++import { join, relative } from "node:path";
++import test from "node:test";
++
++/*
++ * fork:dsn-07 — 内联数字字号的全局守卫。
++ *
++ * DSN-07 分两批把 `fontSize: <数字>` 收口到 `TEXT.*`（`lib/typography.ts`）。逐文件的断言
++ * （如 `components/fork/TodoChip.test.mjs`）只能守住那几个文件，而漏一处就前功尽弃 ——
++ * 于是这里扫全仓：**任何** app/ 或 components/ 下的 ts/tsx 都不允许再写死字号。
++ *
++ * 允许的写法：
++ *   fontSize: TEXT.sm / TEXT["2xs"]   —— CSS 变量，随主题缩放
++ *   fontSize: TEXT_PX.md              —— 数值 token（xterm 这类必须拿数字的地方）
++ *   fontSize: someVariable            —— 动态值（例如用户在设置里调的 chat 字号）
++ *
++ * 不允许：`fontSize: 12`、`fontSize: 12.5`。
++ */
++
++const ROOTS = ["app", "components"];
++const SKIP_DIRS = new Set(["node_modules", ".next", "test-results", "release"]);
++
++function sourceFiles(dir) {
++  const out = [];
++  for (const entry of readdirSync(dir)) {
++    if (SKIP_DIRS.has(entry)) continue;
++    const path = join(dir, entry);
++    const stats = statSync(path);
++    if (stats.isDirectory()) {
++      out.push(...sourceFiles(path));
++      continue;
++    }
++    if (!/\.(ts|tsx)$/.test(entry)) continue;
++    if (/\.test\.(ts|tsx|mjs)$/.test(entry)) continue;
++    out.push(path);
++  }
++  return out;
++}
++
++test("no inline px font sizes remain in app/ or components/ (DSN-07)", () => {
++  const offenders = [];
++  for (const root of ROOTS) {
++    for (const file of sourceFiles(join(process.cwd(), root))) {
++      const source = readFileSync(file, "utf8");
++      source.split("\n").forEach((line, index) => {
++        if (/fontSize:\s*[0-9]/.test(line)) {
++          offenders.push(`${relative(process.cwd(), file).replace(/\\/g, "/")}:${index + 1}: ${line.trim()}`);
++        }
++      });
++    }
++  }
++  assert.deepEqual(
++    offenders,
++    [],
++    `inline px font sizes must use TEXT.* / TEXT_PX.* from lib/typography:\n${offenders.join("\n")}`,
++  );
++});
++
++test("the type ladder and the CSS variables stay in step", () => {
++  const typography = readFileSync(join(process.cwd(), "lib", "typography.ts"), "utf8");
++  const globals = readFileSync(join(process.cwd(), "app", "globals.css"), "utf8");
++
++  // 每个梯度档都必须同时在 typography.ts（TEXT_PX）与 globals.css（--text-*）里有定义，
++  // 否则 TEXT.xx 会解析成不存在的变量 —— 那正是「改 token 不生效」的另一种形态。
++  for (const step of ["2xs", "xs", "sm", "md", "lg", "xl", "2xl", "3xl"]) {
++    // 档名前可能带引号（`"2xs": 10`）也可能不带（`xs: 11`），两种写法都要认。
++    const key = `(?:"${step}"|\\b${step}\\b)`;
++    assert.match(typography, new RegExp(`${key}:\\s*\\d+`), `TEXT_PX.${step} missing`);
++    assert.match(typography, new RegExp(`${key}:\\s*"var\\(--text-${step}\\)"`), `TEXT.${step} missing`);
++    assert.match(globals, new RegExp(`--text-${step}:\\s*\\d+px;`), `--text-${step} missing in globals.css`);
++  }
++});
+--- a/components/fork/CronConfig.tsx
++++ b/components/fork/CronConfig.tsx
+@@ -5,6 +5,7 @@
+ import { ConfigButton, ConfigSwitch } from "../SettingsUi";
+ import { CRON_EXAMPLES } from "@/lib/cron-expression";
+ import type { CronScheduleKind, CronTaskView } from "@/lib/cron-schedule";
++import { TEXT } from "@/lib/typography";
+ 
+ const THINKING_LEVELS = ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+ const THINKING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = {
+@@ -251,7 +252,7 @@
+           </label>
+           <label style={{ display: "grid", gap: 4 }}>
+             <span className="settings-chat-option-label">{t("cron.cwd")}</span>
+-            <input className="settings-field-input" value={taskCwd} onChange={(event) => setTaskCwd(event.target.value)} placeholder={t("cron.cwdPlaceholder")} style={{ fontFamily: "var(--font-mono)", fontSize: 12 }} />
++            <input className="settings-field-input" value={taskCwd} onChange={(event) => setTaskCwd(event.target.value)} placeholder={t("cron.cwdPlaceholder")} style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.sm }} />
+           </label>
+           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+             <label style={{ display: "grid", gap: 4, minWidth: 220 }}>
+@@ -363,7 +364,7 @@
+                         width: "100%", padding: "5px 8px",
+                         border: "1px solid var(--border-faint)", borderRadius: "var(--radius-sm)",
+                         background: expression === example.expression ? "var(--bg-selected)" : "transparent",
+-                        cursor: "pointer", fontSize: 12, whiteSpace: "nowrap",
++                        cursor: "pointer", fontSize: TEXT.sm, whiteSpace: "nowrap",
+                       }}
+                     >
+                       <code style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>{example.expression}</code>
+@@ -390,7 +391,7 @@
+                       border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
+                       background: active ? "var(--bg-selected)" : "transparent",
+                       color: active ? "var(--text)" : "var(--text-muted)",
+-                      cursor: "pointer", fontSize: 11.5,
++                      cursor: "pointer", fontSize: TEXT.xs,
+                     }}
+                   >
+                     {t(`cron.weekday.${key}`)}
+@@ -454,28 +455,28 @@
+               }}
+             >
+               <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
+-                <span style={{ fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.name}</span>
+-                <span style={{ fontSize: 11.5, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
++                <span style={{ fontSize: TEXT.md, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.name}</span>
++                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+                   {describe(task)}
+                   {task.nextRunAt ? ` · ${t("cron.next")} ${new Date(task.nextRunAt).toLocaleString()}` : ` · ${t("cron.noNext")}`}
+                   {task.missed ? ` · ${t("cron.missed")}` : ""}
+                 </span>
+-                <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.cwd}>
++                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.cwd}>
+                   {task.prompt}
+                 </span>
+                 {(task.model || task.thinking) && (
+-                  <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
++                  <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+                     {task.model ? `${task.model.provider}/${task.model.modelId}` : t("cron.default")}{task.thinking ? ` · ${task.thinking}` : ""}
+                   </span>
+                 )}
+                 {task.history && task.history.length > 0 && (
+                   <details style={{ marginTop: 2 }}>
+-                    <summary style={{ cursor: "pointer", fontSize: 11, color: "var(--text-dim)" }}>
++                    <summary style={{ cursor: "pointer", fontSize: TEXT.xs, color: "var(--text-dim)" }}>
+                       {t("cron.history")} · {task.history.length}
+                     </summary>
+                     <ul style={{ margin: "4px 0 0", padding: 0, listStyle: "none", display: "grid", gap: 3 }}>
+                       {task.history.slice(0, 8).map((run, index) => (
+-                        <li key={`${run.at}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: run.status === "error" ? "var(--danger)" : "var(--text-dim)" }}>
++                        <li key={`${run.at}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: TEXT.xs, color: run.status === "error" ? "var(--danger)" : "var(--text-dim)" }}>
+                           <span style={{ fontVariantNumeric: "tabular-nums" }}>{new Date(run.at).toLocaleString()}</span>
+                           <span>{t(`cron.status.${run.status}`)}</span>
+                           {run.sessionId && (
+@@ -482,7 +483,7 @@
+                             <button
+                               type="button"
+                               onClick={() => onOpenSession?.(run.sessionId!)}
+-                              style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11, padding: 0 }}
++                              style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: TEXT.xs, padding: 0 }}
+                             >
+                               {t("cron.openRun")}
+                             </button>
+@@ -494,7 +495,7 @@
+                   </details>
+                 )}
+                 {task.lastStatus && (
+-                  <span style={{ fontSize: 11, color: task.lastStatus === "error" ? "var(--danger)" : "var(--text-dim)" }}>
++                  <span style={{ fontSize: TEXT.xs, color: task.lastStatus === "error" ? "var(--danger)" : "var(--text-dim)" }}>
+                     {t(`cron.status.${task.lastStatus}`)}{task.lastError ? ` · ${task.lastError}` : ""}
+                   </span>
+                 )}
+--- a/components/fork/PiMemoryConfig.tsx
++++ b/components/fork/PiMemoryConfig.tsx
+@@ -4,6 +4,7 @@
+ import { useI18n } from "@/hooks/useI18n";
+ import { ConfigButton, ConfigSwitch } from "../SettingsUi";
+ import { PI_MEMORY_PACKAGE_SOURCE, PI_MEMORY_TEMPLATES, PI_MEMORY_TOOLS } from "@/lib/pi-memory";
++import { TEXT } from "@/lib/typography";
+ 
+ /*
+  * fork:memory-panel — settings page for the pi-memory package.
+@@ -220,7 +221,7 @@
+               </ConfigButton>
+             )}
+           </div>
+-          <p role="status" style={{ margin: "6px 0 0", fontSize: 12.5, color: enabled ? "var(--text)" : "var(--text-dim)" }}>
++          <p role="status" style={{ margin: "6px 0 0", fontSize: TEXT.sm, color: enabled ? "var(--text)" : "var(--text-dim)" }}>
+             {loading
+               ? t("i18n.loading")
+               : installed
+@@ -228,7 +229,7 @@
+                 : t("memory.stateMissing")}
+           </p>
+           <p className="settings-chat-range-hint">{t("memory.enableHint")}</p>
+-          {message && <p role="status" style={{ margin: 0, fontSize: 12, color: "var(--text)" }}>{message}</p>}
++          {message && <p role="status" style={{ margin: 0, fontSize: TEXT.sm, color: "var(--text)" }}>{message}</p>}
+         </div>
+       </section>
+ 
+@@ -237,7 +238,7 @@
+         <div className="settings-chat-option settings-chat-range-option">
+           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+             {PI_MEMORY_TOOLS.map((tool) => (
+-              <code key={tool} style={{ padding: "2px 7px", border: "1px solid var(--border-faint)", borderRadius: "var(--radius-sm)", fontSize: 11.5, color: "var(--text-muted)" }}>
++              <code key={tool} style={{ padding: "2px 7px", border: "1px solid var(--border-faint)", borderRadius: "var(--radius-sm)", fontSize: TEXT.xs, color: "var(--text-muted)" }}>
+                 {tool}
+               </code>
+             ))}
+@@ -248,7 +249,7 @@
+ 
+       <section className="settings-general-section">
+         <h3 className="settings-general-heading">{t("memory.files")}</h3>
+-        {dir && <p className="settings-chat-range-hint" style={{ marginTop: -2, fontFamily: "var(--font-mono)", fontSize: 11 }}>{dir}</p>}
++        {dir && <p className="settings-chat-range-hint" style={{ marginTop: -2, fontFamily: "var(--font-mono)", fontSize: TEXT.xs }}>{dir}</p>}
+         <div style={{ display: "grid", gap: 4 }}>
+           {files.map((file) => (
+             <div
+@@ -261,10 +262,10 @@
+               }}
+             >
+               <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 1 }}>
+-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
++                <span style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.sm, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                   {file.path}
+                 </span>
+-                <span style={{ fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
++                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+                   {file.exists
+                     ? `${file.size} B · ${new Date(file.mtime).toLocaleString()}`
+                     : t("memory.fileMissing")}
+@@ -302,7 +303,7 @@
+             role="alert"
+             style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", border: "1px solid var(--warning)", borderRadius: "var(--radius-md)", background: "var(--warning-soft)" }}
+           >
+-            <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)" }}>{t("memory.conflict")}</span>
++            <span style={{ flex: 1, minWidth: 0, fontSize: TEXT.sm, color: "var(--text)" }}>{t("memory.conflict")}</span>
+             <ConfigButton variant="secondary" size="small" onClick={() => void read(openFile.path)}>{t("memory.reload")}</ConfigButton>
+           </div>
+         )}
+@@ -309,7 +310,7 @@
+         {openFile && !conflict && (
+           <div style={{ marginTop: 8 }}>
+             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+-              <strong style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}>{openFile.path}</strong>
++              <strong style={{ fontSize: TEXT.sm, fontFamily: "var(--font-mono)" }}>{openFile.path}</strong>
+               <ConfigButton variant="ghost" size="small" onClick={() => setOpenFile(null)}>{t("i18n.close")}</ConfigButton>
+               <ConfigButton
+                 variant="primary"
+@@ -325,7 +326,7 @@
+               value={draft}
+               spellCheck={false}
+               onChange={(event) => setDraft(event.target.value)}
+-              style={{ minHeight: 200, fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.55, resize: "vertical" }}
++              style={{ minHeight: 200, fontFamily: "var(--font-mono)", fontSize: TEXT.sm, lineHeight: 1.55, resize: "vertical" }}
+             />
+             <p className="settings-chat-range-hint">{t("memory.autoSaveHint")}</p>
+           </div>
+--- a/components/fork/UnsupportedFilePreview.tsx
++++ b/components/fork/UnsupportedFilePreview.tsx
+@@ -4,6 +4,7 @@
+ import { useI18n } from "@/hooks/useI18n";
+ import { encodeFilePathForApi, getFileName } from "@/lib/file-paths";
+ import { unsupportedReasonKey } from "@/lib/file-preview-support";
++import { TEXT } from "@/lib/typography";
+ 
+ /**
+  * fork:gap-unsupported-preview — 无法预览文件的降级卡片。
+@@ -70,7 +71,7 @@
+ 
+   const buttonStyle = {
+     padding: "5px 12px",
+-    fontSize: 12,
++    fontSize: TEXT.sm,
+     borderRadius: "var(--radius-md)",
+     border: "1px solid var(--border)",
+     background: "var(--bg-panel)",
+@@ -99,8 +100,8 @@
+         <path d="M14 2v6h6" />
+         <path d="M9 15h6" />
+       </svg>
+-      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", wordBreak: "break-all" }}>{name}</div>
+-      <div style={{ fontSize: 12, lineHeight: 1.7 }}>
++      <div style={{ fontSize: TEXT.md, fontWeight: 600, color: "var(--text)", wordBreak: "break-all" }}>{name}</div>
++      <div style={{ fontSize: TEXT.sm, lineHeight: 1.7 }}>
+         {t(unsupportedReasonKey(filePath))}
+         <br />
+         {[
+@@ -117,9 +118,9 @@
+           {busy === "reveal" ? t("i18n.opening") : t("i18n.showInFolder")}
+         </button>
+       </div>
+-      {error && <div role="alert" style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
++      {error && <div role="alert" style={{ fontSize: TEXT.sm, color: "var(--danger)" }}>{error}</div>}
+       {/* 保留一个可复制的路径，方便用户自己去终端处理。 */}
+-      <code style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
++      <code style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
+         {encodeFilePathForApi(filePath)}
+       </code>
+     </div>
+--- a/app/error.tsx
++++ b/app/error.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { useEffect } from "react";
+ import { useI18n } from "@/hooks/useI18n";
++import { TEXT } from "@/lib/typography";
+ 
+ /**
+  * fork:gap-error-boundary — 应用级错误边界。
+@@ -30,7 +31,7 @@
+     color: "var(--text, inherit)",
+     cursor: "pointer",
+     font: "inherit",
+-    fontSize: 13,
++    fontSize: TEXT.md,
+   } as const;
+ 
+   return (
+@@ -44,12 +45,12 @@
+         fontFamily: "inherit",
+       }}
+     >
+-      <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 8px" }}>{t("error.boundaryTitle")}</h2>
+-      <p style={{ fontSize: 13, lineHeight: 1.7, margin: "0 0 12px", color: "var(--text-muted, inherit)" }}>
++      <h2 style={{ fontSize: TEXT.xl, fontWeight: 600, margin: "0 0 8px" }}>{t("error.boundaryTitle")}</h2>
++      <p style={{ fontSize: TEXT.md, lineHeight: 1.7, margin: "0 0 12px", color: "var(--text-muted, inherit)" }}>
+         {t("error.boundaryHint")}
+       </p>
+       {error.digest && (
+-        <p style={{ fontSize: 12, margin: "0 0 16px", color: "var(--text-dim, inherit)" }}>
++        <p style={{ fontSize: TEXT.sm, margin: "0 0 16px", color: "var(--text-dim, inherit)" }}>
+           {t("error.boundaryDigest")} <code style={{ fontFamily: "var(--font-mono, monospace)" }}>{error.digest}</code>
+         </p>
+       )}
+--- a/app/global-error.tsx
++++ b/app/global-error.tsx
+@@ -1,4 +1,5 @@
+ "use client";
++import { TEXT } from "@/lib/typography";
+ 
+ /**
+  * fork:gap-error-boundary — 根布局级错误边界。
+@@ -28,14 +29,14 @@
+         }}
+       >
+         <div style={{ maxWidth: 520, width: "100%" }} role="alert">
+-          <h1 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>应用启动失败 / Failed to start</h1>
+-          <p style={{ fontSize: 13, lineHeight: 1.7, margin: "0 0 12px", opacity: 0.8 }}>
++          <h1 style={{ fontSize: TEXT["2xl"], fontWeight: 600, margin: "0 0 8px" }}>应用启动失败 / Failed to start</h1>
++          <p style={{ fontSize: TEXT.md, lineHeight: 1.7, margin: "0 0 12px", opacity: 0.8 }}>
+             根布局渲染时出现异常。请先重试；若持续失败，打开开发者工具查看控制台堆栈。
+             <br />
+             An error occurred while rendering the root layout. Retry first; if it persists, check the console.
+           </p>
+           {error.digest && (
+-            <p style={{ fontSize: 12, opacity: 0.7, margin: "0 0 16px" }}>
++            <p style={{ fontSize: TEXT.sm, opacity: 0.7, margin: "0 0 16px" }}>
+               digest: <code>{error.digest}</code>
+             </p>
+           )}
+--- a/components/fork/PathActions.tsx
++++ b/components/fork/PathActions.tsx
+@@ -3,6 +3,7 @@
+ import { useState, type ReactNode } from "react";
+ import { useI18n } from "@/hooks/useI18n";
+ import { copyText } from "@/lib/clipboard";
++import { TEXT } from "@/lib/typography";
+ 
+ /*
+  * fork:ui-20 — the three path actions, in one place.
+@@ -67,7 +68,7 @@
+     borderRadius: "var(--radius-xs)",
+     color: state === "failed" ? "var(--danger)" : copied ? "var(--accent)" : "var(--text-dim)",
+     cursor: "pointer",
+-    fontSize: 11,
++    fontSize: TEXT.xs,
+     whiteSpace: "nowrap" as const,
+   };
+ 
+@@ -114,7 +115,7 @@
+         </svg>
+         {!compact && <span>{t("files.openPath")}</span>}
+       </button>
+-      {state === "failed" && <span style={{ fontSize: 11, color: "var(--danger)" }}>{t("files.pathActionFailed")}</span>}
++      {state === "failed" && <span style={{ fontSize: TEXT.xs, color: "var(--danger)" }}>{t("files.pathActionFailed")}</span>}
+     </span>
+   );
+ }
+--- a/components/TerminalPanel.tsx
++++ b/components/TerminalPanel.tsx
+@@ -7,6 +7,7 @@
+ import { createTerminalWriter, terminalRequest } from "@/lib/terminal-client";
+ import type { TerminalEvent } from "@/lib/terminal-manager";
+ import type { TerminalTab } from "./terminal-tab-state";
++import { TEXT_PX } from "@/lib/typography";
+ 
+ interface Props {
+   tab: TerminalTab;
+@@ -46,7 +47,9 @@
+     const terminal = new Terminal({
+       cursorBlink: true,
+       fontFamily: getComputedStyle(container).getPropertyValue("--font-mono").trim() || "monospace",
+-      fontSize: 13,
++      // xterm 的 fontSize 必须是数字（它自己测量 canvas），所以用数值 token 而不是 CSS 变量：
++      // 仍由梯度驱动，改梯度会跟着变。
++      fontSize: TEXT_PX.md,
+       lineHeight: 1.25,
+       scrollback: 8000,
+       screenReaderMode: true,
+--- a/components/fork/ProjectChip.tsx
++++ b/components/fork/ProjectChip.tsx
+@@ -4,6 +4,7 @@
+ import { useContextMenu, type ContextMenuEntry } from "../ContextMenu";
+ import { getFileName } from "@/lib/file-paths";
+ import { useI18n } from "@/hooks/useI18n";
++import { TEXT } from "@/lib/typography";
+ 
+ /*
+  * fork:ui-projectchip — "this chat runs in <workspace>" selector on the new-session
+@@ -172,7 +173,7 @@
+         borderRadius: 14,
+         background: "var(--bg-panel)",
+         color: "var(--text-muted)",
+-        fontSize: 12,
++        fontSize: TEXT.sm,
+         fontWeight: 500,
+         lineHeight: 1,
+         cursor: "pointer",
+--- a/components/fork/ComposerTipLine.tsx
++++ b/components/fork/ComposerTipLine.tsx
+@@ -2,6 +2,7 @@
+ 
+ import { useEffect, useRef, useState, type ReactNode } from "react";
+ import { useI18n } from "@/hooks/useI18n";
++import { TEXT } from "@/lib/typography";
+ 
+ /*
+  * fork:ui-tipline — rotating capability tips under the new-session composer
+@@ -68,7 +69,7 @@
+         overflow: "hidden",
+         textOverflow: "ellipsis",
+         whiteSpace: "nowrap",
+-        fontSize: 11.5,
++        fontSize: TEXT.xs,
+         lineHeight: 1,
+         color: "var(--text-dim)",
+       }}
+--- a/components/fork/NewSessionHome.tsx
++++ b/components/fork/NewSessionHome.tsx
+@@ -1,6 +1,7 @@
+ "use client";
+ 
+ import { useI18n } from "@/hooks/useI18n";
++import { TEXT } from "@/lib/typography";
+ 
+ /*
+  * fork:ui-newhome — empty-state hero for a brand new session.
+@@ -100,7 +101,7 @@
+               background: "var(--bg-panel)",
+               border: "1px solid var(--border-faint)",
+               color: "var(--text-muted)",
+-              fontSize: 20,
++              fontSize: TEXT["2xl"],
+               fontWeight: 600,
+               fontFamily: "var(--font-mono)",
+             }}

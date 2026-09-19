@@ -67,6 +67,7 @@ function ToolbarIconButton({
 
 export function ExplorerPanel({
   cwd,
+  projectRoot,
   onOpenFile,
   onOpenTerminal,
   explorerRefreshKey,
@@ -76,6 +77,8 @@ export function ExplorerPanel({
   trailingActions,
 }: {
   cwd: string;
+  /** fork:gap08-roots — 会话所属项目根（与 cwd 不同时文件树多出一个「项目」根）。 */
+  projectRoot?: string | null;
   onOpenFile: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "preview" | "diff" }) => void;
   onOpenTerminal?: (cwd: string) => void;
   explorerRefreshKey?: number;
@@ -275,6 +278,7 @@ export function ExplorerPanel({
           <FileExplorer
             ref={fileExplorerRef}
             cwd={cwd}
+            projectRoot={projectRoot}
             onOpenFile={onOpenFile}
             refreshKey={explorerKey}
             onAtMention={onAtMention}

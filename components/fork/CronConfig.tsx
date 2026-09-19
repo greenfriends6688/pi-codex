@@ -5,6 +5,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { ConfigButton, ConfigSwitch } from "../SettingsUi";
 import { CRON_EXAMPLES } from "@/lib/cron-expression";
 import type { CronScheduleKind, CronTaskView } from "@/lib/cron-schedule";
+import { TEXT } from "@/lib/typography";
 
 const THINKING_LEVELS = ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 const THINKING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = {
@@ -33,6 +34,20 @@ function timezoneOptions(): string[] {
  */
 
 const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+
+/**
+ * fork:fix-cron-model-list — shape of `GET /api/models`.
+ *
+ * `models` is a `provider:id → display name` map used for lookups; the list a
+ * picker must render is `modelList`. Reading the map here made `.map` throw,
+ * the `.catch` swallowed the TypeError, and the picker silently kept a single
+ * "default" option (see lib/models-cache.ts `ModelsData`).
+ */
+interface ModelsResponse {
+  modelList?: { id: string; name?: string; provider: string }[];
+  defaultModel?: { provider: string; modelId: string } | null;
+  modelError?: string;
+}
 
 function toDateInputValue(date: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
@@ -66,24 +81,47 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
   const [notify, setNotify] = useState<"never" | "always" | "success" | "error">("error");
   const [taskEnabled, setTaskEnabled] = useState(true);
   const [models, setModels] = useState<{ key: string; label: string }[]>([]);
+  const [defaultModelKey, setDefaultModelKey] = useState("");
+  const [modelsError, setModelsError] = useState<string | null>(null);
   const zones = useMemo(() => timezoneOptions(), []);
 
   useEffect(() => {
     // Model list for the optional override; a failure is not fatal (the task then
-    // runs with the app default, which is what an empty selection means anyway).
+    // runs with the app default, which is what an empty selection means anyway),
+    // but it is surfaced — a picker that silently offers nothing is the bug this
+    // replaced.
     // The route is scoped to a browsable cwd, so pass the panel's — without it the
     // request falls back to the server's own cwd and can be refused.
     const url = cwd ? `/api/models?cwd=${encodeURIComponent(cwd)}` : "/api/models";
     void fetch(url, { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { models?: { provider: string; id: string; name?: string }[] } | null) => {
-        setModels((data?.models ?? []).map((model) => ({
+      .then(async (res) => {
+        if (!res.ok) {
+          const detail = await res.json().catch(() => null) as { error?: string } | null;
+          throw new Error(detail?.error ?? `HTTP ${res.status}`);
+        }
+        return res.json() as Promise<ModelsResponse>;
+      })
+      .then((data) => {
+        setModels((data.modelList ?? []).map((model) => ({
           key: `${model.provider}/${model.id}`,
           label: `${model.name || model.id} · ${model.provider}`,
         })));
+        setDefaultModelKey(data.defaultModel ? `${data.defaultModel.provider}/${data.defaultModel.modelId}` : "");
+        setModelsError(data.modelError ?? null);
       })
-      .catch(() => setModels([]));
+      .catch((cause: unknown) => {
+        setModels([]);
+        setDefaultModelKey("");
+        setModelsError(cause instanceof Error ? cause.message : String(cause));
+      });
   }, [cwd]);
+
+  // "Default" is the app's own default model, so name it: an unlabelled "default"
+  // leaves the user guessing which model a scheduled run will actually use.
+  const defaultModelLabel = useMemo(() => {
+    if (!defaultModelKey) return "";
+    return models.find((model) => model.key === defaultModelKey)?.label ?? defaultModelKey;
+  }, [defaultModelKey, models]);
 
   const load = useCallback(async () => {
     try {
@@ -214,13 +252,15 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
           </label>
           <label style={{ display: "grid", gap: 4 }}>
             <span className="settings-chat-option-label">{t("cron.cwd")}</span>
-            <input className="settings-field-input" value={taskCwd} onChange={(event) => setTaskCwd(event.target.value)} placeholder={t("cron.cwdPlaceholder")} style={{ fontFamily: "var(--font-mono)", fontSize: 12 }} />
+            <input className="settings-field-input" value={taskCwd} onChange={(event) => setTaskCwd(event.target.value)} placeholder={t("cron.cwdPlaceholder")} style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.sm }} />
           </label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label style={{ display: "grid", gap: 4, minWidth: 220 }}>
               <span className="settings-chat-option-label">{t("cron.model")}</span>
               <select className="settings-select" value={modelKey} onChange={(event) => setModelKey(event.target.value)}>
-                <option value="">{t("cron.default")}</option>
+                <option value="">
+                  {defaultModelLabel ? t("cron.modelDefault", { model: defaultModelLabel }) : t("cron.default")}
+                </option>
                 {models.map((model) => <option key={model.key} value={model.key}>{model.label}</option>)}
               </select>
             </label>
@@ -293,6 +333,10 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
             )}
           </div>
 
+          {modelsError && (
+            <p className="settings-chat-range-hint" role="status">{t("cron.modelListError", { error: modelsError })}</p>
+          )}
+
           {kind === "cron" && (
             <div style={{ display: "grid", gap: 6 }}>
               <label style={{ display: "grid", gap: 4 }}>
@@ -320,7 +364,7 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
                         width: "100%", padding: "5px 8px",
                         border: "1px solid var(--border-faint)", borderRadius: "var(--radius-sm)",
                         background: expression === example.expression ? "var(--bg-selected)" : "transparent",
-                        cursor: "pointer", fontSize: 12, whiteSpace: "nowrap",
+                        cursor: "pointer", fontSize: TEXT.sm, whiteSpace: "nowrap",
                       }}
                     >
                       <code style={{ color: "var(--accent)", fontFamily: "var(--font-mono)" }}>{example.expression}</code>
@@ -347,7 +391,7 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
                       border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
                       background: active ? "var(--bg-selected)" : "transparent",
                       color: active ? "var(--text)" : "var(--text-muted)",
-                      cursor: "pointer", fontSize: 11.5,
+                      cursor: "pointer", fontSize: TEXT.xs,
                     }}
                   >
                     {t(`cron.weekday.${key}`)}
@@ -411,35 +455,35 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
               }}
             >
               <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
-                <span style={{ fontSize: 13, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.name}</span>
-                <span style={{ fontSize: 11.5, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+                <span style={{ fontSize: TEXT.md, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{task.name}</span>
+                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
                   {describe(task)}
                   {task.nextRunAt ? ` · ${t("cron.next")} ${new Date(task.nextRunAt).toLocaleString()}` : ` · ${t("cron.noNext")}`}
                   {task.missed ? ` · ${t("cron.missed")}` : ""}
                 </span>
-                <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.cwd}>
+                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={task.cwd}>
                   {task.prompt}
                 </span>
                 {(task.model || task.thinking) && (
-                  <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+                  <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
                     {task.model ? `${task.model.provider}/${task.model.modelId}` : t("cron.default")}{task.thinking ? ` · ${task.thinking}` : ""}
                   </span>
                 )}
                 {task.history && task.history.length > 0 && (
                   <details style={{ marginTop: 2 }}>
-                    <summary style={{ cursor: "pointer", fontSize: 11, color: "var(--text-dim)" }}>
+                    <summary style={{ cursor: "pointer", fontSize: TEXT.xs, color: "var(--text-dim)" }}>
                       {t("cron.history")} · {task.history.length}
                     </summary>
                     <ul style={{ margin: "4px 0 0", padding: 0, listStyle: "none", display: "grid", gap: 3 }}>
                       {task.history.slice(0, 8).map((run, index) => (
-                        <li key={`${run.at}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, color: run.status === "error" ? "var(--danger)" : "var(--text-dim)" }}>
+                        <li key={`${run.at}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: TEXT.xs, color: run.status === "error" ? "var(--danger)" : "var(--text-dim)" }}>
                           <span style={{ fontVariantNumeric: "tabular-nums" }}>{new Date(run.at).toLocaleString()}</span>
                           <span>{t(`cron.status.${run.status}`)}</span>
                           {run.sessionId && (
                             <button
                               type="button"
                               onClick={() => onOpenSession?.(run.sessionId!)}
-                              style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11, padding: 0 }}
+                              style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: TEXT.xs, padding: 0 }}
                             >
                               {t("cron.openRun")}
                             </button>
@@ -451,7 +495,7 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
                   </details>
                 )}
                 {task.lastStatus && (
-                  <span style={{ fontSize: 11, color: task.lastStatus === "error" ? "var(--danger)" : "var(--text-dim)" }}>
+                  <span style={{ fontSize: TEXT.xs, color: task.lastStatus === "error" ? "var(--danger)" : "var(--text-dim)" }}>
                     {t(`cron.status.${task.lastStatus}`)}{task.lastError ? ` · ${task.lastError}` : ""}
                   </span>
                 )}

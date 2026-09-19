@@ -7,6 +7,7 @@ import { useI18n } from "@/hooks/useI18n";
 import { createTerminalWriter, terminalRequest } from "@/lib/terminal-client";
 import type { TerminalEvent } from "@/lib/terminal-manager";
 import type { TerminalTab } from "./terminal-tab-state";
+import { TEXT_PX } from "@/lib/typography";
 
 interface Props {
   tab: TerminalTab;
@@ -46,7 +47,9 @@ export function TerminalPanel({ tab, active, onRestart, onClosed, onCloseError }
     const terminal = new Terminal({
       cursorBlink: true,
       fontFamily: getComputedStyle(container).getPropertyValue("--font-mono").trim() || "monospace",
-      fontSize: 13,
+      // xterm 的 fontSize 必须是数字（它自己测量 canvas），所以用数值 token 而不是 CSS 变量：
+      // 仍由梯度驱动，改梯度会跟着变。
+      fontSize: TEXT_PX.md,
       lineHeight: 1.25,
       scrollback: 8000,
       screenReaderMode: true,

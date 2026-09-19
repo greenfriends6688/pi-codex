@@ -4,6 +4,7 @@ import { useRef, type ReactNode } from "react";
 import { useContextMenu, type ContextMenuEntry } from "../ContextMenu";
 import { getFileName } from "@/lib/file-paths";
 import { useI18n } from "@/hooks/useI18n";
+import { TEXT } from "@/lib/typography";
 
 /*
  * fork:ui-projectchip — "this chat runs in <workspace>" selector on the new-session
@@ -172,7 +173,7 @@ export function ProjectChip({ targets }: { targets: NewSessionTargets }): ReactN
         borderRadius: 14,
         background: "var(--bg-panel)",
         color: "var(--text-muted)",
-        fontSize: 12,
+        fontSize: TEXT.sm,
         fontWeight: 500,
         lineHeight: 1,
         cursor: "pointer",

@@ -8,7 +8,7 @@
 // a browser tab — native notifications, the Dock badge, keep-awake during a run, and a
 // channel for main-process events (notification clicks).
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 const DESKTOP_ACTIONS = ["notification-clicked", "theme-changed", "open-session"];
 
@@ -25,6 +25,21 @@ contextBridge.exposeInMainWorld("piWebDesktop", {
   openExternal: (url) => ipcRenderer.send("desktop:open-external", url),
   /** Ask the main process to reveal a path in Finder. */
   revealPath: (target) => ipcRenderer.send("desktop:reveal", target),
+  /**
+   * fork:gap07-attachments — real on-disk path of a dropped File.
+   *
+   * Browsers deliberately hide it; Electron exposes it through webUtils. Composer
+   * attachments use it to reference an oversized file in place instead of uploading
+   * (or dropping) it. Returns null when Electron refuses the object, which is the
+   * signal for the renderer to fall back to uploading.
+   */
+  filePathFor: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
+  },
   onAction: (callback) => {
     const listener = (_event, action) => {
       if (!action || !DESKTOP_ACTIONS.includes(action.kind)) return;

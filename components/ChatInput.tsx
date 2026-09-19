@@ -29,6 +29,8 @@ import { useI18n } from "@/hooks/useI18n";
 import { useChatAppearance } from "@/hooks/useChatAppearance";
 import { ThinkingIcon } from "./ThinkingIcon";
 import type { ToolPreset } from "@/lib/tool-presets";
+// fork:proma-02-mode — 会话权限模式
+import { nextPermissionMode, PERMISSION_MODE_HINT_KEYS, PERMISSION_MODE_LABEL_KEYS, type PermissionMode } from "@/lib/permission-mode";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
 import { ComposerContextStrip } from "./ComposerContextStrip";
 import { TodoChip } from "./fork/TodoChip";
@@ -41,6 +43,37 @@ import {
   type SelectionContext,
   type SessionReference,
 } from "@/lib/composer-context";
+// fork:gap06-references — `&` 会话 / `#` MCP / `~` 待办 的行内引用 token
+import {
+  COMPOSER_REFERENCE_TRIGGERS,
+  buildMcpReferenceItems,
+  buildReferenceInsertText,
+  buildSessionReferenceItems,
+  buildTodoReferenceItems,
+  extractReferenceQuery,
+  filterMcpReferenceItems,
+  filterSessionReferenceItems,
+  filterTodoReferenceItems,
+  replaceReferenceToken,
+  sessionReferenceFromItem,
+  type ComposerReferenceItem,
+  type ComposerReferenceQuery,
+  type ReferenceMcpItem,
+  type ReferenceMcpSource,
+  type ReferenceSessionItem,
+  type ReferenceSessionSource,
+} from "@/lib/composer-references";
+import { ComposerReferenceMenu } from "./ComposerReferenceMenu";
+// fork:gap07-attachments — 任意文件：分类 / 上限 / 路径引用
+import {
+  MAX_ATTACHED_FILE_BYTES,
+  buildAttachmentReference,
+  nextAvailableAttachmentName,
+  planAttachments,
+  type AttachmentSkipReason,
+} from "@/lib/composer-attachments";
+import { encodeFilePathForApi, joinFilePath } from "@/lib/file-paths";
+import { desktopFilePathFor } from "@/lib/desktop-shell";
 import { TEXT } from "@/lib/typography";
 
 export { filterModelOptions } from "./ModelSelector";
@@ -76,14 +109,23 @@ interface Props {
   compactResult?: CompactResultInfo | null;
   toolPreset?: ToolPreset;
   onToolPresetChange?: (preset: ToolPreset) => void;
+  /** fork:proma-02-mode — 会话权限模式（Chat-only 会话不显示这个控件）。 */
+  permissionMode?: PermissionMode;
+  onPermissionModeChange?: (mode: PermissionMode) => void;
   thinkingLevel?: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
   onThinkingLevelChange?: (level: "auto" | "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max") => void;
   availableThinkingLevels?: string[] | null;
   thinkingLevelMap?: Record<string, string | null> | null;
+  /** fork:gap04-queue — 队列逐条操控（移除 / 拖拽排序 / 立即发送）。 */
+  onQueueRemove?: (kind: "steer" | "followUp", index: number, expect: string) => void;
+  onQueueMove?: (kind: "steer" | "followUp", from: number, to: number, expect: string) => void;
+  onQueuePromote?: (index: number, expect: string) => void;
   retryInfo?: { attempt: number; maxAttempts: number; errorMessage?: string } | null;
   queuedMessages?: QueuedMessages | null;
   /** fork:ui-todo — task list of this session, derived from the transcript. */
   todoSummary?: TodoSummary | null;
+  /** fork:gap06-references — 当前会话 id，用于把“自己”从 `&` 建议里剔除。 */
+  currentSessionId?: string | null;
   inputHistory?: string[];
   onRecallQueue?: () => void;
   slashCommands?: SlashCommandInfo[];
@@ -110,6 +152,8 @@ export interface ChatInputHandle {
   replaceMessage: (message: UserMessage) => void;
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
+  /** fork:gap07-attachments — 任意文件（图片内联，其余落盘后插路径引用）。 */
+  addFiles: (files: File[]) => void;
   addSelectionContext: (context: SelectionContext) => void;
   removeSelectionContext: (id: string) => void;
   clearSelectionContexts: () => void;
@@ -450,10 +494,63 @@ function revokeImagePreview(image: AttachedImage): void {
   }
 }
 
-function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: string }) {
+/**
+ * fork:gap04-queue — 队列里的一行：可拖拽排序，带「立即发送」（仅 follow-up）与「移除」。
+ *
+ * 控件的可见性靠 `:hover`（用 style 手写，仓库不引 CSS-in-JS 库），
+ * 但键盘用户也能拿到（button 本身可聚焦，hover 时显现不影响 tab 顺序）。
+ */
+function QueuedMessageRow({
+  kind,
+  text,
+  index,
+  promoteTitle,
+  removeTitle,
+  onRemove,
+  onPromote,
+  onDragStart,
+  onDropOn,
+  dragging,
+}: {
+  kind: "steer" | "follow-up";
+  text: string;
+  index: number;
+  promoteTitle: string;
+  removeTitle: string;
+  onRemove: () => void;
+  onPromote?: () => void;
+  onDragStart?: () => void;
+  onDropOn?: () => void;
+  dragging?: boolean;
+}) {
+  const [hover, setHover] = useState(false);
+  const controlStyle: React.CSSProperties = {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 20,
+    height: 20,
+    padding: 0,
+    border: "none",
+    borderRadius: "var(--radius-xs)",
+    background: "transparent",
+    color: "var(--text-dim)",
+    cursor: "pointer",
+    opacity: hover ? 1 : 0,
+    transition: "opacity 0.12s",
+  };
   return (
     <div
       title={text}
+      draggable={Boolean(onDragStart)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onFocusCapture={() => setHover(true)}
+      onBlurCapture={() => setHover(false)}
+      onDragStart={onDragStart}
+      onDragOver={(event) => { if (onDropOn) event.preventDefault(); }}
+      onDrop={(event) => { if (onDropOn) { event.preventDefault(); onDropOn(); } }}
       style={{
         display: "flex",
         alignItems: "center",
@@ -462,6 +559,8 @@ function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: s
         fontSize: TEXT.sm,
         color: "var(--text-muted)",
         minWidth: 0,
+        opacity: dragging ? 0.4 : 1,
+        cursor: onDragStart ? "grab" : "default",
       }}
     >
       <span
@@ -478,6 +577,32 @@ function QueuedMessageRow({ kind, text }: { kind: "steer" | "follow-up"; text: s
         {kind}
       </span>
       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{text}</span>
+      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 2 }}>
+        {onPromote && (
+          <button
+            type="button"
+            onClick={onPromote}
+            title={promoteTitle}
+            aria-label={promoteTitle}
+            style={controlStyle}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 19V5" /><polyline points="5 12 12 5 19 12" />
+            </svg>
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onRemove}
+          title={removeTitle}
+          aria-label={`${removeTitle} #${index + 1}`}
+          style={controlStyle}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
@@ -580,8 +705,10 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
+  permissionMode, onPermissionModeChange,
   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
-  retryInfo, queuedMessages, inputHistory = [], onRecallQueue, todoSummary,
+  retryInfo, queuedMessages, inputHistory = [], onRecallQueue, todoSummary, currentSessionId,
+  onQueueRemove, onQueueMove, onQueuePromote,
   slashCommands, slashCommandsLoading, onLoadSlashCommands,
   onBuiltinCommand,
   soundEnabled, onSoundToggle, onAudioUnlock,
@@ -626,7 +753,48 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [atMenuOpen, setAtMenuOpen] = useState(false);
   const [atMenuMaxHeight, setAtMenuMaxHeight] = useState<number | null>(null);
   const [atActiveIndex, setAtActiveIndex] = useState(0);
+  // fork:gap06-references — 行内引用菜单（& 会话 / # MCP / ~ 待办）。
+  // 与 `@` 菜单平行：两个抽取器都锚定光标，所以同一时刻最多只有一个能命中（见
+  // lib/composer-references.ts 的 extractReferenceQuery）。
+  const [referenceQuery, setReferenceQuery] = useState<ComposerReferenceQuery | null>(null);
+  const [referenceMenuOpen, setReferenceMenuOpen] = useState(false);
+  const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
+  const [referenceMenuMaxHeight, setReferenceMenuMaxHeight] = useState<number | null>(null);
+  const [referenceSessions, setReferenceSessions] = useState<ReferenceSessionItem[] | null>(null);
+  const [referenceMcp, setReferenceMcp] = useState<ReferenceMcpItem[] | null>(null);
+  const [referenceLoading, setReferenceLoading] = useState(false);
+  const referenceMenuRef = useRef<HTMLDivElement>(null);
+  const referenceItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  /** 数据源缓存时间戳（10s，与文件索引同款策略）。 */
+  const referenceMetaRef = useRef<{ sessions?: number; mcp?: string }>({});
+  /** 防止同一个数据源被并发拉取。 */
+  const referenceFetchRef = useRef<{ sessions: boolean; mcp: string | null }>({ sessions: false, mcp: null });
   const [imageWarningDismissed, setImageWarningDismissed] = useState(false);
+  /**
+   * fork:gap04-queue — 正在拖拽的队列行。
+   *
+   * 载荷用 **ref** 存：drop 可能在 dragstart 的同一个 tick 里发生（真实拖拽里也有极快的
+   * 甩拖），这时 React 还没重渲染，state 读到的是旧值（null）→ 拖拽会静默失效。
+   * state 只负责置灰的视觉效果。
+   */
+  const [draggingQueue, setDraggingQueue] = useState<{ kind: "steer" | "followUp"; index: number } | null>(null);
+  const draggingQueueRef = useRef<{ kind: "steer" | "followUp"; index: number } | null>(null);
+  const beginQueueDrag = (kind: "steer" | "followUp", index: number) => {
+    draggingQueueRef.current = { kind, index };
+    setDraggingQueue({ kind, index });
+  };
+  const endQueueDrag = () => {
+    draggingQueueRef.current = null;
+    setDraggingQueue(null);
+  };
+  /** 拖拽落点 → 插入下标：往下拖落在目标行之后，往上拖落在它之前（“所见即所得”）。 */
+  const queueDropTarget = (from: number, hovered: number) => (from < hovered ? hovered + 1 : hovered);
+  /** fork:gap07-attachments — 附件落盘结果提示；每一次拖入都有可见交代，不静默丢。 */
+  const [attachmentNotice, setAttachmentNotice] = useState<{
+    added: string[];
+    skipped: Array<{ name: string; reason: AttachmentSkipReason }>;
+    failed: string[];
+  } | null>(null);
   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
   const [builtinCommandPending, setBuiltinCommandPending] = useState(false);
@@ -913,6 +1081,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     addImages(files: File[]) {
       processImageFiles(files);
     },
+    addFiles(files: File[]) {
+      void attachFiles(files);
+    },
     addSelectionContext(context: SelectionContext) {
       const normalized = normalizeSelectionContext(context);
       if (!normalized) return;
@@ -1002,6 +1173,150 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       pendingImageCountRef.current -= imageFiles.length;
     }
   }, [compact]);
+
+  // ---------------------------------------------------------------------------
+  // fork:gap07-attachments — 任意文件 → 落盘（或就地引用）→ 插入 `@路径`
+  // ---------------------------------------------------------------------------
+
+  /** 把引用路径插到光标处（与 `@` 菜单插入的文本同构，所以 agent 侧无需特殊处理）。 */
+  const appendAttachmentReferences = useCallback((paths: string[]) => {
+    if (paths.length === 0) return;
+    const current = valueRef.current;
+    const ta = textareaRef.current;
+    const cursor = ta?.selectionStart ?? current.length;
+    const insert = paths.map((path) => buildAttachmentReference(path).text).join("");
+    const needsSpace = cursor > 0 && !/\s/.test(current.slice(cursor - 1, cursor));
+    const next = current.slice(0, cursor) + (needsSpace ? " " : "") + insert + current.slice(cursor);
+    const nextCursor = cursor + (needsSpace ? 1 : 0) + insert.length;
+    valueRef.current = next;
+    setValue(next);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextCursor, nextCursor);
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    });
+  }, []);
+
+  /**
+   * 上传到附件目录。字节走的是**既有**文件上传路由（同一个 25MB/文件、100MB/单次封套、
+   * 同一个冲突策略校验），这里只负责把目录要到手、把结果拼回绝对路径。
+   *
+   * 同名不覆盖：先用 `conflict=skip`，被跳过的那几个改名重试（`report.csv` →
+   * `report-2.csv` → `report-3.csv`）。覆盖会让**旧消息里的引用指向新内容**，
+   * 那种错误事后很难发现。
+   *
+   * 待重试的队列必须同时带着「本地 File」——只记服务端名字会丢了对应关系（名字被改过）。
+   */
+  const uploadAttachmentFiles = useCallback(async (files: File[]) => {
+    const dirResponse = await fetch("/api/attachments");
+    if (!dirResponse.ok) throw new Error(`attachments directory failed: ${dirResponse.status}`);
+    const { dir } = await dirResponse.json() as { dir?: string };
+    if (!dir) throw new Error("attachments directory missing");
+    const url = `/api/files/${encodeFilePathForApi(dir)}?type=upload&conflict=skip`;
+
+    const send = async (entries: Array<{ file: File; name: string }>) => {
+      const form = new FormData();
+      for (const entry of entries) {
+        form.append(
+          "files",
+          entry.name === entry.file.name
+            ? entry.file
+            : new File([entry.file], entry.name, { type: entry.file.type }),
+        );
+      }
+      const response = await fetch(url, { method: "POST", body: form });
+      const body = await response.json().catch(() => null) as {
+        uploaded?: string[];
+        skipped?: string[];
+        errors?: Array<{ name: string; error: string }>;
+        error?: string;
+      } | null;
+      if (!response.ok && !(body?.uploaded?.length)) {
+        throw new Error(body?.error ?? `upload failed: ${response.status}`);
+      }
+      return body ?? {};
+    };
+
+    const uploaded: string[] = [];
+    const failed: string[] = [];
+    const taken = new Set<string>();
+    let pending: Array<{ file: File; name: string }> = files.map((file) => ({ file, name: file.name }));
+
+    for (let attempt = 0; attempt < 5 && pending.length > 0; attempt += 1) {
+      const body = await send(pending);
+      uploaded.push(...(body.uploaded ?? []));
+      failed.push(...(body.errors ?? []).map((entry) => entry.name));
+      const conflicts = new Set(body.skipped ?? []);
+      pending = pending.flatMap((entry) => {
+        if (!conflicts.has(entry.name)) return [];
+        taken.add(entry.name);
+        return [{ file: entry.file, name: nextAvailableAttachmentName(entry.name, taken) }];
+      });
+    }
+
+    return {
+      paths: uploaded.map((name) => joinFilePath(dir, name)),
+      names: uploaded,
+      failed: [...failed, ...pending.map((entry) => entry.name)],
+    };
+  }, []);
+
+  /**
+   * 所有入口（按钮 / 拖拽 / 粘贴）统一走这里。
+   *
+   * 图片先走既有内联管道（10MB/10 张 + 压缩，**保持不变**）；剩下的 —— 包括超出图片
+   * 上限的那部分 —— 按 `planAttachments` 分成上传 / 就地引用 / 跳过。
+   */
+  const attachFiles = useCallback(async (files: File[]) => {
+    if (compact || files.length === 0) return;
+    const imageSlots = Math.max(
+      0,
+      MAX_ATTACHED_IMAGES - attachedImagesRef.current.length - pendingImageCountRef.current,
+    );
+    const inlineImages = files
+      .filter((file) => file.type.startsWith("image/") && file.size <= MAX_ATTACHED_IMAGE_BYTES)
+      .slice(0, imageSlots);
+    const rest = files.filter((file) => !inlineImages.includes(file));
+
+    if (inlineImages.length > 0) await processImageFiles(inlineImages);
+    if (rest.length === 0) return;
+
+    const entries = rest.map((file) => ({ file, facts: { name: file.name, size: file.size, type: file.type } }));
+    const plan = planAttachments(entries.map((entry) => entry.facts), {
+      pathOf: (facts) => {
+        const match = entries.find((entry) => entry.facts === facts);
+        return match ? desktopFilePathFor(match.file) : null;
+      },
+    });
+
+    const added = plan.referenceInPlace.map((entry) => entry.file.name);
+    const paths = plan.referenceInPlace.map((entry) => entry.path);
+    const skipped = plan.skipped.map((entry) => ({ name: entry.file.name, reason: entry.reason }));
+    const failed: string[] = [];
+
+    if (plan.upload.length > 0) {
+      const uploadFiles = plan.upload.flatMap((facts) => {
+        const match = entries.find((entry) => entry.facts === facts);
+        return match ? [match.file] : [];
+      });
+      try {
+        const result = await uploadAttachmentFiles(uploadFiles);
+        paths.push(...result.paths);
+        added.push(...result.names);
+        failed.push(...result.failed);
+      } catch {
+        failed.push(...plan.upload.map((facts) => facts.name));
+      }
+    }
+
+    appendAttachmentReferences(paths);
+    if (added.length > 0 || skipped.length > 0 || failed.length > 0) {
+      setAttachmentNotice({ added, skipped, failed });
+    }
+  }, [appendAttachmentReferences, compact, processImageFiles, uploadAttachmentFiles]);
 
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
@@ -1196,13 +1511,26 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   // Recomputed from the text before the caret on every change/caret move.
   // Disabled entirely when there is no cwd (new session without a directory).
   const updateAtQuery = useCallback((text: string, cursor: number | null) => {
-    if (!cwd) {
-      setAtQuery(null);
-      return;
-    }
     const pos = cursor ?? text.length;
-    setAtQuery(extractAtQuery(text.slice(0, pos)));
+    const before = text.slice(0, pos);
+    const fileToken = cwd ? extractAtQuery(before) : null;
+    setAtQuery(fileToken);
+    // fork:gap06-references — 同一次光标解析也产出引用 token。两个抽取器都锚定光标，
+    // 所以 `@` 命中时引用 token 必然为空（无需仲裁）。没有 cwd 时 `@` 菜单整体不可用，
+    // 但会话/待办引用不需要 cwd，所以它不受这个门控。
+    setReferenceQuery(fileToken ? null : extractReferenceQuery(before));
   }, [cwd]);
+
+  // fork:gap06-references — 程序化改文本的路径（发送后清空、插入引用、草稿恢复…）
+  // 都会 `setValue(...)` 但不走 updateAtQuery，上游那里逐个 `setAtQuery(null)` 是 11 处。
+  // 与其一个个跟着改，不如让 token 自己校验：记录的区间里不再是对应的 token 文本，就关掉
+  // 菜单。以后的任何新重置路径也自动被覆盖。
+  useEffect(() => {
+    if (!referenceQuery) return;
+    const token = `${COMPOSER_REFERENCE_TRIGGERS[referenceQuery.kind]}${referenceQuery.query}`;
+    const end = referenceQuery.start + token.length;
+    if (value.slice(referenceQuery.start, end) !== token) setReferenceQuery(null);
+  }, [value, referenceQuery]);
 
   const atQueryText = atQuery?.query ?? null;
   const atLocalMatches: FileIndexEntry[] = React.useMemo(() => (
@@ -1313,6 +1641,151 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
     });
   }, [atQuery, value]);
+
+  // ---------------------------------------------------------------------------
+  // fork:gap06-references — `&` 会话 / `#` MCP / `~` 待办
+  // ---------------------------------------------------------------------------
+
+  /** 当前该展示哪些候选。待办直接来自 prop（无需拉取）。 */
+  const referenceItems: ComposerReferenceItem[] = React.useMemo(() => {
+    if (!referenceQuery) return [];
+    if (referenceQuery.kind === "session") {
+      return filterSessionReferenceItems(referenceSessions ?? [], referenceQuery.query);
+    }
+    if (referenceQuery.kind === "mcp") {
+      return filterMcpReferenceItems(referenceMcp ?? [], referenceQuery.query);
+    }
+    return filterTodoReferenceItems(buildTodoReferenceItems(todoSummary?.todos ?? []), referenceQuery.query);
+  }, [referenceQuery, referenceSessions, referenceMcp, todoSummary]);
+
+  // 拉取数据源：只在对应触发符真的被敲出来时才请求，命中缓存则不重复请求。
+  useEffect(() => {
+    if (!referenceQuery) return;
+    if (referenceQuery.kind === "session") {
+      const fetchedAt = referenceMetaRef.current.sessions;
+      if (fetchedAt !== undefined && Date.now() - fetchedAt < 10_000) return;
+      if (referenceFetchRef.current.sessions) return;
+      referenceFetchRef.current.sessions = true;
+      setReferenceLoading(true);
+      fetch("/api/sessions")
+        .then((res) => (res.ok ? (res.json() as Promise<{ sessions?: ReferenceSessionSource[] }>) : null))
+        .then((data) => {
+          setReferenceSessions(buildSessionReferenceItems(data?.sessions ?? [], { currentSessionId }));
+          referenceMetaRef.current.sessions = Date.now();
+        })
+        .catch(() => {
+          // 下次敲触发符重试；不要在菜单里空转
+          referenceMetaRef.current.sessions = undefined;
+        })
+        .finally(() => {
+          referenceFetchRef.current.sessions = false;
+          setReferenceLoading(false);
+        });
+      return;
+    }
+    if (referenceQuery.kind === "mcp") {
+      if (!cwd) return;
+      if (referenceMetaRef.current.mcp === cwd) return;
+      if (referenceFetchRef.current.mcp === cwd) return;
+      referenceFetchRef.current.mcp = cwd;
+      setReferenceLoading(true);
+      fetch(`/api/mcp?cwd=${encodeURIComponent(cwd)}`)
+        .then((res) => (res.ok ? (res.json() as Promise<{ servers?: ReferenceMcpSource[] }>) : null))
+        .then((data) => {
+          setReferenceMcp(buildMcpReferenceItems(data?.servers ?? []));
+          referenceMetaRef.current.mcp = cwd;
+        })
+        .catch(() => {
+          referenceMetaRef.current.mcp = undefined;
+        })
+        .finally(() => {
+          referenceFetchRef.current.mcp = null;
+          setReferenceLoading(false);
+        });
+    }
+  }, [referenceQuery, cwd, currentSessionId]);
+
+  // 敲出/改写触发符时开菜单（与 `@` 菜单同款规则：Escape 关掉，下一次按键重开）。
+  const referenceTokenKey = referenceQuery === null
+    ? null
+    : `${referenceQuery.kind}:${referenceQuery.start}:${referenceQuery.query}`;
+  useEffect(() => {
+    if (referenceTokenKey === null) {
+      setReferenceMenuOpen(false);
+      setReferenceActiveIndex(0);
+      return;
+    }
+    setReferenceMenuOpen(true);
+    setReferenceActiveIndex(0);
+  }, [referenceTokenKey]);
+
+  useEffect(() => {
+    if (referenceActiveIndex >= referenceItems.length) {
+      setReferenceActiveIndex(Math.max(0, referenceItems.length - 1));
+    }
+  }, [referenceItems.length, referenceActiveIndex]);
+
+  useEffect(() => {
+    referenceItemRefs.current.length = referenceItems.length;
+  }, [referenceItems.length]);
+
+  useEffect(() => {
+    if (!referenceMenuOpen) return;
+    referenceItemRefs.current[referenceActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [referenceActiveIndex, referenceMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!referenceMenuOpen || referenceQuery === null) {
+      setReferenceMenuMaxHeight(null);
+      return;
+    }
+    const menu = referenceMenuRef.current;
+    if (!menu) return;
+    return subscribeUpwardMenuMaxHeight(menu, (nextHeight) => {
+      setReferenceMenuMaxHeight((current) => current === nextHeight ? current : nextHeight);
+    });
+  }, [referenceMenuOpen, referenceQuery]);
+
+  /**
+   * 确认一条候选：
+   * - 会话 → 吃掉 token 并加一个 chip（复用已有 SessionReference 管道）；
+   * - MCP / 待办 → 把 token 换成行内文本（与 `@path` 同构）。
+   */
+  const applyReferenceCompletion = useCallback((item: ComposerReferenceItem) => {
+    if (!referenceQuery) return;
+    const ta = textareaRef.current;
+    const cursor = ta?.selectionStart ?? value.length;
+    let newValue: string;
+    let newPos: number;
+    if (item.kind === "session") {
+      newValue = value.slice(0, referenceQuery.start) + value.slice(cursor);
+      newPos = referenceQuery.start;
+      const reference = normalizeSessionReference(sessionReferenceFromItem(item));
+      if (reference) {
+        setSessionReferences((current) => {
+          if (current.some((existing) => existing.id === reference.id)) return current;
+          const next = [...current, reference];
+          sessionReferencesRef.current = next;
+          return next;
+        });
+      }
+    } else {
+      const replaced = replaceReferenceToken(value, referenceQuery.start, cursor, buildReferenceInsertText(item));
+      newValue = replaced.value;
+      newPos = replaced.cursor;
+    }
+    valueRef.current = newValue;
+    setValue(newValue);
+    setReferenceQuery(null);
+    requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(newPos, newPos);
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+    });
+  }, [referenceQuery, value]);
 
   useEffect(() => {
     if (atActiveIndex >= atMatches.length) {
@@ -1526,6 +1999,31 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
 
+      // fork:gap06-references — 引用菜单（& / # / ~）与 `@` 菜单同款按键，
+      // 同样在 IME 合成期间跳过。
+      if (referenceMenuOpen && referenceQuery !== null && !isComposing) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setReferenceActiveIndex((i) => cycleListIndex(i, referenceItems.length, 1));
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setReferenceActiveIndex((i) => cycleListIndex(i, referenceItems.length, -1));
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setReferenceMenuOpen(false);
+          return;
+        }
+        if ((e.key === "Tab" || sendShortcut) && referenceItems[referenceActiveIndex]) {
+          e.preventDefault();
+          applyReferenceCompletion(referenceItems[referenceActiveIndex]);
+          return;
+        }
+      }
+
       // @ file menu — skip while composing so IME candidate navigation
       // (arrows/Enter/Tab) is never intercepted.
       if (atMenuOpen && atQuery !== null && !isComposing) {
@@ -1576,7 +2074,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         }
       }
     },
-    [isMobile, isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+    [isMobile, isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, referenceMenuOpen, referenceQuery, referenceItems, referenceActiveIndex, applyReferenceCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
   );
 
   const handleInput = useCallback(() => {
@@ -1588,11 +2086,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const items = Array.from(e.clipboardData?.items ?? []);
-    const imageItems = items.filter((item) => item.type.startsWith("image/"));
-    if (!compact && imageItems.length) {
+    // fork:gap07-attachments — 粘贴的文件不再限定图片：图片内联，其余落盘后插路径引用。
+    const fileItems = items.filter((item) => item.kind === "file");
+    if (!compact && fileItems.length) {
       e.preventDefault();
-      const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
-      processImageFiles(files);
+      const files = fileItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
+      void attachFiles(files);
       return;
     }
 
@@ -1641,7 +2140,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       ta.focus();
       ta.setSelectionRange(start + markdown.length, start + markdown.length);
     });
-  }, [compact, processImageFiles, updateAtQuery]);
+  }, [attachFiles, compact, updateAtQuery]);
 
   useEffect(() => {
     if (slashQuery === null) {
@@ -1903,12 +2402,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       {!compact && <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
         multiple
         style={{ display: "none" }}
         onChange={(e) => {
           const files = Array.from(e.target.files ?? []);
-          processImageFiles(files);
+          // fork:gap07-attachments — 任意文件（原来只收图片，其余静默丢弃）
+          void attachFiles(files);
           e.target.value = "";
         }}
       />}
@@ -1987,10 +2486,43 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               )}
             </div>
             {queuedMessages?.steering.map((text, i) => (
-              <QueuedMessageRow key={`steer-${i}`} kind="steer" text={text} />
+              <QueuedMessageRow
+                key={`steer-${i}`}
+                kind="steer"
+                text={text}
+                index={i}
+                promoteTitle={t("chat.queueSendNow")}
+                removeTitle={t("chat.queueRemove")}
+                dragging={draggingQueue?.kind === "steer" && draggingQueue.index === i}
+                onRemove={() => onQueueRemove?.("steer", i, text)}
+                onDragStart={onQueueMove ? () => beginQueueDrag("steer", i) : undefined}
+                onDropOn={onQueueMove ? () => {
+                  const drag = draggingQueueRef.current;
+                  if (drag?.kind !== "steer" || drag.index === i) { endQueueDrag(); return; }
+                  onQueueMove("steer", drag.index, queueDropTarget(drag.index, i), queuedMessages.steering[drag.index] ?? "");
+                  endQueueDrag();
+                } : undefined}
+              />
             ))}
             {queuedMessages?.followUp.map((text, i) => (
-              <QueuedMessageRow key={`followup-${i}`} kind="follow-up" text={text} />
+              <QueuedMessageRow
+                key={`followup-${i}`}
+                kind="follow-up"
+                text={text}
+                index={i}
+                promoteTitle={t("chat.queueSendNow")}
+                removeTitle={t("chat.queueRemove")}
+                dragging={draggingQueue?.kind === "followUp" && draggingQueue.index === i}
+                onRemove={() => onQueueRemove?.("followUp", i, text)}
+                onPromote={onQueuePromote ? () => onQueuePromote(i, text) : undefined}
+                onDragStart={onQueueMove ? () => beginQueueDrag("followUp", i) : undefined}
+                onDropOn={onQueueMove ? () => {
+                  const drag = draggingQueueRef.current;
+                  if (drag?.kind !== "followUp" || drag.index === i) { endQueueDrag(); return; }
+                  onQueueMove("followUp", drag.index, queueDropTarget(drag.index, i), queuedMessages.followUp[drag.index] ?? "");
+                  endQueueDrag();
+                } : undefined}
+              />
             ))}
           </div>
         )}
@@ -2345,6 +2877,19 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             </div>
           )}
+          {referenceMenuOpen && referenceQuery !== null && (
+            <ComposerReferenceMenu
+              kind={referenceQuery.kind}
+              items={referenceItems}
+              activeIndex={referenceActiveIndex}
+              loading={referenceLoading && referenceItems.length === 0}
+              maxHeight={referenceMenuMaxHeight}
+              menuRef={referenceMenuRef}
+              itemRefs={referenceItemRefs}
+              onHover={setReferenceActiveIndex}
+              onPick={applyReferenceCompletion}
+            />
+          )}
           {atMenuOpen && atQuery !== null && (() => {
             const indexLoading = fileIndexLoading && (!fileIndex || fileIndex.cwd !== cwd);
              const matchCountLabel = atMatches.length === 1 ? t("chat.match") : t("chat.matches", { count: atMatches.length });
@@ -2450,6 +2995,67 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               </div>
             );
           })()}
+          {/* fork:gap07-attachments — 附件落盘结果：每次拖入都有可见交代（新增了什么、跳过了什么） */}
+          {attachmentNotice && (
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 8,
+                // 宽度由外层 composer 容器（`--composer-max-width`）统一约束，
+                // 这里不再声明自己的 maxWidth —— 上层的 ChatAppearance 测试
+                // 就要求这个变量在文件里只出现一次。
+                margin: "0 0 6px",
+                padding: "5px 8px 5px 10px",
+                border: "1px solid var(--border-faint)",
+                borderRadius: "var(--radius-md)",
+                background: "var(--bg-panel)",
+                color: "var(--text-muted)",
+                fontSize: TEXT.xs,
+                lineHeight: 1.5,
+              }}
+            >
+              <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
+                {attachmentNotice.added.length > 0 && (
+                  <span>{t("chat.attachmentAdded", { names: attachmentNotice.added.join("、") })}</span>
+                )}
+                {attachmentNotice.skipped.length > 0 && (
+                  <span style={{ color: "var(--warning)" }}>
+                    {t("chat.attachmentSkipped", {
+                      limit: Math.round(MAX_ATTACHED_FILE_BYTES / (1024 * 1024)),
+                      names: attachmentNotice.skipped.map((entry) => entry.name).join("、"),
+                    })}
+                  </span>
+                )}
+                {attachmentNotice.failed.length > 0 && (
+                  <span style={{ color: "var(--danger, #ef4444)" }}>
+                    {t("chat.attachmentFailed", { names: attachmentNotice.failed.join("、") })}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setAttachmentNotice(null)}
+                aria-label={t("chat.close")}
+                title={t("chat.close")}
+                style={{
+                  marginLeft: "auto",
+                  flexShrink: 0,
+                  padding: "0 4px",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--text-dim)",
+                  cursor: "pointer",
+                  fontSize: TEXT.md,
+                  lineHeight: 1,
+                }}
+              >
+                ×
+              </button>
+            </div>
+          )}
           <div
             className="chat-input-shell"
             style={{
@@ -2554,7 +3160,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
             <button
               onClick={() => fileInputRef.current?.click()}
-             title={t("chat.attachImage")}
+             title={t("chat.attachFile")}
               style={{
                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
                 width: "var(--spacing-token-button-composer, 28px)", height: "var(--spacing-token-button-composer, 28px)", padding: 0,
@@ -2775,6 +3381,44 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                   </div>
                 )}
               </div>
+            )}
+            {/* fork:proma-02-mode — 权限档位（Chat-only 会话没有意义，所以隐藏）。
+                点一下循环切换：全自动 → 需审批 → 计划。 */}
+            {onPermissionModeChange && permissionMode && toolPreset !== "none" && (
+              <button
+                type="button"
+                onClick={() => onPermissionModeChange(nextPermissionMode(permissionMode))}
+                title={`${t(PERMISSION_MODE_LABEL_KEYS[permissionMode])}：${t(PERMISSION_MODE_HINT_KEYS[permissionMode])}`}
+                aria-label={t(PERMISSION_MODE_LABEL_KEYS[permissionMode])}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 5,
+                  padding: isMobile ? "0 6px" : "6px 10px",
+                  width: isMobile ? "auto" : undefined,
+                  height: 28,
+                  background: "none",
+                  border: "none",
+                  borderRadius: "var(--radius-md)",
+                  // 非默认档位用强调色，因为「当前不全自动」是需要一眼看出来的状态
+                  color: permissionMode === "bypass" ? "var(--text-muted)" : "var(--accent)",
+                  cursor: "pointer",
+                  fontSize: TEXT.sm,
+                  transition: "background 0.12s, color 0.12s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {permissionMode === "bypass" && <path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z" />}
+                  {permissionMode === "ask" && (<><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z" /><path d="m9 12 2 2 4-4" /></>)}
+                  {permissionMode === "plan" && (<><path d="M8 4h9a2 2 0 0 1 2 2v14l-4-2-3 2-3-2-4 2V6a2 2 0 0 1 2-2z" /><path d="M9 9h6M9 13h4" /></>)}
+                </svg>
+                {(!isMobile || controlsMenuOpen) && (
+                  <span style={{ whiteSpace: "nowrap" }}>{t(PERMISSION_MODE_LABEL_KEYS[permissionMode])}</span>
+                )}
+              </button>
             )}
             {!isStreaming && onToolPresetChange && (
               <div ref={toolDropdownRef} style={{ position: "relative" }}>

@@ -1,0 +1,1253 @@
+--- a/lib/composer-references.ts
++++ b/lib/composer-references.ts
+@@ -0,0 +1,301 @@
++/**
++ * fork:gap06-references — 行内引用触发符：`&` 会话 / `#` MCP / `~` 待办。
++ *
++ * 本仓此前只有 `@` 文件引用（`lib/file-fuzzy.ts` 的 `extractAtQuery` +
++ * `components/ChatInput.tsx` 的 `@` 菜单）。B（Proma）有 5 类行内触发符，
++ * 这里补上其中三类，把「右键复制会话引用 → 粘贴」那条间接路径变成行内可发现的操作。
++ *
++ * 三类触发符的落地方式**刻意不同**，因为它们下游能力不同：
++ *
++ * | 触发符 | 数据源 | 确认后 | 为什么 |
++ * | --- | --- | --- | --- |
++ * | `&` | `/api/sessions` | 变成 composer chip（`SessionReference`） | 会话引用管道已全线打通（序列化 `lib/composer-context.ts`、chip 回跳、草稿持久化），没有理由再铺一条 |
++ * | `#` | `/api/mcp` | 插入行内文本 `#server ` | MCP 只有「服务名」这一级稳定标识，没有 chip 类型；行内文本与 `@path` 同构，且 agent 直接可读 |
++ * | `~` | composer 已有的 `todoSummary` prop | 插入行内文本 `~#3 第三步 ` | 本仓 todo 是会话级的，`#id` 正是 todo 工具的选择器（`lib/todo-state.ts` 的 `toggle` 接受 id），文本同时给人看 |
++ *
++ * 本模块只放**纯函数**：抽取 token、筛选候选、生成插入文本。没有 React、没有 fetch，
++ * 所以三个触发符的行为都能用 node:test 直接覆盖，不需要起组件树。
++ */
++
++import type { SessionReference } from "./composer-context";
++
++export type ComposerReferenceKind = "session" | "mcp" | "todo";
++
++export const COMPOSER_REFERENCE_TRIGGERS: Record<ComposerReferenceKind, string> = {
++  session: "&",
++  mcp: "#",
++  todo: "~",
++};
++
++export interface ComposerReferenceQuery {
++  kind: ComposerReferenceKind;
++  /** 触发符在 `textBeforeCursor` 中的下标（替换 token 时要从这里切）。 */
++  start: number;
++  query: string;
++}
++
++const TRIGGER_KINDS: Record<string, ComposerReferenceKind | undefined> = {
++  "&": "session",
++  "#": "mcp",
++  "~": "todo",
++};
++
++export const REFERENCE_RESULT_LIMIT = 20;
++
++/**
++ * 从光标前的文本里抽出当前生效的引用 token。
++ *
++ * 规则与 `extractAtQuery` 一致：触发符必须在行首或空白之后（避免把 `a#b`、`1~2`
++ * 当成引用），查询串不含空白。
++ *
++ * 一个例外：`~/xxx` 是家目录路径，不是待办引用 —— 本仓的文件树/工具里 `~` 大量
++ * 出现在路径位置，不排除它会在每一次输入 home 路径时弹出待办菜单。
++ */
++export function extractReferenceQuery(textBeforeCursor: string): ComposerReferenceQuery | null {
++  const match = /(?:^|\s)([&#~])([^\s]*)$/.exec(textBeforeCursor);
++  if (!match) return null;
++  const trigger = match[1]!;
++  const kind = TRIGGER_KINDS[trigger];
++  if (!kind) return null;
++  const query = match[2]!;
++  if (kind === "todo" && query.startsWith("/")) return null;
++  return { kind, start: textBeforeCursor.length - query.length - 1, query };
++}
++
++// --- 打分 -------------------------------------------------------------------
++
++function isSubsequence(needle: string, haystack: string): boolean {
++  if (!needle) return true;
++  let i = 0;
++  for (let j = 0; j < haystack.length && i < needle.length; j += 1) {
++    if (haystack[j] === needle[i]) i += 1;
++  }
++  return i === needle.length;
++}
++
++/**
++ * 与 `lib/file-fuzzy.ts` 的 `scoreEntry` 同一把梯子（精确 100 / 前缀 80 /
++ * 子串 50 / 子序列 10），这样三个新菜单和 `@` 文件菜单的排序手感一致。
++ * 多字段时取最高分：会话能按标题、cwd、id 命中任一。
++ */
++function scoreFields(fields: Array<string | undefined>, lowerQuery: string): number {
++  let best = 0;
++  for (const field of fields) {
++    if (!field) continue;
++    const lower = field.toLowerCase();
++    let score = 0;
++    if (lower === lowerQuery) score = 100;
++    else if (lower.startsWith(lowerQuery)) score = 80;
++    else if (lower.includes(lowerQuery)) score = 50;
++    else if (isSubsequence(lowerQuery, lower)) score = 10;
++    if (score > best) best = score;
++  }
++  return best;
++}
++
++function rank<T>(items: T[], lowerQuery: string, fields: (item: T) => Array<string | undefined>, limit: number): T[] {
++  if (!lowerQuery) return items.slice(0, limit);
++  const scored: Array<{ item: T; score: number; index: number }> = [];
++  items.forEach((item, index) => {
++    const score = scoreFields(fields(item), lowerQuery);
++    if (score > 0) scored.push({ item, score, index });
++  });
++  scored.sort((a, b) => b.score - a.score || a.index - b.index);
++  return scored.slice(0, limit).map((entry) => entry.item);
++}
++
++// --- 会话 -------------------------------------------------------------------
++
++export interface ReferenceSessionSource {
++  id: string;
++  name?: string;
++  firstMessage?: string;
++  cwd?: string;
++}
++
++export interface ReferenceSessionItem {
++  kind: "session";
++  id: string;
++  title: string;
++  cwd?: string;
++}
++
++/** 标题优先用会话名，其次首条消息；两者都没有时退到短 id。 */
++export function sessionItemTitle(session: ReferenceSessionSource): string {
++  const name = session.name?.replace(/\s+/g, " ").trim();
++  if (name) return name;
++  const first = session.firstMessage?.replace(/\s+/g, " ").trim();
++  if (first) return first.length > 80 ? `${first.slice(0, 79)}…` : first;
++  return session.id.slice(0, 12);
++}
++
++/**
++ * 会话候选列表。`currentSessionId` 从候选里剔除：引用当前会话没有意义，
++ * 而且序列化块会让模型去「检索自己」。
++ */
++export function buildSessionReferenceItems(
++  sessions: readonly ReferenceSessionSource[],
++  options: { currentSessionId?: string | null } = {},
++): ReferenceSessionItem[] {
++  const seen = new Set<string>();
++  const items: ReferenceSessionItem[] = [];
++  for (const session of sessions) {
++    if (!session?.id || seen.has(session.id)) continue;
++    if (options.currentSessionId && session.id === options.currentSessionId) continue;
++    seen.add(session.id);
++    items.push({
++      kind: "session",
++      id: session.id,
++      title: sessionItemTitle(session),
++      ...(session.cwd ? { cwd: session.cwd } : {}),
++    });
++  }
++  return items;
++}
++
++export function filterSessionReferenceItems(
++  items: readonly ReferenceSessionItem[],
++  query: string,
++  limit: number = REFERENCE_RESULT_LIMIT,
++): ReferenceSessionItem[] {
++  return rank([...items], query.toLowerCase(), (item) => [item.title, item.cwd, item.id], limit);
++}
++
++/** 确认一条会话引用后进入已有 chip 管道（`addSessionReference`）。 */
++export function sessionReferenceFromItem(item: ReferenceSessionItem): SessionReference {
++  return { id: item.id, title: item.title, ...(item.cwd ? { cwd: item.cwd } : {}) };
++}
++
++// --- MCP --------------------------------------------------------------------
++
++export interface ReferenceMcpSource {
++  name: string;
++  scope?: string;
++  disabled?: boolean;
++  kind?: string;
++}
++
++export interface ReferenceMcpItem {
++  kind: "mcp";
++  name: string;
++  scope?: string;
++  transport?: string;
++  disabled: boolean;
++}
++
++/**
++ * 禁用的服务**保留**在候选里并打标：用户常常先在设置里配好、临时禁用，
++ * 从菜单里彻底消失会让人以为配置丢了。启用项排在前面。
++ */
++export function buildMcpReferenceItems(servers: readonly ReferenceMcpSource[]): ReferenceMcpItem[] {
++  const seen = new Set<string>();
++  const items: ReferenceMcpItem[] = [];
++  for (const server of servers) {
++    if (!server?.name || seen.has(server.name)) continue;
++    seen.add(server.name);
++    items.push({
++      kind: "mcp",
++      name: server.name,
++      ...(server.scope ? { scope: server.scope } : {}),
++      ...(server.kind ? { transport: server.kind } : {}),
++      disabled: server.disabled === true,
++    });
++  }
++  items.sort((a, b) => Number(a.disabled) - Number(b.disabled) || a.name.localeCompare(b.name));
++  return items;
++}
++
++export function filterMcpReferenceItems(
++  items: readonly ReferenceMcpItem[],
++  query: string,
++  limit: number = REFERENCE_RESULT_LIMIT,
++): ReferenceMcpItem[] {
++  return rank([...items], query.toLowerCase(), (item) => [item.name, item.scope], limit);
++}
++
++// --- 待办 -------------------------------------------------------------------
++
++export interface ReferenceTodoSource {
++  id: number;
++  text: string;
++  done: boolean;
++}
++
++export interface ReferenceTodoItem {
++  kind: "todo";
++  id: number;
++  text: string;
++  done: boolean;
++}
++
++/** 菜单要渲染的候选合集（三类行的渲染差异都在 `components/ComposerReferenceMenu.tsx`）。 */
++export type ComposerReferenceItem = ReferenceSessionItem | ReferenceMcpItem | ReferenceTodoItem;
++
++export function buildTodoReferenceItems(todos: readonly ReferenceTodoSource[]): ReferenceTodoItem[] {
++  return todos.map((todo) => ({ kind: "todo" as const, id: todo.id, text: todo.text, done: todo.done }));
++}
++
++/**
++ * 待办查询支持两种写法：`~#3`（id，正是 token 自身的形式）与 `~第三步`（文字）。
++ * 未完成项排在前面 —— 引用一条已经勾掉的待办，绝大多数时候是误操作。
++ */
++export function filterTodoReferenceItems(
++  items: readonly ReferenceTodoItem[],
++  query: string,
++  limit: number = REFERENCE_RESULT_LIMIT,
++): ReferenceTodoItem[] {
++  const trimmed = query.replace(/^#/, "");
++  const sorted = [...items].sort((a, b) => Number(a.done) - Number(b.done) || a.id - b.id);
++  if (!trimmed) return sorted.slice(0, limit);
++
++  const numeric = /^\d+$/.test(trimmed);
++  const matches = sorted.filter((item) => (
++    numeric
++      ? String(item.id).startsWith(trimmed)
++      : scoreFields([item.text], trimmed.toLowerCase()) > 0
++  ));
++  return matches.slice(0, limit);
++}
++
++// --- 插入文本 ---------------------------------------------------------------
++
++export interface ReferenceInsertion {
++  /** 替换 token 的文本（含闭合空格）。 */
++  text: string;
++  /** 插入后光标相对 `text` 起点的偏移。 */
++  cursorOffset: number;
++}
++
++export type ReferenceInsertableItem = ReferenceMcpItem | ReferenceTodoItem;
++
++/**
++ * 确认 MCP / 待办候选时写回 composer 的文本。
++ *
++ * 会话返回 `null`：它不是文本引用，而是 chip（见 `sessionReferenceFromItem`）。
++ * 与 `buildAtInsertText` 一样以空格闭合 token —— 菜单随之关闭。
++ */
++export function buildReferenceInsertText(item: ReferenceInsertableItem): ReferenceInsertion {
++  if (item.kind === "mcp") {
++    const text = `#${item.name} `;
++    return { text, cursorOffset: text.length };
++  }
++  // 待办的文本里可能带换行（模型写清单时常有多行条目），压成一行再插入。
++  const label = item.text.replace(/\s+/g, " ").trim();
++  const text = label ? `~#${item.id} ${label} ` : `~#${item.id} `;
++  return { text, cursorOffset: text.length };
++}
++
++/** 用插入文本替换 text 中 `[tokenStart, cursor)` 之间的内容。 */
++export function replaceReferenceToken(
++  text: string,
++  tokenStart: number,
++  cursor: number,
++  insertion: ReferenceInsertion,
++): { value: string; cursor: number } {
++  const before = text.slice(0, tokenStart);
++  const after = text.slice(cursor);
++  return {
++    value: before + insertion.text + after,
++    cursor: before.length + insertion.cursorOffset,
++  };
++}
+--- a/lib/composer-references.test.mjs
++++ b/lib/composer-references.test.mjs
+@@ -0,0 +1,233 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++
++async function loadSubject() {
++  return import("./composer-references.ts");
++}
++
++// --- token 抽取 --------------------------------------------------------------
++
++test("每个触发符都在行首或空白后开启 token", async () => {
++  const { extractReferenceQuery } = await loadSubject();
++
++  assert.deepEqual(extractReferenceQuery("&"), { kind: "session", start: 0, query: "" });
++  assert.deepEqual(extractReferenceQuery("看下 &登录"), { kind: "session", start: 3, query: "登录" });
++  assert.deepEqual(extractReferenceQuery("#"), { kind: "mcp", start: 0, query: "" });
++  assert.deepEqual(extractReferenceQuery("用 #git"), { kind: "mcp", start: 2, query: "git" });
++  assert.deepEqual(extractReferenceQuery("~"), { kind: "todo", start: 0, query: "" });
++  assert.deepEqual(extractReferenceQuery("第 ~#3"), { kind: "todo", start: 2, query: "#3" });
++});
++
++test("触发符在词中不生效（避免把 a#b、1~2 当引用）", async () => {
++  const { extractReferenceQuery } = await loadSubject();
++
++  assert.equal(extractReferenceQuery("a#b"), null);
++  assert.equal(extractReferenceQuery("1~2"), null);
++  assert.equal(extractReferenceQuery("x&y"), null);
++  assert.equal(extractReferenceQuery("issue-42#3"), null);
++});
++
++test("token 在空白处关闭", async () => {
++  const { extractReferenceQuery } = await loadSubject();
++
++  assert.equal(extractReferenceQuery("&登录 之后"), null);
++  assert.equal(extractReferenceQuery("#git "), null);
++});
++
++test("`~/` 是家目录路径而不是待办引用", async () => {
++  const { extractReferenceQuery } = await loadSubject();
++
++  assert.equal(extractReferenceQuery("~/.pi/agent"), null);
++  assert.equal(extractReferenceQuery("cat ~/notes.md"), null);
++  // 待办本身仍能命中
++  assert.deepEqual(extractReferenceQuery("~#2"), { kind: "todo", start: 0, query: "#2" });
++});
++
++test("光标在文本中间时只看光标之前（token 未闭合则不弹菜单）", async () => {
++  const { extractReferenceQuery } = await loadSubject();
++
++  // "看 &登录 里的问题" 光标停在 "登录" 之后、空格之前 → 仍是活跃 token
++  assert.deepEqual(extractReferenceQuery("看 &登录"), { kind: "session", start: 2, query: "登录" });
++  // 光标移到空格之后 → token 关闭
++  assert.equal(extractReferenceQuery("看 &登录 "), null);
++});
++
++test("同类触发符取离光标最近的那个", async () => {
++  const { extractReferenceQuery } = await loadSubject();
++
++  const token = extractReferenceQuery("&第一个 #mid &第二个");
++  assert.deepEqual(token, { kind: "session", start: 10, query: "第二个" });
++});
++
++test("与文件 @token 互斥：光标所在的那个 token 才生效", async () => {
++  const { extractReferenceQuery } = await loadSubject();
++
++  // 两个抽取器都锚定光标：`&` 在文本中间而 `#` 在光标处 → 只会命中 `#`。
++  assert.equal(extractReferenceQuery("&会话 @src/Ch"), null);
++  assert.deepEqual(extractReferenceQuery("&会话 #gi"), { kind: "mcp", start: 4, query: "gi" });
++  assert.deepEqual(extractReferenceQuery("@src/x &sess"), { kind: "session", start: 7, query: "sess" });
++  assert.deepEqual(extractReferenceQuery("@src/x ~#2"), { kind: "todo", start: 7, query: "#2" });
++});
++
++// --- 会话 -------------------------------------------------------------------
++
++const SESSIONS = [
++  { id: "aaaaaaaa-1111", name: "修复登录超时", cwd: "/repo/web" },
++  { id: "bbbbbbbb-2222", firstMessage: "帮我写一个 Redis 连接池文档", cwd: "/repo/api" },
++  { id: "cccccccc-3333", name: "登录页样式", cwd: "/repo/design" },
++  { id: "dddddddd-4444" },
++];
++
++test("会话候选：标题优先会话名，其次首条消息，最后短 id", async () => {
++  const { buildSessionReferenceItems } = await loadSubject();
++
++  const items = buildSessionReferenceItems(SESSIONS);
++  assert.deepEqual(items.map((item) => item.title), ["修复登录超时", "帮我写一个 Redis 连接池文档", "登录页样式", "dddddddd-444"]);
++});
++
++test("会话候选剔除当前会话与重复 id", async () => {
++  const { buildSessionReferenceItems } = await loadSubject();
++
++  const items = buildSessionReferenceItems([...SESSIONS, SESSIONS[0]], { currentSessionId: "bbbbbbbb-2222" });
++  assert.equal(items.length, 3);
++  assert.ok(!items.some((item) => item.id === "bbbbbbbb-2222"));
++  assert.equal(new Set(items.map((item) => item.id)).size, 3);
++});
++
++test("会话筛选：命中标题/cwd/id，前缀优先于子串", async () => {
++  const { buildSessionReferenceItems, filterSessionReferenceItems } = await loadSubject();
++  const items = buildSessionReferenceItems(SESSIONS);
++
++  const byTitle = filterSessionReferenceItems(items, "登录");
++  assert.deepEqual(byTitle.map((item) => item.title), ["登录页样式", "修复登录超时"]);
++
++  const byCwd = filterSessionReferenceItems(items, "repo/api");
++  assert.deepEqual(byCwd.map((item) => item.id), ["bbbbbbbb-2222"]);
++
++  const byId = filterSessionReferenceItems(items, "cccc");
++  assert.deepEqual(byId.map((item) => item.id), ["cccccccc-3333"]);
++
++  assert.deepEqual(filterSessionReferenceItems(items, "不存在的词"), []);
++});
++
++test("会话候选转成 SessionReference（进已有 chip 管道）", async () => {
++  const { buildSessionReferenceItems, sessionReferenceFromItem } = await loadSubject();
++  const [item] = buildSessionReferenceItems(SESSIONS);
++
++  assert.deepEqual(sessionReferenceFromItem(item), {
++    id: "aaaaaaaa-1111",
++    title: "修复登录超时",
++    cwd: "/repo/web",
++  });
++  // 没有 cwd 的会话不带这个字段（normalizeSessionReference 会剥掉空值）
++  const [, , , plain] = buildSessionReferenceItems(SESSIONS);
++  assert.deepEqual(sessionReferenceFromItem(plain), { id: "dddddddd-4444", title: "dddddddd-444" });
++});
++
++// --- MCP --------------------------------------------------------------------
++
++const MCP = [
++  { name: "zeta", scope: "global", disabled: true, kind: "command" },
++  { name: "github", scope: "project", kind: "command" },
++  { name: "linear", scope: "global", kind: "url" },
++  { name: "github" },
++];
++
++test("MCP 候选：去重、启用在先、禁用保留并打标", async () => {
++  const { buildMcpReferenceItems } = await loadSubject();
++
++  const items = buildMcpReferenceItems(MCP);
++  assert.deepEqual(items.map((item) => item.name), ["github", "linear", "zeta"]);
++  assert.equal(items.find((item) => item.name === "zeta")?.disabled, true);
++  assert.equal(items.find((item) => item.name === "linear")?.transport, "url");
++  assert.equal(items.length, 3);
++});
++
++test("MCP 筛选按名字与作用域", async () => {
++  const { buildMcpReferenceItems, filterMcpReferenceItems } = await loadSubject();
++  const items = buildMcpReferenceItems(MCP);
++
++  assert.deepEqual(filterMcpReferenceItems(items, "git").map((item) => item.name), ["github"]);
++  assert.deepEqual(filterMcpReferenceItems(items, "lin").map((item) => item.name), ["linear"]);
++  assert.deepEqual(filterMcpReferenceItems(items, "zzz"), []);
++  // 空查询保持「启用在先」的顺序
++  assert.deepEqual(filterMcpReferenceItems(items, "").map((item) => item.name), ["github", "linear", "zeta"]);
++});
++
++// --- 待办 -------------------------------------------------------------------
++
++const TODOS = [
++  { id: 1, text: "第一步：读代码", done: true },
++  { id: 2, text: "第二步：改渲染", done: false },
++  { id: 3, text: "第三步：补测试", done: false },
++];
++
++test("待办候选：未完成在前", async () => {
++  const { buildTodoReferenceItems, filterTodoReferenceItems } = await loadSubject();
++
++  const items = filterTodoReferenceItems(buildTodoReferenceItems(TODOS), "");
++  assert.deepEqual(items.map((item) => item.id), [2, 3, 1]);
++});
++
++test("待办筛选支持 `#id` 与文字两种写法", async () => {
++  const { buildTodoReferenceItems, filterTodoReferenceItems } = await loadSubject();
++  const items = buildTodoReferenceItems(TODOS);
++
++  assert.deepEqual(filterTodoReferenceItems(items, "#3").map((item) => item.id), [3]);
++  assert.deepEqual(filterTodoReferenceItems(items, "3").map((item) => item.id), [3]);
++  assert.deepEqual(filterTodoReferenceItems(items, "测试").map((item) => item.id), [3]);
++  assert.deepEqual(filterTodoReferenceItems(items, "第二步").map((item) => item.id), [2]);
++  assert.deepEqual(filterTodoReferenceItems(items, "不存在"), []);
++});
++
++test("待办筛选按 id 前缀匹配（~#1 不应命中 #11 之外的歧义）", async () => {
++  const { buildTodoReferenceItems, filterTodoReferenceItems } = await loadSubject();
++  const items = buildTodoReferenceItems([{ id: 1, text: "a", done: false }, { id: 11, text: "b", done: false }]);
++
++  assert.deepEqual(filterTodoReferenceItems(items, "#1").map((item) => item.id), [1, 11]);
++  assert.deepEqual(filterTodoReferenceItems(items, "#11").map((item) => item.id), [11]);
++});
++
++// --- 插入文本 ---------------------------------------------------------------
++
++test("MCP 插入文本是 `#server `（闭合 token）", async () => {
++  const { buildReferenceInsertText } = await loadSubject();
++
++  const insertion = buildReferenceInsertText({ kind: "mcp", name: "github", disabled: false });
++  assert.deepEqual(insertion, { text: "#github ", cursorOffset: 8 });
++});
++
++test("待办插入文本带 id 与文字，多行条目压成一行", async () => {
++  const { buildReferenceInsertText } = await loadSubject();
++
++  assert.deepEqual(
++    buildReferenceInsertText({ kind: "todo", id: 3, text: "第三步：补测试", done: false }),
++    { text: "~#3 第三步：补测试 ", cursorOffset: 12 },
++  );
++  assert.deepEqual(
++    buildReferenceInsertText({ kind: "todo", id: 7, text: "多行\n条目  带空格", done: false }),
++    { text: "~#7 多行 条目 带空格 ", cursorOffset: 14 },
++  );
++  assert.deepEqual(
++    buildReferenceInsertText({ kind: "todo", id: 9, text: "   ", done: false }),
++    { text: "~#9 ", cursorOffset: 4 },
++  );
++});
++
++test("替换 token 只吃掉触发符到光标之间的内容", async () => {
++  const { replaceReferenceToken, buildReferenceInsertText } = await loadSubject();
++
++  const value = "看下 #git 的配置";
++  // token 起点在 "#"（下标 3），光标在 "git" 之后（下标 7）
++  const result = replaceReferenceToken(value, 3, 7, buildReferenceInsertText({ kind: "mcp", name: "github", disabled: false }));
++  assert.equal(result.value, "看下 #github  的配置");
++  assert.equal(result.cursor, 11);
++});
++
++test("行尾未闭合的 token 也能被替换", async () => {
++  const { replaceReferenceToken, buildReferenceInsertText } = await loadSubject();
++
++  const value = "帮我看看 &登录";
++  const result = replaceReferenceToken(value, 5, value.length, buildReferenceInsertText({ kind: "todo", id: 2, text: "第二步", done: false }));
++  assert.equal(result.value, "帮我看看 ~#2 第二步 ");
++});
+--- a/components/ComposerReferenceMenu.tsx
++++ b/components/ComposerReferenceMenu.tsx
+@@ -0,0 +1,237 @@
++"use client";
++
++import type { CSSProperties, MutableRefObject, RefObject } from "react";
++import { useI18n } from "@/hooks/useI18n";
++import { TEXT } from "@/lib/typography";
++import type { ComposerReferenceItem, ComposerReferenceKind } from "@/lib/composer-references";
++
++/*
++ * fork:gap06-references — `&` 会话 / `#` MCP / `~` 待办 的建议浮层。
++ *
++ * 与 `@` 文件菜单（`ChatInput.tsx` 内联的那段 JSX）是**同一个视觉外壳**：
++ * 位置、圆角、阴影、头部提示行都对齐，因为它们会出现在同一个位置、被同一组按键驱动。
++ * 区别只在行内容 —— 文件菜单是「路径 + 文件图标」，这里是三类各不相同的行。
++ *
++ * 抽成独立组件（而不是继续往 ChatInput 里塞第四段内联 JSX）是本仓补丁约定的第 2 条：
++ * 新能力放进新文件，上游文件只留接线。ChatInput 因此只多了些状态和一次渲染。
++ */
++
++interface Props {
++  kind: ComposerReferenceKind;
++  items: ComposerReferenceItem[];
++  activeIndex: number;
++  loading: boolean;
++  /** 由 `subscribeUpwardMenuMaxHeight` 量出来的可用高度（null = 用默认上限）。 */
++  maxHeight: number | null;
++  menuRef: RefObject<HTMLDivElement | null>;
++  itemRefs: MutableRefObject<(HTMLButtonElement | null)[]>;
++  onHover: (index: number) => void;
++  onPick: (item: ComposerReferenceItem) => void;
++}
++
++const SHELL: CSSProperties = {
++  position: "absolute",
++  left: 0,
++  right: 0,
++  bottom: "calc(100% + 8px)",
++  zIndex: 120,
++  background: "var(--bg)",
++  border: "1px solid var(--border)",
++  borderRadius: "var(--radius-lg)",
++  boxShadow: "0 -6px 20px rgba(0,0,0,0.12)",
++  overflow: "hidden",
++  boxSizing: "border-box",
++  display: "flex",
++  flexDirection: "column",
++};
++
++const HEADER: CSSProperties = {
++  padding: "8px 10px",
++  borderBottom: "1px solid var(--border)",
++  display: "flex",
++  alignItems: "center",
++  justifyContent: "space-between",
++  gap: 8,
++  fontSize: TEXT.xs,
++  color: "var(--text-dim)",
++  flexShrink: 0,
++};
++
++const ROW: CSSProperties = {
++  width: "100%",
++  display: "flex",
++  alignItems: "center",
++  gap: 8,
++  padding: "6px 8px",
++  border: "none",
++  borderRadius: "var(--radius-sm)",
++  color: "var(--text)",
++  cursor: "pointer",
++  textAlign: "left",
++  fontSize: TEXT.sm,
++};
++
++const BADGE: CSSProperties = {
++  flexShrink: 0,
++  marginLeft: "auto",
++  padding: "1px 6px",
++  borderRadius: 9,
++  fontSize: TEXT["2xs"],
++  lineHeight: 1.5,
++  whiteSpace: "nowrap",
++};
++
++/** 三类行的前置图标，沿用应用内手写 SVG 的既有词汇（不引图标依赖）。 */
++function ReferenceIcon({ item }: { item: ComposerReferenceItem }) {
++  const common = {
++    width: 14,
++    height: 14,
++    viewBox: "0 0 24 24",
++    fill: "none",
++    stroke: "currentColor",
++    strokeWidth: 1.7,
++    strokeLinecap: "round" as const,
++    strokeLinejoin: "round" as const,
++    "aria-hidden": true,
++  };
++  if (item.kind === "session") {
++    return (
++      <svg {...common}>
++        <path d="M21 12a8 8 0 0 1-8 8H7l-4 3V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8z" />
++      </svg>
++    );
++  }
++  if (item.kind === "mcp") {
++    return (
++      <svg {...common}>
++        <rect x="3" y="4" width="18" height="7" rx="2" />
++        <rect x="3" y="13" width="18" height="7" rx="2" />
++        <path d="M7 7.5h.01M7 16.5h.01" />
++      </svg>
++    );
++  }
++  return (
++    <svg {...common}>
++      <path d="m4 6 2 2 3-4M13 7h7M4 17l2 2 3-4M13 18h7" />
++    </svg>
++  );
++}
++
++/** 行的第二段（副标题）：会话给 cwd，MCP 给作用域+传输方式，待办给 id。 */
++function itemDetail(item: ComposerReferenceItem): string | undefined {
++  if (item.kind === "session") return item.cwd;
++  if (item.kind === "mcp") return [item.scope, item.transport].filter(Boolean).join(" · ") || undefined;
++  return `#${item.id}`;
++}
++
++export function ComposerReferenceMenu({
++  kind,
++  items,
++  activeIndex,
++  loading,
++  maxHeight,
++  menuRef,
++  itemRefs,
++  onHover,
++  onPick,
++}: Props) {
++  const { t } = useI18n();
++  const countLabel = items.length === 1 ? t("chat.match") : t("chat.matches", { count: items.length });
++  const titleKey = kind === "session"
++    ? "chat.referenceSessions"
++    : kind === "mcp"
++      ? "chat.referenceMcp"
++      : "chat.referenceTodos";
++
++  return (
++    <div
++      ref={menuRef}
++      className="anim-popover"
++      role="listbox"
++      aria-label={t(titleKey, { label: countLabel })}
++      style={{
++        ...SHELL,
++        maxHeight: maxHeight === null
++          ? "min(48vh, 400px)"
++          : `min(48vh, 400px, ${maxHeight}px)`,
++      }}
++    >
++      <div style={HEADER}>
++        <span>
++          {loading ? t("chat.referenceLoading") : t(titleKey, { label: countLabel })}
++        </span>
++        <span style={{ fontFamily: "var(--font-mono)" }}>{t("chat.tabEnter")}</span>
++      </div>
++      <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: 4 }}>
++        {!loading && items.length === 0 ? (
++          <div style={{ padding: "6px 8px", fontSize: TEXT.sm, color: "var(--text-dim)" }}>
++            {t("chat.referenceEmpty")}
++          </div>
++        ) : (
++          items.map((item, index) => {
++            const active = index === activeIndex;
++            const detail = itemDetail(item);
++            const disabled = item.kind === "mcp" && item.disabled;
++            const done = item.kind === "todo" && item.done;
++            return (
++              <button
++                key={item.kind === "session" ? `s:${item.id}` : item.kind === "mcp" ? `m:${item.name}` : `t:${item.id}`}
++                ref={(node) => {
++                  itemRefs.current[index] = node;
++                }}
++                type="button"
++                role="option"
++                aria-selected={active}
++                onMouseDown={(event) => {
++                  event.preventDefault();
++                  onPick(item);
++                }}
++                onMouseEnter={() => onHover(index)}
++                style={{
++                  ...ROW,
++                  background: active ? "var(--bg-selected)" : "none",
++                  opacity: disabled ? 0.55 : 1,
++                  fontFamily: item.kind === "session" ? "inherit" : "var(--font-mono)",
++                }}
++              >
++                <span style={{ flexShrink: 0, display: "flex", alignItems: "center", color: "var(--text-muted)" }}>
++                  <ReferenceIcon item={item} />
++                </span>
++                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
++                  {item.kind === "todo" ? item.text : item.kind === "mcp" ? item.name : item.title}
++                </span>
++                {detail && (
++                  <span
++                    style={{
++                      marginLeft: 8,
++                      minWidth: 0,
++                      maxWidth: "45%",
++                      overflow: "hidden",
++                      textOverflow: "ellipsis",
++                      whiteSpace: "nowrap",
++                      color: "var(--text-dim)",
++                      fontSize: TEXT.xs,
++                      fontFamily: "var(--font-mono)",
++                    }}
++                  >
++                    {detail}
++                  </span>
++                )}
++                {disabled && (
++                  <span style={{ ...BADGE, background: "var(--bg-subtle)", color: "var(--text-dim)" }}>
++                    {t("chat.referenceDisabled")}
++                  </span>
++                )}
++                {done && (
++                  <span style={{ ...BADGE, background: "var(--bg-subtle)", color: "var(--text-dim)" }}>
++                    {t("chat.referenceTodoDone")}
++                  </span>
++                )}
++              </button>
++            );
++          })
++        )}
++      </div>
++    </div>
++  );
++}
+--- a/components/ChatInput.tsx
++++ b/components/ChatInput.tsx
+@@ -41,6 +41,27 @@
+   type SelectionContext,
+   type SessionReference,
+ } from "@/lib/composer-context";
++// fork:gap06-references — `&` 会话 / `#` MCP / `~` 待办 的行内引用 token
++import {
++  COMPOSER_REFERENCE_TRIGGERS,
++  buildMcpReferenceItems,
++  buildReferenceInsertText,
++  buildSessionReferenceItems,
++  buildTodoReferenceItems,
++  extractReferenceQuery,
++  filterMcpReferenceItems,
++  filterSessionReferenceItems,
++  filterTodoReferenceItems,
++  replaceReferenceToken,
++  sessionReferenceFromItem,
++  type ComposerReferenceItem,
++  type ComposerReferenceQuery,
++  type ReferenceMcpItem,
++  type ReferenceMcpSource,
++  type ReferenceSessionItem,
++  type ReferenceSessionSource,
++} from "@/lib/composer-references";
++import { ComposerReferenceMenu } from "./ComposerReferenceMenu";
+ import { TEXT } from "@/lib/typography";
+ 
+ export { filterModelOptions } from "./ModelSelector";
+@@ -84,6 +105,8 @@
+   queuedMessages?: QueuedMessages | null;
+   /** fork:ui-todo — task list of this session, derived from the transcript. */
+   todoSummary?: TodoSummary | null;
++  /** fork:gap06-references — 当前会话 id，用于把“自己”从 `&` 建议里剔除。 */
++  currentSessionId?: string | null;
+   inputHistory?: string[];
+   onRecallQueue?: () => void;
+   slashCommands?: SlashCommandInfo[];
+@@ -581,7 +604,7 @@
+   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
+   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
+   thinkingLevel, onThinkingLevelChange, availableThinkingLevels, thinkingLevelMap,
+-  retryInfo, queuedMessages, inputHistory = [], onRecallQueue, todoSummary,
++  retryInfo, queuedMessages, inputHistory = [], onRecallQueue, todoSummary, currentSessionId,
+   slashCommands, slashCommandsLoading, onLoadSlashCommands,
+   onBuiltinCommand,
+   soundEnabled, onSoundToggle, onAudioUnlock,
+@@ -626,6 +649,22 @@
+   const [atMenuOpen, setAtMenuOpen] = useState(false);
+   const [atMenuMaxHeight, setAtMenuMaxHeight] = useState<number | null>(null);
+   const [atActiveIndex, setAtActiveIndex] = useState(0);
++  // fork:gap06-references — 行内引用菜单（& 会话 / # MCP / ~ 待办）。
++  // 与 `@` 菜单平行：两个抽取器都锚定光标，所以同一时刻最多只有一个能命中（见
++  // lib/composer-references.ts 的 extractReferenceQuery）。
++  const [referenceQuery, setReferenceQuery] = useState<ComposerReferenceQuery | null>(null);
++  const [referenceMenuOpen, setReferenceMenuOpen] = useState(false);
++  const [referenceActiveIndex, setReferenceActiveIndex] = useState(0);
++  const [referenceMenuMaxHeight, setReferenceMenuMaxHeight] = useState<number | null>(null);
++  const [referenceSessions, setReferenceSessions] = useState<ReferenceSessionItem[] | null>(null);
++  const [referenceMcp, setReferenceMcp] = useState<ReferenceMcpItem[] | null>(null);
++  const [referenceLoading, setReferenceLoading] = useState(false);
++  const referenceMenuRef = useRef<HTMLDivElement>(null);
++  const referenceItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
++  /** 数据源缓存时间戳（10s，与文件索引同款策略）。 */
++  const referenceMetaRef = useRef<{ sessions?: number; mcp?: string }>({});
++  /** 防止同一个数据源被并发拉取。 */
++  const referenceFetchRef = useRef<{ sessions: boolean; mcp: string | null }>({ sessions: false, mcp: null });
+   const [imageWarningDismissed, setImageWarningDismissed] = useState(false);
+   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
+   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
+@@ -1196,14 +1235,27 @@
+   // Recomputed from the text before the caret on every change/caret move.
+   // Disabled entirely when there is no cwd (new session without a directory).
+   const updateAtQuery = useCallback((text: string, cursor: number | null) => {
+-    if (!cwd) {
+-      setAtQuery(null);
+-      return;
+-    }
+     const pos = cursor ?? text.length;
+-    setAtQuery(extractAtQuery(text.slice(0, pos)));
++    const before = text.slice(0, pos);
++    const fileToken = cwd ? extractAtQuery(before) : null;
++    setAtQuery(fileToken);
++    // fork:gap06-references — 同一次光标解析也产出引用 token。两个抽取器都锚定光标，
++    // 所以 `@` 命中时引用 token 必然为空（无需仲裁）。没有 cwd 时 `@` 菜单整体不可用，
++    // 但会话/待办引用不需要 cwd，所以它不受这个门控。
++    setReferenceQuery(fileToken ? null : extractReferenceQuery(before));
+   }, [cwd]);
+ 
++  // fork:gap06-references — 程序化改文本的路径（发送后清空、插入引用、草稿恢复…）
++  // 都会 `setValue(...)` 但不走 updateAtQuery，上游那里逐个 `setAtQuery(null)` 是 11 处。
++  // 与其一个个跟着改，不如让 token 自己校验：记录的区间里不再是对应的 token 文本，就关掉
++  // 菜单。以后的任何新重置路径也自动被覆盖。
++  useEffect(() => {
++    if (!referenceQuery) return;
++    const token = `${COMPOSER_REFERENCE_TRIGGERS[referenceQuery.kind]}${referenceQuery.query}`;
++    const end = referenceQuery.start + token.length;
++    if (value.slice(referenceQuery.start, end) !== token) setReferenceQuery(null);
++  }, [value, referenceQuery]);
++
+   const atQueryText = atQuery?.query ?? null;
+   const atLocalMatches: FileIndexEntry[] = React.useMemo(() => (
+     atQueryText !== null && fileIndex && fileIndex.cwd === cwd
+@@ -1314,8 +1366,152 @@
+     });
+   }, [atQuery, value]);
+ 
++  // ---------------------------------------------------------------------------
++  // fork:gap06-references — `&` 会话 / `#` MCP / `~` 待办
++  // ---------------------------------------------------------------------------
+ 
++  /** 当前该展示哪些候选。待办直接来自 prop（无需拉取）。 */
++  const referenceItems: ComposerReferenceItem[] = React.useMemo(() => {
++    if (!referenceQuery) return [];
++    if (referenceQuery.kind === "session") {
++      return filterSessionReferenceItems(referenceSessions ?? [], referenceQuery.query);
++    }
++    if (referenceQuery.kind === "mcp") {
++      return filterMcpReferenceItems(referenceMcp ?? [], referenceQuery.query);
++    }
++    return filterTodoReferenceItems(buildTodoReferenceItems(todoSummary?.todos ?? []), referenceQuery.query);
++  }, [referenceQuery, referenceSessions, referenceMcp, todoSummary]);
++
++  // 拉取数据源：只在对应触发符真的被敲出来时才请求，命中缓存则不重复请求。
+   useEffect(() => {
++    if (!referenceQuery) return;
++    if (referenceQuery.kind === "session") {
++      const fetchedAt = referenceMetaRef.current.sessions;
++      if (fetchedAt !== undefined && Date.now() - fetchedAt < 10_000) return;
++      if (referenceFetchRef.current.sessions) return;
++      referenceFetchRef.current.sessions = true;
++      setReferenceLoading(true);
++      fetch("/api/sessions")
++        .then((res) => (res.ok ? (res.json() as Promise<{ sessions?: ReferenceSessionSource[] }>) : null))
++        .then((data) => {
++          setReferenceSessions(buildSessionReferenceItems(data?.sessions ?? [], { currentSessionId }));
++          referenceMetaRef.current.sessions = Date.now();
++        })
++        .catch(() => {
++          // 下次敲触发符重试；不要在菜单里空转
++          referenceMetaRef.current.sessions = undefined;
++        })
++        .finally(() => {
++          referenceFetchRef.current.sessions = false;
++          setReferenceLoading(false);
++        });
++      return;
++    }
++    if (referenceQuery.kind === "mcp") {
++      if (!cwd) return;
++      if (referenceMetaRef.current.mcp === cwd) return;
++      if (referenceFetchRef.current.mcp === cwd) return;
++      referenceFetchRef.current.mcp = cwd;
++      setReferenceLoading(true);
++      fetch(`/api/mcp?cwd=${encodeURIComponent(cwd)}`)
++        .then((res) => (res.ok ? (res.json() as Promise<{ servers?: ReferenceMcpSource[] }>) : null))
++        .then((data) => {
++          setReferenceMcp(buildMcpReferenceItems(data?.servers ?? []));
++          referenceMetaRef.current.mcp = cwd;
++        })
++        .catch(() => {
++          referenceMetaRef.current.mcp = undefined;
++        })
++        .finally(() => {
++          referenceFetchRef.current.mcp = null;
++          setReferenceLoading(false);
++        });
++    }
++  }, [referenceQuery, cwd, currentSessionId]);
++
++  // 敲出/改写触发符时开菜单（与 `@` 菜单同款规则：Escape 关掉，下一次按键重开）。
++  const referenceTokenKey = referenceQuery === null
++    ? null
++    : `${referenceQuery.kind}:${referenceQuery.start}:${referenceQuery.query}`;
++  useEffect(() => {
++    if (referenceTokenKey === null) {
++      setReferenceMenuOpen(false);
++      setReferenceActiveIndex(0);
++      return;
++    }
++    setReferenceMenuOpen(true);
++    setReferenceActiveIndex(0);
++  }, [referenceTokenKey]);
++
++  useEffect(() => {
++    if (referenceActiveIndex >= referenceItems.length) {
++      setReferenceActiveIndex(Math.max(0, referenceItems.length - 1));
++    }
++  }, [referenceItems.length, referenceActiveIndex]);
++
++  useEffect(() => {
++    referenceItemRefs.current.length = referenceItems.length;
++  }, [referenceItems.length]);
++
++  useEffect(() => {
++    if (!referenceMenuOpen) return;
++    referenceItemRefs.current[referenceActiveIndex]?.scrollIntoView({ block: "nearest", inline: "nearest" });
++  }, [referenceActiveIndex, referenceMenuOpen]);
++
++  useLayoutEffect(() => {
++    if (!referenceMenuOpen || referenceQuery === null) {
++      setReferenceMenuMaxHeight(null);
++      return;
++    }
++    const menu = referenceMenuRef.current;
++    if (!menu) return;
++    return subscribeUpwardMenuMaxHeight(menu, (nextHeight) => {
++      setReferenceMenuMaxHeight((current) => current === nextHeight ? current : nextHeight);
++    });
++  }, [referenceMenuOpen, referenceQuery]);
++
++  /**
++   * 确认一条候选：
++   * - 会话 → 吃掉 token 并加一个 chip（复用已有 SessionReference 管道）；
++   * - MCP / 待办 → 把 token 换成行内文本（与 `@path` 同构）。
++   */
++  const applyReferenceCompletion = useCallback((item: ComposerReferenceItem) => {
++    if (!referenceQuery) return;
++    const ta = textareaRef.current;
++    const cursor = ta?.selectionStart ?? value.length;
++    let newValue: string;
++    let newPos: number;
++    if (item.kind === "session") {
++      newValue = value.slice(0, referenceQuery.start) + value.slice(cursor);
++      newPos = referenceQuery.start;
++      const reference = normalizeSessionReference(sessionReferenceFromItem(item));
++      if (reference) {
++        setSessionReferences((current) => {
++          if (current.some((existing) => existing.id === reference.id)) return current;
++          const next = [...current, reference];
++          sessionReferencesRef.current = next;
++          return next;
++        });
++      }
++    } else {
++      const replaced = replaceReferenceToken(value, referenceQuery.start, cursor, buildReferenceInsertText(item));
++      newValue = replaced.value;
++      newPos = replaced.cursor;
++    }
++    valueRef.current = newValue;
++    setValue(newValue);
++    setReferenceQuery(null);
++    requestAnimationFrame(() => {
++      const el = textareaRef.current;
++      if (!el) return;
++      el.focus();
++      el.setSelectionRange(newPos, newPos);
++      el.style.height = "auto";
++      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
++    });
++  }, [referenceQuery, value]);
++
++  useEffect(() => {
+     if (atActiveIndex >= atMatches.length) {
+       setAtActiveIndex(Math.max(0, atMatches.length - 1));
+     }
+@@ -1527,6 +1723,31 @@
+         }
+       }
+ 
++      // fork:gap06-references — 引用菜单（& / # / ~）与 `@` 菜单同款按键，
++      // 同样在 IME 合成期间跳过。
++      if (referenceMenuOpen && referenceQuery !== null && !isComposing) {
++        if (e.key === "ArrowDown") {
++          e.preventDefault();
++          setReferenceActiveIndex((i) => cycleListIndex(i, referenceItems.length, 1));
++          return;
++        }
++        if (e.key === "ArrowUp") {
++          e.preventDefault();
++          setReferenceActiveIndex((i) => cycleListIndex(i, referenceItems.length, -1));
++          return;
++        }
++        if (e.key === "Escape") {
++          e.preventDefault();
++          setReferenceMenuOpen(false);
++          return;
++        }
++        if ((e.key === "Tab" || sendShortcut) && referenceItems[referenceActiveIndex]) {
++          e.preventDefault();
++          applyReferenceCompletion(referenceItems[referenceActiveIndex]);
++          return;
++        }
++      }
++
+       // @ file menu — skip while composing so IME candidate navigation
+       // (arrows/Enter/Tab) is never intercepted.
+       if (atMenuOpen && atQuery !== null && !isComposing) {
+@@ -1577,7 +1798,7 @@
+         }
+       }
+     },
+-    [isMobile, isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
++    [isMobile, isStreaming, onSteer, onFollowUp, onAbort, slashMenuOpen, slashQuery, displayedSlashCommands, slashActiveIndex, applySlashCommand, sendQueued, handleSend, getNextSlashIndex, atMenuOpen, atQuery, atMatches, atActiveIndex, applyAtCompletion, referenceMenuOpen, referenceQuery, referenceItems, referenceActiveIndex, applyReferenceCompletion, historyMenuOpen, inputHistory, historyActiveIndex, applyHistoryInput, value]
+   );
+ 
+   const handleInput = useCallback(() => {
+@@ -2346,6 +2567,19 @@
+               </div>
+             </div>
+           )}
++          {referenceMenuOpen && referenceQuery !== null && (
++            <ComposerReferenceMenu
++              kind={referenceQuery.kind}
++              items={referenceItems}
++              activeIndex={referenceActiveIndex}
++              loading={referenceLoading && referenceItems.length === 0}
++              maxHeight={referenceMenuMaxHeight}
++              menuRef={referenceMenuRef}
++              itemRefs={referenceItemRefs}
++              onHover={setReferenceActiveIndex}
++              onPick={applyReferenceCompletion}
++            />
++          )}
+           {atMenuOpen && atQuery !== null && (() => {
+             const indexLoading = fileIndexLoading && (!fileIndex || fileIndex.cwd !== cwd);
+              const matchCountLabel = atMatches.length === 1 ? t("chat.match") : t("chat.matches", { count: atMatches.length });
+--- a/components/ChatWindow.tsx
++++ b/components/ChatWindow.tsx
+@@ -1118,6 +1118,8 @@
+       onLoadSlashCommands={loadSlashCommands}
+       onBuiltinCommand={handleBuiltinSlashCommand}
+       todoSummary={todoSummary}
++      // fork:gap06-references — 让 `&` 建议列表知道当前会话，把它自己剔除
++      currentSessionId={session?.id ?? null}
+       soundEnabled={soundEnabled}
+       onSoundToggle={onSoundToggle}
+       onAudioUnlock={unlockAudio}
+--- a/components/ChatInput.test.mjs
++++ b/components/ChatInput.test.mjs
+@@ -69,6 +69,9 @@
+     ["slash completion takes priority", { altKey: true }, { slashMenuOpen: true, slashQuery: "help" }, "slash"],
+     ["available built-in commands take priority", { altKey: true }, { slashMenuOpen: true, slashQuery: "copy", value: "/copy", displayedSlashCommands: [{ name: "copy", source: "builtin", availableWhileStreaming: true }] }, "send"],
+     ["file completion takes priority", { altKey: true }, { atMenuOpen: true, atQuery: {} }, "file"],
++    // fork:gap06-references — 引用菜单（& / # / ~）与 @ 菜单同级，且在它之前判定
++    ["reference completion takes priority", { altKey: true }, { referenceMenuOpen: true, referenceQuery: {} }, "reference"],
++    ["reference menu wins over the file menu when both are open", { altKey: true }, { referenceMenuOpen: true, referenceQuery: {}, atMenuOpen: true, atQuery: {} }, "reference"],
+     ["history selection takes priority", { altKey: true }, { historyMenuOpen: true }, "history"],
+   ];
+   for (const [name, keys, state, expected] of cases) {
+@@ -81,11 +84,14 @@
+       historyMenuOpen: false, inputHistory: ["previous"], historyActiveIndex: 0,
+       slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [{}], slashActiveIndex: 0,
+       atMenuOpen: false, atQuery: null, atMatches: [{}], atActiveIndex: 0,
++      // fork:gap06-references
++      referenceMenuOpen: false, referenceQuery: null, referenceItems: [{}], referenceActiveIndex: 0,
+       onSteer() {}, onFollowUp() {},
+       sendQueued(mode) { action = mode; }, handleSend() { action = "send"; },
+       applySlashCommand() { action = "slash"; },
+       isExactSlashCommand, value: "", setSlashMenuOpen() {},
+       applyAtCompletion() { action = "file"; },
++      applyReferenceCompletion() { action = "reference"; },
+       applyHistoryInput() { action = "history"; },
+       ...state,
+     });
+@@ -121,6 +127,9 @@
+       historyMenuOpen: false, inputHistory: [], historyActiveIndex: 0,
+       slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [], slashActiveIndex: 0,
+       atMenuOpen: true, atQuery: {}, atMatches: Array.from({ length }, () => ({})), atActiveIndex,
++      // fork:gap06-references — 这个用例只驱动 @ 菜单，但 handleKeyDown 会先看引用菜单
++      referenceMenuOpen: false, referenceQuery: null, referenceItems: [], referenceActiveIndex: 0,
++      applyReferenceCompletion() {},
+       onSteer() {}, onFollowUp() {},
+       sendQueued() {}, handleSend() {},
+       applySlashCommand() {},
+@@ -149,6 +158,58 @@
+   assert.equal(move("ArrowDown", 0, 0), 0);
+ });
+ 
++// fork:gap06-references — `&` 会话 / `#` MCP / `~` 待办 共用一个列表导航
++test("reference menu arrows wrap around its match list", () => {
++  const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
++  function findHandler(node) {
++    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "handleKeyDown") {
++      return node.initializer.arguments[0];
++    }
++    return ts.forEachChild(node, findHandler);
++  }
++  const script = new Script(ts.transpileModule(findHandler(source).getText(source), {
++    compilerOptions: { target: ts.ScriptTarget.ES2020 },
++  }).outputText);
++
++  function move(key, referenceActiveIndex, length) {
++    let next = null;
++    const handler = script.runInNewContext({
++      Date: { now: () => 1000 },
++      COMPOSITION_END_ENTER_GRACE_MS: 100,
++      isMobile: false, isStreaming: false,
++      isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 },
++      historyMenuOpen: false, inputHistory: [], historyActiveIndex: 0,
++      slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [], slashActiveIndex: 0,
++      atMenuOpen: false, atQuery: null, atMatches: [], atActiveIndex: 0,
++      applyAtCompletion() {},
++      referenceMenuOpen: true, referenceQuery: {}, referenceItems: Array.from({ length }, () => ({})), referenceActiveIndex,
++      onSteer() {}, onFollowUp() {},
++      sendQueued() {}, handleSend() {},
++      applySlashCommand() {},
++      isExactSlashCommand() { return false; }, value: "&se",
++      setSlashMenuOpen() {}, setAtMenuOpen() {},
++      applyHistoryInput() {},
++      applyReferenceCompletion() {},
++      cycleListIndex,
++      setReferenceActiveIndex(update) {
++        next = typeof update === "function" ? update(referenceActiveIndex) : update;
++      },
++    });
++    handler({
++      key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false,
++      nativeEvent: { isComposing: false, keyCode: 0 },
++      preventDefault() {},
++    });
++    return next;
++  }
++
++  assert.equal(move("ArrowDown", 0, 3), 1);
++  assert.equal(move("ArrowDown", 2, 3), 0);
++  assert.equal(move("ArrowUp", 0, 3), 2);
++  assert.equal(move("ArrowUp", 1, 3), 0);
++  assert.equal(move("ArrowDown", 0, 0), 0);
++});
++
+ test("cycleListIndex wraps in both directions", () => {
+   assert.equal(cycleListIndex(0, 3, 1), 1);
+   assert.equal(cycleListIndex(2, 3, 1), 0);
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -666,6 +666,13 @@
+     "chat.files": "Files · {label}{hint}",
+     "chat.searching": "Searching…",
+     "chat.noMatchingFiles": "No matching files",
++    "chat.referenceSessions": "Sessions · {label}",
++    "chat.referenceMcp": "MCP servers · {label}",
++    "chat.referenceTodos": "Todos · {label}",
++    "chat.referenceLoading": "Loading…",
++    "chat.referenceEmpty": "No matching item",
++    "chat.referenceDisabled": "disabled",
++    "chat.referenceTodoDone": "done",
+     "chat.searchingAll": " · searching all files…",
+     "chat.indexTruncated": " · index truncated",
+     "chat.steerPlaceholder": "Steer now / queue follow-up...",
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -665,6 +665,13 @@
+     "chat.files": "文件 · {label}{hint}",
+     "chat.searching": "搜索中…",
+     "chat.noMatchingFiles": "未找到匹配的文件",
++    "chat.referenceSessions": "会话引用 · {label}",
++    "chat.referenceMcp": "MCP 服务 · {label}",
++    "chat.referenceTodos": "待办 · {label}",
++    "chat.referenceLoading": "读取中…",
++    "chat.referenceEmpty": "没有匹配项",
++    "chat.referenceDisabled": "已禁用",
++    "chat.referenceTodoDone": "已完成",
+     "chat.searchingAll": " · 正在搜索所有文件…",
+     "chat.indexTruncated": " · 索引不完整",
+     "chat.steerPlaceholder": "立即引导 / 排队后续消息...",
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -665,6 +665,13 @@
+     "chat.files": "檔案 · {label}{hint}",
+     "chat.searching": "搜尋中…",
+     "chat.noMatchingFiles": "找不到相符的檔案",
++    "chat.referenceSessions": "工作階段引用 · {label}",
++    "chat.referenceMcp": "MCP 服務 · {label}",
++    "chat.referenceTodos": "待辦 · {label}",
++    "chat.referenceLoading": "讀取中…",
++    "chat.referenceEmpty": "沒有相符項目",
++    "chat.referenceDisabled": "已停用",
++    "chat.referenceTodoDone": "已完成",
+     "chat.searchingAll": " · 正在搜尋所有檔案…",
+     "chat.indexTruncated": " · 索引已截斷",
+     "chat.steerPlaceholder": "立即引導 / 將後續訊息排入佇列...",

@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { encodeFilePathForApi, getFileName } from "@/lib/file-paths";
 import { unsupportedReasonKey } from "@/lib/file-preview-support";
+import { TEXT } from "@/lib/typography";
 
 /**
  * fork:gap-unsupported-preview — 无法预览文件的降级卡片。
@@ -70,7 +71,7 @@ export function UnsupportedFilePreview({ filePath, cwd, size, sourceSessionId }:
 
   const buttonStyle = {
     padding: "5px 12px",
-    fontSize: 12,
+    fontSize: TEXT.sm,
     borderRadius: "var(--radius-md)",
     border: "1px solid var(--border)",
     background: "var(--bg-panel)",
@@ -99,8 +100,8 @@ export function UnsupportedFilePreview({ filePath, cwd, size, sourceSessionId }:
         <path d="M14 2v6h6" />
         <path d="M9 15h6" />
       </svg>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text)", wordBreak: "break-all" }}>{name}</div>
-      <div style={{ fontSize: 12, lineHeight: 1.7 }}>
+      <div style={{ fontSize: TEXT.md, fontWeight: 600, color: "var(--text)", wordBreak: "break-all" }}>{name}</div>
+      <div style={{ fontSize: TEXT.sm, lineHeight: 1.7 }}>
         {t(unsupportedReasonKey(filePath))}
         <br />
         {[
@@ -117,9 +118,9 @@ export function UnsupportedFilePreview({ filePath, cwd, size, sourceSessionId }:
           {busy === "reveal" ? t("i18n.opening") : t("i18n.showInFolder")}
         </button>
       </div>
-      {error && <div role="alert" style={{ fontSize: 12, color: "var(--danger)" }}>{error}</div>}
+      {error && <div role="alert" style={{ fontSize: TEXT.sm, color: "var(--danger)" }}>{error}</div>}
       {/* 保留一个可复制的路径，方便用户自己去终端处理。 */}
-      <code style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
+      <code style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontFamily: "var(--font-mono)", wordBreak: "break-all" }}>
         {encodeFilePathForApi(filePath)}
       </code>
     </div>

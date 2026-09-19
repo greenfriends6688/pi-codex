@@ -213,6 +213,9 @@ interface Props {
   searchBlock?: AssistantContentBlock;
   onFork?: (entryId: string) => void;
   forking?: boolean;
+  /** fork:proma-04-rewind — 「回退到此处」：截断这条之后的所有对话。 */
+  onRewind?: (entryId: string) => void;
+  rewinding?: boolean;
   onNavigate?: (entryId: string) => Promise<boolean>;
   onEditContent?: (message: UserMessage) => void;
   showTimestamp?: boolean;
@@ -295,9 +298,9 @@ function haveSameRelevantToolResults(
   return true;
 }
 
-export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, searchBlock, onFork, forking, onNavigate, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, expandedToolIds, onToggleTool }: Props) {
+export const MessageView = memo(function MessageView({ message, isStreaming, toolResults, modelNames, cwd, onOpenFile, onOpenSession, entryId, searchBlock, onFork, forking, onRewind, rewinding, onNavigate, onEditContent, showTimestamp, prevTimestamp, sessionId, writtenFiles, expandedToolIds, onToggleTool }: Props) {
   if (message.role === "user") {
-    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onNavigate={onNavigate} onEditContent={onEditContent} />;
+    return <UserMessageView message={message as UserMessage} cwd={cwd} onOpenFile={onOpenFile} entryId={entryId} onFork={onFork} forking={forking} onRewind={onRewind} rewinding={rewinding} onNavigate={onNavigate} onEditContent={onEditContent} />;
   }
   if (message.role === "assistant") {
     return <AssistantMessageView message={message as AssistantMessage} isStreaming={isStreaming} toolResults={toolResults} modelNames={modelNames} cwd={cwd} onOpenFile={onOpenFile} onOpenSession={onOpenSession} showTimestamp={showTimestamp} prevTimestamp={prevTimestamp} sessionId={sessionId} entryId={entryId} searchBlock={searchBlock} writtenFiles={writtenFiles} expandedToolIds={expandedToolIds} onToggleTool={onToggleTool} />;
@@ -328,6 +331,9 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.searchBlock === next.searchBlock
     && prev.onFork === next.onFork
     && prev.forking === next.forking
+    // fork:proma-04-rewind
+    && prev.onRewind === next.onRewind
+    && prev.rewinding === next.rewinding
     && prev.onNavigate === next.onNavigate
     && prev.onEditContent === next.onEditContent
     && prev.showTimestamp === next.showTimestamp
@@ -338,13 +344,16 @@ export const MessageView = memo(function MessageView({ message, isStreaming, too
     && prev.onToggleTool === next.onToggleTool;
 });
 
-function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onNavigate, onEditContent }: {
+function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, onRewind, rewinding, onNavigate, onEditContent }: {
   message: UserMessage;
   cwd?: string;
   onOpenFile?: (filePath: string) => void;
   entryId?: string;
   onFork?: (entryId: string) => void;
   forking?: boolean;
+  // fork:proma-04-rewind — 「回退到此处」（UserMessageView 自己的 props 类型）
+  onRewind?: (entryId: string) => void;
+  rewinding?: boolean;
   onNavigate?: (entryId: string) => Promise<boolean>;
   onEditContent?: (message: UserMessage) => void;
 }) {
@@ -376,6 +385,8 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   const time = formatTime(message.timestamp);
   const canFork = !!entryId && !!onFork;
+  // fork:proma-04-rewind — 回退同样是「按 entryId」的会话级操作
+  const canRewind = !!entryId && !!onRewind;
   const copyTarget = commandText ?? content;
   const editTarget = commandText ? replaceUserMessageText(message, commandText) : message;
 
@@ -597,6 +608,33 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   <path d="M18 9a9 9 0 0 1-9 9" />
                 </svg>
                  {forking ? t("i18n.creating") : t("i18n.newSession")}
+              </button>
+            )}
+            {/* fork:proma-04-rewind — 回退到此处（放在 fork 旁：两者都是「从这条消息出发」的会话级操作） */}
+            {canRewind && (
+              <button
+                onClick={() => { onRewind!(entryId!); }}
+                disabled={rewinding}
+                title={t("rewind.actionTitle")}
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "3px 8px", height: 22,
+                  background: "none", border: "none",
+                  borderRadius: "var(--radius-xs)",
+                  color: rewinding ? "var(--warning)" : "var(--text-dim)",
+                  cursor: rewinding ? "not-allowed" : "pointer",
+                  fontSize: TEXT.xs, fontWeight: 400,
+                  whiteSpace: "nowrap",
+                  transition: "color 0.12s",
+                }}
+                onMouseEnter={(e) => { if (!rewinding) e.currentTarget.style.color = "var(--warning)"; }}
+                onMouseLeave={(e) => { if (!rewinding) e.currentTarget.style.color = "var(--text-dim)"; }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 12a9 9 0 1 0 3-6.7" />
+                  <polyline points="3 4 3 9 8 9" />
+                </svg>
+                {t("rewind.action")}
               </button>
             )}
           </div>

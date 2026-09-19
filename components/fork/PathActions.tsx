@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
+import { TEXT } from "@/lib/typography";
 
 /*
  * fork:ui-20 — the three path actions, in one place.
@@ -67,7 +68,7 @@ export function PathActions({
     borderRadius: "var(--radius-xs)",
     color: state === "failed" ? "var(--danger)" : copied ? "var(--accent)" : "var(--text-dim)",
     cursor: "pointer",
-    fontSize: 11,
+    fontSize: TEXT.xs,
     whiteSpace: "nowrap" as const,
   };
 
@@ -114,7 +115,7 @@ export function PathActions({
         </svg>
         {!compact && <span>{t("files.openPath")}</span>}
       </button>
-      {state === "failed" && <span style={{ fontSize: 11, color: "var(--danger)" }}>{t("files.pathActionFailed")}</span>}
+      {state === "failed" && <span style={{ fontSize: TEXT.xs, color: "var(--danger)" }}>{t("files.pathActionFailed")}</span>}
     </span>
   );
 }

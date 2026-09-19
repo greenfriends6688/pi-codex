@@ -1,4 +1,5 @@
 "use client";
+import { TEXT } from "@/lib/typography";
 
 /**
  * fork:gap-error-boundary — 根布局级错误边界。
@@ -28,14 +29,14 @@ export default function GlobalError({ error, retry }: { error: Error & { digest?
         }}
       >
         <div style={{ maxWidth: 520, width: "100%" }} role="alert">
-          <h1 style={{ fontSize: 18, fontWeight: 600, margin: "0 0 8px" }}>应用启动失败 / Failed to start</h1>
-          <p style={{ fontSize: 13, lineHeight: 1.7, margin: "0 0 12px", opacity: 0.8 }}>
+          <h1 style={{ fontSize: TEXT["2xl"], fontWeight: 600, margin: "0 0 8px" }}>应用启动失败 / Failed to start</h1>
+          <p style={{ fontSize: TEXT.md, lineHeight: 1.7, margin: "0 0 12px", opacity: 0.8 }}>
             根布局渲染时出现异常。请先重试；若持续失败，打开开发者工具查看控制台堆栈。
             <br />
             An error occurred while rendering the root layout. Retry first; if it persists, check the console.
           </p>
           {error.digest && (
-            <p style={{ fontSize: 12, opacity: 0.7, margin: "0 0 16px" }}>
+            <p style={{ fontSize: TEXT.sm, opacity: 0.7, margin: "0 0 16px" }}>
               digest: <code>{error.digest}</code>
             </p>
           )}

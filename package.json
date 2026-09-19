@@ -47,6 +47,7 @@
     "desktop:verify": "node scripts/verify-desktop-bundle.mjs",
     "desktop:smoke": "node scripts/desktop-smoke.mjs",
     "desktop:dist": "npm run build && npm run desktop:verify && electron-builder",
+    "desktop:dist:win": "npm run build && npm run desktop:verify && electron-builder --win",
     "desktop:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
@@ -186,10 +187,35 @@
         }
       ]
     },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pi Codex",
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "uninstallDisplayName": "Pi Codex ${version}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    },
     "extraResources": [
       {
         "from": "assets/default-skills",
         "to": "default-skills"
+      },
+      {
+        "from": "build/icon.png",
+        "to": "appIcon.png"
       },
       {
         "from": "build/trayTemplate.png",

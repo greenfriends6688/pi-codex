@@ -69,6 +69,9 @@ test("follow-up shortcuts preserve newline, IME, mobile and completion behavior"
     ["slash completion takes priority", { altKey: true }, { slashMenuOpen: true, slashQuery: "help" }, "slash"],
     ["available built-in commands take priority", { altKey: true }, { slashMenuOpen: true, slashQuery: "copy", value: "/copy", displayedSlashCommands: [{ name: "copy", source: "builtin", availableWhileStreaming: true }] }, "send"],
     ["file completion takes priority", { altKey: true }, { atMenuOpen: true, atQuery: {} }, "file"],
+    // fork:gap06-references — 引用菜单（& / # / ~）与 @ 菜单同级，且在它之前判定
+    ["reference completion takes priority", { altKey: true }, { referenceMenuOpen: true, referenceQuery: {} }, "reference"],
+    ["reference menu wins over the file menu when both are open", { altKey: true }, { referenceMenuOpen: true, referenceQuery: {}, atMenuOpen: true, atQuery: {} }, "reference"],
     ["history selection takes priority", { altKey: true }, { historyMenuOpen: true }, "history"],
   ];
   for (const [name, keys, state, expected] of cases) {
@@ -81,11 +84,14 @@ test("follow-up shortcuts preserve newline, IME, mobile and completion behavior"
       historyMenuOpen: false, inputHistory: ["previous"], historyActiveIndex: 0,
       slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [{}], slashActiveIndex: 0,
       atMenuOpen: false, atQuery: null, atMatches: [{}], atActiveIndex: 0,
+      // fork:gap06-references
+      referenceMenuOpen: false, referenceQuery: null, referenceItems: [{}], referenceActiveIndex: 0,
       onSteer() {}, onFollowUp() {},
       sendQueued(mode) { action = mode; }, handleSend() { action = "send"; },
       applySlashCommand() { action = "slash"; },
       isExactSlashCommand, value: "", setSlashMenuOpen() {},
       applyAtCompletion() { action = "file"; },
+      applyReferenceCompletion() { action = "reference"; },
       applyHistoryInput() { action = "history"; },
       ...state,
     });
@@ -121,6 +127,9 @@ test("file mention arrows wrap around the match list", () => {
       historyMenuOpen: false, inputHistory: [], historyActiveIndex: 0,
       slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [], slashActiveIndex: 0,
       atMenuOpen: true, atQuery: {}, atMatches: Array.from({ length }, () => ({})), atActiveIndex,
+      // fork:gap06-references — 这个用例只驱动 @ 菜单，但 handleKeyDown 会先看引用菜单
+      referenceMenuOpen: false, referenceQuery: null, referenceItems: [], referenceActiveIndex: 0,
+      applyReferenceCompletion() {},
       onSteer() {}, onFollowUp() {},
       sendQueued() {}, handleSend() {},
       applySlashCommand() {},
@@ -146,6 +155,58 @@ test("file mention arrows wrap around the match list", () => {
   assert.equal(move("ArrowUp", 0, 3), 2);
   assert.equal(move("ArrowUp", 1, 3), 0);
   assert.equal(move("ArrowDown", 0, 1), 0);
+  assert.equal(move("ArrowDown", 0, 0), 0);
+});
+
+// fork:gap06-references — `&` 会话 / `#` MCP / `~` 待办 共用一个列表导航
+test("reference menu arrows wrap around its match list", () => {
+  const source = ts.createSourceFile("ChatInput.tsx", readFileSync(new URL("./ChatInput.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  function findHandler(node) {
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === "handleKeyDown") {
+      return node.initializer.arguments[0];
+    }
+    return ts.forEachChild(node, findHandler);
+  }
+  const script = new Script(ts.transpileModule(findHandler(source).getText(source), {
+    compilerOptions: { target: ts.ScriptTarget.ES2020 },
+  }).outputText);
+
+  function move(key, referenceActiveIndex, length) {
+    let next = null;
+    const handler = script.runInNewContext({
+      Date: { now: () => 1000 },
+      COMPOSITION_END_ENTER_GRACE_MS: 100,
+      isMobile: false, isStreaming: false,
+      isComposingRef: { current: false }, lastCompositionEndAtRef: { current: 0 },
+      historyMenuOpen: false, inputHistory: [], historyActiveIndex: 0,
+      slashMenuOpen: false, slashQuery: null, displayedSlashCommands: [], slashActiveIndex: 0,
+      atMenuOpen: false, atQuery: null, atMatches: [], atActiveIndex: 0,
+      applyAtCompletion() {},
+      referenceMenuOpen: true, referenceQuery: {}, referenceItems: Array.from({ length }, () => ({})), referenceActiveIndex,
+      onSteer() {}, onFollowUp() {},
+      sendQueued() {}, handleSend() {},
+      applySlashCommand() {},
+      isExactSlashCommand() { return false; }, value: "&se",
+      setSlashMenuOpen() {}, setAtMenuOpen() {},
+      applyHistoryInput() {},
+      applyReferenceCompletion() {},
+      cycleListIndex,
+      setReferenceActiveIndex(update) {
+        next = typeof update === "function" ? update(referenceActiveIndex) : update;
+      },
+    });
+    handler({
+      key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false,
+      nativeEvent: { isComposing: false, keyCode: 0 },
+      preventDefault() {},
+    });
+    return next;
+  }
+
+  assert.equal(move("ArrowDown", 0, 3), 1);
+  assert.equal(move("ArrowDown", 2, 3), 0);
+  assert.equal(move("ArrowUp", 0, 3), 2);
+  assert.equal(move("ArrowUp", 1, 3), 0);
   assert.equal(move("ArrowDown", 0, 0), 0);
 });
 

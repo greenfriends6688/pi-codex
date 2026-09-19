@@ -489,6 +489,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [sessionListVersion, setSessionListVersion] = useState<number | null>(null);
   const sessionListVersionRef = useRef<number | null>(null);
   const sessionLoadIdRef = useRef(0);
+  // fork:fix-url-session-restore — whether /api/sessions has answered at least once.
+  // The `?session=` restore is one-shot, and it must not be spent while the list is
+  // still empty-but-coming (see the restore effect below).
+  const sessionsLoadedRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedCwd, setSelectedCwd] = useState<string | null>(null);
@@ -590,6 +594,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       };
       if (loadId !== sessionLoadIdRef.current) return;
       sessionListVersionRef.current = data.sessionListVersion;
+      sessionsLoadedRef.current = true;
       setSessionListVersion(data.sessionListVersion);
       setAllSessions(data.sessions);
       // Treat the fetched running set as an initial fallback only. Once the
@@ -890,13 +895,22 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (selectedCwd === null) {
       // If restoring a session, set cwd to match that session
       if (initialSessionId && !restoredRef.current) {
-        restoredRef.current = true;
         const target = allSessions.find((s) => s.id === initialSessionId);
         if (target) {
+          restoredRef.current = true;
           setSelectedCwd(target.cwd);
           onSelectSession(target, true);
           return;
         }
+        // fork:fix-url-session-restore — this effect can run before /api/sessions
+        // lands: the `/api/chat-workspace` fetch resolves first, which clears the
+        // `allSessions.length === 0` guard above and opens this branch with an
+        // empty list. Spending the one-shot attempt there made `?session=<id>`
+        // open the welcome page instead of the session on every install that has
+        // a chat workspace — the e2e fixtures have none, which is why it stayed
+        // invisible. Wait for the list: the effect re-runs when it arrives.
+        if (!sessionsLoadedRef.current) return;
+        restoredRef.current = true;
         // Session not found — notify parent so it can show the placeholder
         onInitialRestoreDone?.();
       }

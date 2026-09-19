@@ -152,11 +152,30 @@ export function applyTodoAction(state: TodoState, params: TodoParams): TodoActio
     }
 
     case "toggle": {
-      if (params.id === undefined) return fail(current, "toggle", "id is required for toggle");
-      const todo = current.todos.find((item) => item.id === params.id);
-      if (!todo) return fail(current, "toggle", `#${params.id} not found`);
-      const todos = current.todos.map((item) => (item.id === params.id ? { ...item, done: !item.done } : item));
-      const flipped = todos.find((item) => item.id === params.id)!;
+      // fork:ui-todo-live — `id` is the documented selector, but `set` renumbers
+      // the list and an agent that lost track of the numbering then stops updating
+      // it until the end of the run (the "only ticks off at the end" report).
+      // Accepting the item's own text as a fallback keeps a stale id from
+      // freezing the list the user is watching.
+      const wantedText = params.text?.trim();
+      const todo = params.id !== undefined
+        ? current.todos.find((item) => item.id === params.id)
+        : wantedText
+          ? current.todos.find((item) => item.text === wantedText)
+          : undefined;
+      if (!todo) {
+        return fail(
+          current,
+          "toggle",
+          params.id !== undefined
+            ? `#${params.id} not found`
+            : wantedText
+              ? `no todo matches "${wantedText}"`
+              : "id or text is required for toggle",
+        );
+      }
+      const todos = current.todos.map((item) => (item.id === todo.id ? { ...item, done: !item.done } : item));
+      const flipped = todos.find((item) => item.id === todo.id)!;
       return ok("toggle", { todos, nextId: current.nextId }, `Todo #${flipped.id} ${flipped.done ? "completed" : "reopened"}`);
     }
 

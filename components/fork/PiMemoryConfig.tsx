@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useI18n } from "@/hooks/useI18n";
 import { ConfigButton, ConfigSwitch } from "../SettingsUi";
 import { PI_MEMORY_PACKAGE_SOURCE, PI_MEMORY_TEMPLATES, PI_MEMORY_TOOLS } from "@/lib/pi-memory";
+import { TEXT } from "@/lib/typography";
 
 /*
  * fork:memory-panel — settings page for the pi-memory package.
@@ -220,7 +221,7 @@ export function PiMemoryConfig({
               </ConfigButton>
             )}
           </div>
-          <p role="status" style={{ margin: "6px 0 0", fontSize: 12.5, color: enabled ? "var(--text)" : "var(--text-dim)" }}>
+          <p role="status" style={{ margin: "6px 0 0", fontSize: TEXT.sm, color: enabled ? "var(--text)" : "var(--text-dim)" }}>
             {loading
               ? t("i18n.loading")
               : installed
@@ -228,7 +229,7 @@ export function PiMemoryConfig({
                 : t("memory.stateMissing")}
           </p>
           <p className="settings-chat-range-hint">{t("memory.enableHint")}</p>
-          {message && <p role="status" style={{ margin: 0, fontSize: 12, color: "var(--text)" }}>{message}</p>}
+          {message && <p role="status" style={{ margin: 0, fontSize: TEXT.sm, color: "var(--text)" }}>{message}</p>}
         </div>
       </section>
 
@@ -237,7 +238,7 @@ export function PiMemoryConfig({
         <div className="settings-chat-option settings-chat-range-option">
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {PI_MEMORY_TOOLS.map((tool) => (
-              <code key={tool} style={{ padding: "2px 7px", border: "1px solid var(--border-faint)", borderRadius: "var(--radius-sm)", fontSize: 11.5, color: "var(--text-muted)" }}>
+              <code key={tool} style={{ padding: "2px 7px", border: "1px solid var(--border-faint)", borderRadius: "var(--radius-sm)", fontSize: TEXT.xs, color: "var(--text-muted)" }}>
                 {tool}
               </code>
             ))}
@@ -248,7 +249,7 @@ export function PiMemoryConfig({
 
       <section className="settings-general-section">
         <h3 className="settings-general-heading">{t("memory.files")}</h3>
-        {dir && <p className="settings-chat-range-hint" style={{ marginTop: -2, fontFamily: "var(--font-mono)", fontSize: 11 }}>{dir}</p>}
+        {dir && <p className="settings-chat-range-hint" style={{ marginTop: -2, fontFamily: "var(--font-mono)", fontSize: TEXT.xs }}>{dir}</p>}
         <div style={{ display: "grid", gap: 4 }}>
           {files.map((file) => (
             <div
@@ -261,10 +262,10 @@ export function PiMemoryConfig({
               }}
             >
               <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 1 }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.sm, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {file.path}
                 </span>
-                <span style={{ fontSize: 11, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
                   {file.exists
                     ? `${file.size} B · ${new Date(file.mtime).toLocaleString()}`
                     : t("memory.fileMissing")}
@@ -302,14 +303,14 @@ export function PiMemoryConfig({
             role="alert"
             style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", border: "1px solid var(--warning)", borderRadius: "var(--radius-md)", background: "var(--warning-soft)" }}
           >
-            <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: "var(--text)" }}>{t("memory.conflict")}</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: TEXT.sm, color: "var(--text)" }}>{t("memory.conflict")}</span>
             <ConfigButton variant="secondary" size="small" onClick={() => void read(openFile.path)}>{t("memory.reload")}</ConfigButton>
           </div>
         )}
         {openFile && !conflict && (
           <div style={{ marginTop: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <strong style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}>{openFile.path}</strong>
+              <strong style={{ fontSize: TEXT.sm, fontFamily: "var(--font-mono)" }}>{openFile.path}</strong>
               <ConfigButton variant="ghost" size="small" onClick={() => setOpenFile(null)}>{t("i18n.close")}</ConfigButton>
               <ConfigButton
                 variant="primary"
@@ -325,7 +326,7 @@ export function PiMemoryConfig({
               value={draft}
               spellCheck={false}
               onChange={(event) => setDraft(event.target.value)}
-              style={{ minHeight: 200, fontFamily: "var(--font-mono)", fontSize: 12, lineHeight: 1.55, resize: "vertical" }}
+              style={{ minHeight: 200, fontFamily: "var(--font-mono)", fontSize: TEXT.sm, lineHeight: 1.55, resize: "vertical" }}
             />
             <p className="settings-chat-range-hint">{t("memory.autoSaveHint")}</p>
           </div>

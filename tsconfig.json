@@ -38,6 +38,9 @@
   "exclude": [
     "node_modules",
     "release",
+    // 产物 / 一次性脚本目录（gitignored；里面还有补丁基线副本，它们的相对导入
+    // 本来就不会解析，放进 tsc 只会淹没真实错误）
+    "test-results",
     "参考项目",
     "pi参考项目",
     "家里电脑跑的"

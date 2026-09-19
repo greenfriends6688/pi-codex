@@ -1,6 +1,7 @@
 "use client";
 
 import { useI18n } from "@/hooks/useI18n";
+import { TEXT } from "@/lib/typography";
 
 /*
  * fork:ui-newhome — empty-state hero for a brand new session.
@@ -100,7 +101,7 @@ export function NewSessionHome({
               background: "var(--bg-panel)",
               border: "1px solid var(--border-faint)",
               color: "var(--text-muted)",
-              fontSize: 20,
+              fontSize: TEXT["2xl"],
               fontWeight: 600,
               fontFamily: "var(--font-mono)",
             }}

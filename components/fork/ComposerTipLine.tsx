@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { TEXT } from "@/lib/typography";
 
 /*
  * fork:ui-tipline — rotating capability tips under the new-session composer
@@ -68,7 +69,7 @@ export function ComposerTipLine(): ReactNode {
         overflow: "hidden",
         textOverflow: "ellipsis",
         whiteSpace: "nowrap",
-        fontSize: 11.5,
+        fontSize: TEXT.xs,
         lineHeight: 1,
         color: "var(--text-dim)",
       }}

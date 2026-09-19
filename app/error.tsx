@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { TEXT } from "@/lib/typography";
 
 /**
  * fork:gap-error-boundary — 应用级错误边界。
@@ -30,7 +31,7 @@ export default function AppError({ error, retry }: { error: Error & { digest?: s
     color: "var(--text, inherit)",
     cursor: "pointer",
     font: "inherit",
-    fontSize: 13,
+    fontSize: TEXT.md,
   } as const;
 
   return (
@@ -44,12 +45,12 @@ export default function AppError({ error, retry }: { error: Error & { digest?: s
         fontFamily: "inherit",
       }}
     >
-      <h2 style={{ fontSize: 16, fontWeight: 600, margin: "0 0 8px" }}>{t("error.boundaryTitle")}</h2>
-      <p style={{ fontSize: 13, lineHeight: 1.7, margin: "0 0 12px", color: "var(--text-muted, inherit)" }}>
+      <h2 style={{ fontSize: TEXT.xl, fontWeight: 600, margin: "0 0 8px" }}>{t("error.boundaryTitle")}</h2>
+      <p style={{ fontSize: TEXT.md, lineHeight: 1.7, margin: "0 0 12px", color: "var(--text-muted, inherit)" }}>
         {t("error.boundaryHint")}
       </p>
       {error.digest && (
-        <p style={{ fontSize: 12, margin: "0 0 16px", color: "var(--text-dim, inherit)" }}>
+        <p style={{ fontSize: TEXT.sm, margin: "0 0 16px", color: "var(--text-dim, inherit)" }}>
           {t("error.boundaryDigest")} <code style={{ fontFamily: "var(--font-mono, monospace)" }}>{error.digest}</code>
         </p>
       )}

@@ -1,0 +1,608 @@
+--- a/lib/file-browser-roots.ts
++++ b/lib/file-browser-roots.ts
+@@ -0,0 +1,73 @@
++/**
++ * fork:gap08-roots — 文件树的多根模型。
++ *
++ * 本仓的文件树一直只接收**一个** `cwd`（`components/FileExplorer.tsx`）。而一个会话的
++ * `cwd` 与它所属项目的根**可能不同**：会话跑在 git worktree 里时，`cwd` 是
++ * `<repo>-worktrees/<branch>`，`projectRoot` 才是主仓库。此时用户既想看在改的那份
++ * （会话），也想看主仓库的其它文件（项目）——这就是「多根 + 作用域徽标」要解决的问题。
++ *
++ * 按 `docs/proma-prs-2026-09-18.md` GAP-08 的建议，这里只做**并存 + 徽标**，
++ * 不推翻本仓已有的「会话/项目分组 + worktree 分组」：根的顺序是「会话在前、项目在后」，
++ * 只有真的不同才出现第二个根（相同就退化成一个根，界面上不出现多余的分组头）。
++ *
++ * 纯函数：不碰文件系统，也不比较字符串形式的路径 —— 一律用 `lib/paths.ts` 的
++ * `samePath()`，因为 Windows 上 `C:\a` 与 `c:/a` 是同一个目录，而 git 还会吐出
++ * POSIX 风格的路径。
++ */
++
++import { samePath } from "./paths";
++
++export type FileBrowserScope = "session" | "project";
++
++export interface FileBrowserRoot {
++  /** 绝对路径。 */
++  path: string;
++  scope: FileBrowserScope;
++}
++
++function clean(value: string | null | undefined): string | null {
++  const trimmed = value?.trim();
++  return trimmed ? trimmed : null;
++}
++
++/**
++ * 组装文件树的根列表。
++ *
++ * - `cwd` 缺省（还在选目录的新会话）→ 返回空数组，调用方渲染空态；
++ * - `projectRoot` 与 `cwd` 相同（非 git 目录、或会话就在项目根）→ **只返回一个根**，
++ *   这样绝大多数会话的界面与改动前完全一致；
++ * - 两者不同（会话在 worktree 里）→ 两个根，会话在前。
++ */
++export function buildFileBrowserRoots(input: {
++  cwd?: string | null;
++  projectRoot?: string | null;
++}): FileBrowserRoot[] {
++  const cwd = clean(input.cwd);
++  if (!cwd) return [];
++  const roots: FileBrowserRoot[] = [{ path: cwd, scope: "session" }];
++  const projectRoot = clean(input.projectRoot);
++  if (projectRoot && !samePath(projectRoot, cwd)) {
++    roots.push({ path: projectRoot, scope: "project" });
++  }
++  return roots;
++}
++
++/** 去重后的根路径列表（watch 订阅按根建立，所以这里要稳定的唯一集合）。 */
++export function fileBrowserRootPaths(roots: readonly FileBrowserRoot[]): string[] {
++  const paths: string[] = [];
++  for (const root of roots) {
++    if (paths.some((existing) => samePath(existing, root.path))) continue;
++    paths.push(root.path);
++  }
++  return paths;
++}
++
++/** 根在树里的展示名：取最后一段（`/a/b/c` → `c`），盘符根保留原样。 */
++export function fileBrowserRootName(path: string): string {
++  const normalized = path.replace(/[\\/]+$/, "");
++  const parts = normalized.split(/[\\/]/).filter(Boolean);
++  if (parts.length === 0) return normalized;
++  const last = parts[parts.length - 1]!;
++  // `C:` 这类盘符根：`C:\` 去掉尾分隔符后是 `C:`，直接返回
++  return last;
++}
+--- a/lib/file-browser-roots.test.mjs
++++ b/lib/file-browser-roots.test.mjs
+@@ -0,0 +1,54 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { createJiti } from "jiti";
++
++// `file-browser-roots.ts` 内部 import `./paths`（省略扩展名），原生 node ESM 解析不了，
++// 所以与其它带依赖的 lib 测试一样走 jiti。
++const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
++const { buildFileBrowserRoots, fileBrowserRootPaths, fileBrowserRootName } = await jiti.import("./file-browser-roots.ts");
++
++test("没有 cwd 时不产生任何根（新会话还没选目录）", () => {
++  assert.deepEqual(buildFileBrowserRoots({}), []);
++  assert.deepEqual(buildFileBrowserRoots({ cwd: "   " }), []);
++  assert.deepEqual(buildFileBrowserRoots({ cwd: null, projectRoot: "/repo" }), []);
++});
++
++test("项目根与会话 cwd 相同时只保留一个根（绝大多数会话的界面不变）", () => {
++  const roots = buildFileBrowserRoots({ cwd: "/repo/app", projectRoot: "/repo/app" });
++  assert.deepEqual(roots, [{ path: "/repo/app", scope: "session" }]);
++});
++
++test("会话跑在 worktree 里时出现两个根，会话在前", () => {
++  const roots = buildFileBrowserRoots({
++    cwd: "/repo-worktrees/feature-a",
++    projectRoot: "/repo",
++  });
++  assert.deepEqual(roots, [
++    { path: "/repo-worktrees/feature-a", scope: "session" },
++    { path: "/repo", scope: "project" },
++  ]);
++});
++
++test("路径等价判断走 samePath：Windows 大小写/分隔符不同不算两个根", () => {
++  // `samePath` 对带盘符的路径做大小写折叠与斜杠归一，所以这里必须只出一个根。
++  assert.deepEqual(
++    buildFileBrowserRoots({ cwd: "C:\\Users\\me\\repo", projectRoot: "c:/users/me/repo" }),
++    [{ path: "C:\\Users\\me\\repo", scope: "session" }],
++  );
++});
++
++test("根路径去重保持顺序", () => {
++  const paths = fileBrowserRootPaths([
++    { path: "/repo-worktrees/a", scope: "session" },
++    { path: "/repo", scope: "project" },
++    { path: "/repo", scope: "project" },
++  ]);
++  assert.deepEqual(paths, ["/repo-worktrees/a", "/repo"]);
++});
++
++test("根名取最后一段，盘符根保留原样", () => {
++  assert.equal(fileBrowserRootName("/repo"), "repo");
++  assert.equal(fileBrowserRootName("/repo/worktrees/feature-a/"), "feature-a");
++  assert.equal(fileBrowserRootName("C:\\Users\\me\\repo"), "repo");
++  assert.equal(fileBrowserRootName("C:\\"), "C:");
++});
+--- a/components/FileExplorer.roots.test.mjs
++++ b/components/FileExplorer.roots.test.mjs
+@@ -0,0 +1,76 @@
++import assert from "node:assert/strict";
++import { readFileSync } from "node:fs";
++import test from "node:test";
++import { createJiti } from "jiti";
++
++/*
++ * fork:gap08-roots / fork:gap10-* — 文件树的多根与三个细节。
++ *
++ * 为什么用组件渲染测试：本机没有 `.git`（也没有 worktree），所以「会话在 worktree 里 →
++ * 多出一个项目根」这条分支没有真实会话可点。`renderToStaticMarkup` 不跑 effect，
++ * 因此不需要 mock fetch：额外根的分区头会立刻渲染出来，正好用于断言。
++ */
++
++const jiti = createJiti(import.meta.url, {
++  jsx: { runtime: "automatic" },
++  tsconfigPaths: true,
++});
++const React = await jiti.import("react");
++const { renderToStaticMarkup } = await jiti.import("react-dom/server");
++const { FileExplorer } = await jiti.import("./FileExplorer.tsx");
++const { I18nProvider } = await jiti.import("@/hooks/useI18n");
++
++const source = readFileSync(new URL("./FileExplorer.tsx", import.meta.url), "utf8");
++
++function render(props) {
++  return renderToStaticMarkup(
++    React.createElement(I18nProvider, null, React.createElement(FileExplorer, {
++      changesCollapsed: false,
++      onOpenFile() {},
++      ...props,
++    })),
++  );
++}
++
++test("会话 cwd 与项目根相同时不出现第二个根（界面与改动前一致）", () => {
++  const html = render({ cwd: "/repo/app", projectRoot: "/repo/app" });
++  assert.doesNotMatch(html, /files\.scopeProject/);
++  assert.doesNotMatch(html, />Project</);
++});
++
++test("会话在 worktree 里时渲染出「项目」根分区，并带上作用域徽标", () => {
++  const html = render({ cwd: "/repo-worktrees/feature-a", projectRoot: "/repo" });
++  // 徽标（文件句柄里是英文 Project —— node 环境没有 navigator，i18n 回退到 en）
++  assert.match(html, /Project|项目|專案/);
++  // 分区标题是项目根的最后一段，title 是完整路径
++  assert.match(html, /title="\/repo"/);
++});
++
++test("多根时 watch 按根订阅，而不是只订阅会话 cwd", () => {
++  assert.match(source, /extraRoots\.map\(\(root\) => \{[\s\S]*?new EventSource\(`\/api\/file-watch\?path=\$\{encodeURIComponent\(root\.path\)\}`\)/);
++  assert.match(source, /return \(\) => \{ sources\.forEach\(\(source\) => source\.close\(\)\); \};/);
++});
++
++test("GAP-10 细节一：展开的目录行在子项滚动时粘住（深度错开、背景不透明）", () => {
++  assert.match(source, /fork:gap10-sticky-dir/);
++  assert.match(source, /position: "sticky"/);
++  assert.match(source, /top: Math\.min\(depth, 3\) \* 24/);
++  assert.match(source, /background: "var\(--bg-panel\)"/);
++});
++
++test("GAP-10 细节二：搜索命中滚到视口中间（祖先进展开已由既有 effect 负责）", () => {
++  assert.match(source, /fork:gap10-search-scroll/);
++  assert.match(source, /scrollIntoView\(\{ block: "center" \}\)/);
++});
++
++test("GAP-10 细节三：空目录 800ms 后重试一次，且重试不会无限递归", () => {
++  assert.match(source, /fork:gap10-tree-retry/);
++  assert.match(source, /if \(entries\.length === 0 && !isRetry\)/);
++  assert.match(source, /\}, 800\);/);
++  // 定时器必须在卸载时收掉
++  assert.match(source, /emptyRetryRef\.current\) clearTimeout\(emptyRetryRef\.current\)/);
++});
++
++test("空目录文案走 i18n（原来是硬编码的英文 empty）", () => {
++  assert.match(source, /t\("files\.emptyDirectory"\)/);
++});
+--- a/components/FileExplorer.tsx
++++ b/components/FileExplorer.tsx
+@@ -13,6 +13,12 @@
+ import type { GitFileStatus, GitFileStatusKind, GitStatusResponse } from "@/lib/git-types";
+ import type { FileIndexEntry } from "@/lib/file-fuzzy";
+ import { buildSearchTree, type SearchTreeNode } from "@/lib/search-tree";
++// fork:gap08-roots — 多根（会话 cwd + 项目根并存 + 作用域徽标）
++import {
++  buildFileBrowserRoots,
++  fileBrowserRootName,
++  type FileBrowserRoot,
++} from "@/lib/file-browser-roots";
+ import { useI18n } from "@/hooks/useI18n";
+ import { TEXT } from "@/lib/typography";
+ type Translate = ReturnType<typeof useI18n>["t"];
+@@ -35,6 +41,8 @@
+ 
+ interface Props {
+   cwd: string;
++  /** fork:gap08-roots — 会话所属项目的根；与 cwd 不同时（worktree 会话）多出一个「项目」根。 */
++  projectRoot?: string | null;
+   onOpenFile: (filePath: string, fileName: string, options?: OpenFileOptions) => void;
+   refreshKey?: number;
+   onAtMention?: (relativePath: string, isDir: boolean) => void;
+@@ -245,6 +253,8 @@
+   highlightedPaths: Set<string>;
+   gitStatusByPath: Map<string, GitFileStatus>;
+   changedDirectoryPaths: Set<string>;
++  /** fork:gap10-search-scroll — 非空时，与它相等的行会滚到视口中间。 */
++  scrollToPath?: string | null;
+   t: Translate;
+ }) {
+   const open = expandedPaths.has(node.fullPath);
+@@ -258,7 +268,10 @@
+   const [loaded, setLoaded] = useState(node.loaded ?? false);
+   const [loading, setLoading] = useState(false);
+   const [hovered, setHovered] = useState(false);
+-  const loadChildren = useCallback(async (force = false) => {
++  const rowRef = useRef<HTMLDivElement>(null);
++  const emptyRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++
++  const loadChildren = useCallback(async (force = false, isRetry = false) => {
+     if (loaded && !force) return;
+     setLoading(true);
+     try {
+@@ -265,6 +278,12 @@
+       const entries = await fetchEntries(node.fullPath);
+       setChildren(entries);
+       setLoaded(true);
++      // fork:gap10-tree-retry — 空目录 800ms 后重试一次。agent 刚 mkdir / 刚写文件时，
++      // 列表很容易在它落盘前返回空，而用户看到的就是一个永远空着的目录。
++      if (entries.length === 0 && !isRetry) {
++        if (emptyRetryRef.current) clearTimeout(emptyRetryRef.current);
++        emptyRetryRef.current = setTimeout(() => { void loadChildren(true, true); }, 800);
++      }
+     } catch {
+       // ignore
+     } finally {
+@@ -272,6 +291,17 @@
+     }
+   }, [loaded, node.fullPath]);
+ 
++  // 卸载时收掉重试定时器，避免对已卸载的组件 setState
++  useEffect(() => () => {
++    if (emptyRetryRef.current) clearTimeout(emptyRetryRef.current);
++  }, []);
++
++  // fork:gap10-search-scroll — 搜索命中后把它带到视口中间
++  useEffect(() => {
++    if (!scrollToPath || scrollToPath !== node.fullPath) return;
++    rowRef.current?.scrollIntoView({ block: "center" });
++  }, [scrollToPath, node.fullPath]);
++
+   // Re-fetch children when the tree refreshes and the directory is open.
+   useEffect(() => {
+     if (refreshToken !== undefined && open && loaded) {
+@@ -293,6 +323,7 @@
+   return (
+     <div>
+       <div
++        ref={rowRef}
+         role="treeitem"
+         aria-expanded={node.isDir ? open : undefined}
+         aria-selected={false}
+@@ -308,7 +339,12 @@
+         onFocus={() => setHovered(true)}
+         onBlur={() => setHovered(false)}
+         style={{
+-          position: "relative",
++          // fork:gap10-sticky-dir — 展开的目录行在它自己的子项滚动时粘住。
++          // `top` 按深度错开（封顶 3 层），否则子目录会盖到父目录上；背景不透明，
++          // 否则会看穿到下面的行。
++          ...(node.isDir && open
++            ? { position: "sticky" as const, top: Math.min(depth, 3) * 24, zIndex: 5, background: "var(--bg-panel)" }
++            : { position: "relative" as const }),
+           display: "flex",
+           alignItems: "center",
+           gap: 4,
+@@ -316,7 +352,7 @@
+           paddingRight: 8,
+           height: 24,
+           cursor: "pointer",
+-          background: hovered ? "var(--bg-hover)" : "transparent",
++          background: hovered ? "var(--bg-hover)" : undefined,
+           borderRadius: "var(--radius-xs)",
+           userSelect: "none",
+         }}
+@@ -464,12 +500,13 @@
+               highlightedPaths={highlightedPaths}
+               gitStatusByPath={gitStatusByPath}
+               changedDirectoryPaths={changedDirectoryPaths}
++              scrollToPath={scrollToPath}
+               t={t}
+             />
+           ))}
+           {children.length === 0 && loaded && (
+             <div style={{ paddingLeft: 8 + (depth + 1) * 14, fontSize: TEXT.xs, color: "var(--text-dim)", height: 22, display: "flex", alignItems: "center" }}>
+-              empty
++              {t("files.emptyDirectory")}
+             </div>
+           )}
+         </div>
+@@ -480,6 +517,100 @@
+ 
+ type OpenFileOptions = { sourceSessionId?: string | null; modeHint?: "preview" | "diff" };
+ 
++// 额外根的 TreeNode 不参与 git 徽标 / 上传高亮，用模块级空集合避免每次渲染新建引用。
++const EMPTY_PATHS: Set<string> = new Set();
++const EMPTY_GIT_STATUS: Map<string, GitFileStatus> = new Map();
++
++/**
++ * fork:gap08-roots — 除会话 cwd 之外的根（目前只有「项目」）的独立分区。
++ *
++ * 为什么不把主根也改成循环：主根的渲染缠着上传回执、git 徽标、上传高亮、刷新脉冲与搜索，
++ * 拆出来风险远大于收益；而额外根只需要「列目录 + 展开 + 打开文件」。
++ * 于是额外根走这条轻量路径，单根会话的界面与行为完全不变。
++ */
++function RootSection({
++  root,
++  onOpenFile,
++  refreshToken,
++  t,
++}: {
++  root: FileBrowserRoot;
++  onOpenFile: OpenFileHandler;
++  refreshToken: string;
++  t: Translate;
++}) {
++  const [entries, setEntries] = useState<FileNode[]>([]);
++  const [loading, setLoading] = useState(true);
++  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
++
++  useEffect(() => {
++    let cancelled = false;
++    setLoading(true);
++    fetchEntries(root.path)
++      .then((next) => { if (!cancelled) setEntries(next); })
++      .catch(() => { if (!cancelled) setEntries([]); })
++      .finally(() => { if (!cancelled) setLoading(false); });
++    return () => { cancelled = true; };
++  }, [root.path, refreshToken]);
++
++  return (
++    <div style={{ padding: "2px 4px" }}>
++      <div
++        style={{
++          display: "flex",
++          alignItems: "center",
++          gap: 6,
++          height: 22,
++          padding: "0 8px 0 10px",
++          fontSize: TEXT["2xs"],
++          color: "var(--text-dim)",
++        }}
++      >
++        <span
++          style={{
++            flexShrink: 0,
++            padding: "1px 6px",
++            borderRadius: 999,
++            border: "1px solid var(--border)",
++            fontFamily: "var(--font-mono)",
++          }}
++        >
++          {t(root.scope === "project" ? "files.scopeProject" : "files.scopeSession")}
++        </span>
++        <span title={root.path} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
++          {fileBrowserRootName(root.path)}
++        </span>
++      </div>
++      {loading ? (
++        <div style={{ padding: "4px 12px", fontSize: TEXT.xs, color: "var(--text-dim)" }}>Loading files...</div>
++      ) : (
++        entries.map((node) => (
++          <TreeNode
++            key={node.fullPath}
++            node={node}
++            depth={0}
++            cwd={root.path}
++            onOpenFile={onOpenFile}
++            expandedPaths={expandedPaths}
++            onToggleExpanded={(fullPath, open) => {
++              setExpandedPaths((prev) => {
++                const next = new Set(prev);
++                if (open) next.add(fullPath); else next.delete(fullPath);
++                return next;
++              });
++            }}
++            refreshToken={refreshToken}
++            highlightedPaths={EMPTY_PATHS}
++            gitStatusByPath={EMPTY_GIT_STATUS}
++            changedDirectoryPaths={EMPTY_PATHS}
++            t={t}
++          />
++        ))
++      )}
++    </div>
++  );
++}
++
+ type OpenFileHandler = (filePath: string, fileName: string, options?: OpenFileOptions) => void;
+ 
+ function ChangeRow({
+@@ -601,6 +732,7 @@
+ 
+ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileExplorer({
+   cwd,
++  projectRoot,
+   onOpenFile,
+   refreshKey,
+   onAtMention,
+@@ -638,10 +770,26 @@
+   const [searchLoading, setSearchLoading] = useState(false);
+   const [searchError, setSearchError] = useState(false);
+   const [searchExpanded, setSearchExpanded] = useState<Set<string>>(new Set());
++  // fork:gap10-search-scroll — 搜索命中后滚到它并居中（祖先展开已由上面的 effect 负责）
++  const [scrollToPath, setScrollToPath] = useState<string | null>(null);
++  /**
++   * fork:gap08-roots — 多根：会话 cwd 始终是第一个根；`projectRoot` 与它不同时
++   * （会话跑在 worktree 里）再补一个「项目」根。相同时只有一个根，界面与改动前一致。
++   */
++  const browserRoots = useMemo<FileBrowserRoot[]>(
++    () => buildFileBrowserRoots({ cwd, projectRoot }),
++    [cwd, projectRoot],
++  );
++  const extraRoots = useMemo(
++    () => browserRoots.filter((root) => root.scope === "project"),
++    [browserRoots],
++  );
+   const searchInputRef = useRef<HTMLInputElement>(null);
+   const prevCwdRef = useRef<string | null>(null);
+   const uploadInputRef = useRef<HTMLInputElement>(null);
+   const refreshToken = `${refreshKey ?? 0}:${treeRefreshKey}:${watchPulse}`;
++  /** fork:gap08-roots — 额外根自己的变更脉冲（watch 必须按根建立）。 */
++  const [extraWatchPulse, setExtraWatchPulse] = useState(0);
+   const uploadBusy = uploadPhase !== "idle";
+   const hasSearchQuery = searchQuery.trim().length > 0;
+ 
+@@ -893,7 +1041,19 @@
+     return () => source.close();
+   }, [cwd]);
+ 
++  // fork:gap08-roots — 额外根各自订阅目录变更。主根的订阅在下面（挂在 cwd 上），
++  // 这里只负责「项目」根：FIX-08 的 watch 是**按路径**建立的，多根就必须多条订阅。
+   useEffect(() => {
++    if (extraRoots.length === 0 || typeof EventSource === "undefined") return;
++    const sources = extraRoots.map((root) => {
++      const source = new EventSource(`/api/file-watch?path=${encodeURIComponent(root.path)}`);
++      source.addEventListener("change", () => setExtraWatchPulse((pulse) => pulse + 1));
++      return source;
++    });
++    return () => { sources.forEach((source) => source.close()); };
++  }, [extraRoots]);
++
++  useEffect(() => {
+     let cancelled = false;
+     fetchGitStatus(cwd)      .then((status) => {
+         if (!cancelled) {
+@@ -1095,7 +1255,11 @@
+                     node={node}
+                     depth={0}
+                     cwd={cwd}
+-                    onOpenFile={onOpenFile}
++                onOpenFile={(filePath, fileName, options) => {
++                  // fork:gap10-search-scroll — 先把命中行滚到中间，再开文件
++                  setScrollToPath(filePath);
++                  onOpenFile(filePath, fileName, options);
++                }}
+                 onAtMention={onAtMention}
+                 expandedPaths={searchExpanded}
+                 onToggleExpanded={(fullPath, open) => {
+@@ -1108,6 +1272,7 @@
+                     highlightedPaths={highlightedPaths}
+                     gitStatusByPath={gitStatusByPath}
+                     changedDirectoryPaths={changedDirectoryPaths}
++                    scrollToPath={scrollToPath}
+                     t={t}
+                   />
+                 ))}
+@@ -1172,6 +1337,16 @@
+               />
+             ))
+           )}
++          {/* fork:gap08-roots — 项目根分区（仅当会话 cwd 与项目根不同，例如 worktree 会话） */}
++          {extraRoots.map((root) => (
++            <RootSection
++              key={root.path}
++              root={root}
++              onOpenFile={onOpenFile}
++              refreshToken={`${refreshToken}:${extraWatchPulse}`}
++              t={t}
++            />
++          ))}
+           {!loading && !error && roots.length === 0 && (
+             <div style={{ padding: "8px 12px", fontSize: TEXT.xs, color: "var(--text-dim)" }}>
+               {t("files.noFiles")}
+--- a/components/ExplorerPanel.tsx
++++ b/components/ExplorerPanel.tsx
+@@ -67,6 +67,7 @@
+ 
+ export function ExplorerPanel({
+   cwd,
++  projectRoot,
+   onOpenFile,
+   onOpenTerminal,
+   explorerRefreshKey,
+@@ -76,6 +77,8 @@
+   trailingActions,
+ }: {
+   cwd: string;
++  /** fork:gap08-roots — 会话所属项目根（与 cwd 不同时文件树多出一个「项目」根）。 */
++  projectRoot?: string | null;
+   onOpenFile: (filePath: string, fileName: string, options?: { sourceSessionId?: string | null; modeHint?: "preview" | "diff" }) => void;
+   onOpenTerminal?: (cwd: string) => void;
+   explorerRefreshKey?: number;
+@@ -275,6 +278,7 @@
+           <FileExplorer
+             ref={fileExplorerRef}
+             cwd={cwd}
++            projectRoot={projectRoot}
+             onOpenFile={onOpenFile}
+             refreshKey={explorerKey}
+             onAtMention={onAtMention}
+--- a/components/AppShell.tsx
++++ b/components/AppShell.tsx
+@@ -2338,6 +2338,8 @@
+   const explorerPanel = activeCwd ? (
+     <ExplorerPanel
+       cwd={activeCwd}
++      // fork:gap08-roots — 会话在 worktree 里时 cwd ≠ 项目根，文件树会多出一个「项目」根
++      projectRoot={selectedSession?.projectRoot ?? null}
+       onOpenFile={handleOpenFile}
+       onOpenTerminal={handleOpenTerminal}
+       explorerRefreshKey={explorerRefreshKey}
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -438,6 +438,11 @@
+     "files.untracked": "Untracked",
+     "files.conflict": "Conflict",
+     "files.newlyUploaded": "Newly uploaded",
++    // fork:gap08-roots
++    "files.scopeSession": "Session",
++    "files.scopeProject": "Project",
++    // fork:gap10-tree-retry
++    "files.emptyDirectory": "(empty)",
+     "files.containsChangedFiles": "Contains changed files",
+     "files.editorUnavailable": "The live editor could not load, so this is the read-only preview.",
+     "files.editorReload": "Reload",
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -438,6 +438,11 @@
+     "files.untracked": "未跟踪",
+     "files.conflict": "冲突",
+     "files.newlyUploaded": "刚上传",
++    // fork:gap08-roots — 多根的作用域徽标
++    "files.scopeSession": "会话",
++    "files.scopeProject": "项目",
++    // fork:gap10-tree-retry — 空目录（原来是硬编码的英文 "empty"）
++    "files.emptyDirectory": "（空）",
+     "files.containsChangedFiles": "包含已更改文件",
+     "files.editorUnavailable": "实时编辑器未能加载，当前为只读预览。",
+     "files.editorReload": "重新加载",
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -438,6 +438,11 @@
+     "files.untracked": "未追蹤",
+     "files.conflict": "衝突",
+     "files.newlyUploaded": "剛上傳",
++    // fork:gap08-roots
++    "files.scopeSession": "工作階段",
++    "files.scopeProject": "專案",
++    // fork:gap10-tree-retry
++    "files.emptyDirectory": "（空）",
+     "files.containsChangedFiles": "包含已變更的檔案",
+     "files.editorUnavailable": "即時編輯器未能載入，目前為唯讀預覽。",
+     "files.editorReload": "重新載入",

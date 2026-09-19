@@ -1,0 +1,904 @@
+--- a/lib/composer-attachments.ts
++++ b/lib/composer-attachments.ts
+@@ -0,0 +1,147 @@
++/**
++ * fork:gap07-attachments — 附件的分类与「路径引用」降级。
++ *
++ * ## 为什么不是「把任意文件塞进消息」
++ *
++ * pi 的 prompt 内容块只有 `text` 与 `image` 两种，`lib/image-attachments.ts` 的
++ * `validateAgentImages` 就是这条边界的守卫（非 image 直接拒绝）。所以图片以外的字节
++ * **不可能**直接进上下文。真正可行的机制是：把文件落到磁盘、把路径写进消息，由 agent
++ * 用自己的工具去读 —— 这也正是 `docs/proma-prs-2026-09-18.md` 里 GAP-07 写的
++ * 「>100MB 且有源路径时降级为路径引用」的方向。
++ *
++ * ## 三类出口（全部显式，没有一条是静默丢弃）
++ *
++ * | 出口 | 条件 | 落地 |
++ * | --- | --- | --- |
++ * | `image` | `image/*` 且 ≤10MB（既有上限） | 现有内联图片管道 + 压缩，**保持不变** |
++ * | `reference` | 其他文件，≤上传上限（或已有本地路径） | 上传到附件目录后插入 `@path` |
++ * | `skipped` | 超限**且**拿不到本地路径 | 显式提示原因，用户可改走文件树 / `@` 引用 |
++ *
++ * 上限与上传路由（`app/api/files/[...path]/route.ts`）保持一致：每文件 25MB、单次合计
++ * 100MB。这里不自行放宽 —— 上传是唯一会把字节写进磁盘的入口，它的封套不该被新功能顺手撑大。
++ */
++
++import { buildAtInsertText } from "./file-fuzzy";
++
++/** 与上传路由的每文件上限一致。 */
++export const MAX_ATTACHED_FILE_BYTES = 25 * 1024 * 1024;
++/** 与上传路由的单次合计上限一致。 */
++export const MAX_ATTACHED_UPLOAD_TOTAL_BYTES = 100 * 1024 * 1024;
++
++export type AttachmentSkipReason = "too-large" | "no-path";
++
++/** 只需要这几个字段，所以 `File` 与测试里的字面量都能直接传进来。 */
++export interface AttachmentFileFacts {
++  name: string;
++  size: number;
++  type?: string;
++}
++
++export interface AttachmentPlan {
++  /** 需要上传到附件目录的（每文件与合计都在上限内）。 */
++  upload: AttachmentFileFacts[];
++  /** 超过上传上限、但拿到了本地路径 → 直接就地把路径写进消息，不复制字节。 */
++  referenceInPlace: Array<{ file: AttachmentFileFacts; path: string }>;
++  /** 既超限又没有本地路径 → 显式提示，绝不静默丢。 */
++  skipped: Array<{ file: AttachmentFileFacts; reason: AttachmentSkipReason }>;
++}
++
++export interface AttachmentPlanOptions {
++  /**
++   * 该文件的本地绝对路径（桌面外壳可以给：`webUtils.getPathForFile`）。
++   * 浏览器里返回 `null` —— 这正是「>25MB 在网页版只能提示」的原因。
++   */
++  pathOf?: (file: AttachmentFileFacts) => string | null | undefined;
++  /** 本次还能上传多少字节（默认单次合计上限）。 */
++  uploadBudgetBytes?: number;
++}
++
++/**
++ * 把一批拖入/粘贴的文件分成「上传 / 就地引用 / 跳过」。
++ *
++ * 顺序敏感：合计预算按顺序消耗，所以先到先得；超预算但**有本地路径**的文件仍然能
++ * 就地引用（路径没有大小上限），只有两条路都走不通才进 `skipped`。
++ */
++export function planAttachments(
++  files: readonly AttachmentFileFacts[],
++  options: AttachmentPlanOptions = {},
++): AttachmentPlan {
++  const budget = options.uploadBudgetBytes ?? MAX_ATTACHED_UPLOAD_TOTAL_BYTES;
++  const plan: AttachmentPlan = { upload: [], referenceInPlace: [], skipped: [] };
++  let remaining = Math.max(0, budget);
++
++  for (const file of files) {
++    const path = options.pathOf?.(file) ?? null;
++    const withinPerFile = file.size <= MAX_ATTACHED_FILE_BYTES;
++    if (withinPerFile && file.size <= remaining) {
++      plan.upload.push(file);
++      remaining -= file.size;
++      continue;
++    }
++    if (path) {
++      plan.referenceInPlace.push({ file, path });
++      continue;
++    }
++    plan.skipped.push({ file, reason: "too-large" });
++  }
++
++  return plan;
++}
++
++/**
++ * 上传时用的文件名：先做一次与路由同源的清洗（路由也会校验，这里只是尽早失败并给用户
++ * 一个能看懂的原因）。返回 `null` 表示这个名字不可用。
++ */
++export function sanitizeAttachmentName(name: string): string | null {
++  const trimmed = name.trim();
++  if (!trimmed || trimmed === "." || trimmed === "..") return null;
++  if (trimmed.includes("\0")) return null;
++  if (trimmed.includes("/") || trimmed.includes("\\")) return null;
++  if (trimmed.length > 200) return null;
++  return trimmed;
++}
++
++/**
++ * 附件目录里已经有同名文件时，换一个不冲突的名字（`report.csv` → `report-2.csv`）。
++ *
++ * 不用 `conflict=overwrite`：附件目录是同一天的暂存区，同名覆盖会让**旧消息里的引用
++ * 指向新内容** —— 那种错误很难在事后发现。宁可多一次请求也不覆盖。
++ */
++export function nextAvailableAttachmentName(name: string, taken: Iterable<string>): string {
++  const used = new Set(taken);
++  if (!used.has(name)) return name;
++  const dot = name.lastIndexOf(".");
++  const stem = dot > 0 ? name.slice(0, dot) : name;
++  const ext = dot > 0 ? name.slice(dot) : "";
++  for (let index = 2; index < 1000; index += 1) {
++    const candidate = `${stem}-${index}${ext}`;
++    if (!used.has(candidate)) return candidate;
++  }
++  return `${stem}-${Date.now().toString(36)}${ext}`;
++}
++
++/**
++ * 把本地路径变成消息里的引用文本，复用 `@` 文件菜单的插入规则：
++ * `@path `（含空格时 `@"path" `）。
++ */
++export function buildAttachmentReference(path: string): { text: string; cursorOffset: number } {
++  return buildAtInsertText(path, false, false);
++}
++
++/** 提示条要展示的文案键：没有任何需要说明的出口时返回 `null`。 */
++export type AttachmentNotice = "none" | "references" | "skipped";
++
++export interface AttachmentOutcome {
++  /** 成功变成内联图片的数量。 */
++  images?: number;
++  /** 成功插入引用的文件名。 */
++  referenced: string[];
++  /** 跳过的文件名与原因。 */
++  skipped?: Array<{ name: string; reason: AttachmentSkipReason }>;
++}
++
++export function attachmentNotice(outcome: AttachmentOutcome): AttachmentNotice {
++  if ((outcome.skipped?.length ?? 0) > 0) return "skipped";
++  if (outcome.referenced.length > 0 || (outcome.images ?? 0) > 0) return "references";
++  return "none";
++}
+--- a/lib/composer-attachments.test.mjs
++++ b/lib/composer-attachments.test.mjs
+@@ -0,0 +1,151 @@
++import assert from "node:assert/strict";
++import test from "node:test";
++import { createJiti } from "jiti";
++
++// `composer-attachments.ts` 会 import `./file-fuzzy`（省略扩展名，打包器/jiti 能解析，
++// 原生 node ESM 不能），所以这里与 lib/todo-state.test.mjs 一样走 jiti。
++const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
++
++async function loadSubject() {
++  return jiti.import("./composer-attachments.ts");
++}
++
++const MB = 1024 * 1024;
++const file = (name, size, type = "") => ({ name, size, type });
++
++test("上传上限与上传路由保持一致（每文件 25MB / 单次 100MB）", async () => {
++  const { MAX_ATTACHED_FILE_BYTES, MAX_ATTACHED_UPLOAD_TOTAL_BYTES } = await loadSubject();
++
++  assert.equal(MAX_ATTACHED_FILE_BYTES, 25 * 1024 * 1024);
++  assert.equal(MAX_ATTACHED_UPLOAD_TOTAL_BYTES, 100 * 1024 * 1024);
++});
++
++test("上限内的任意文件类型都走上传（不再只收图片）", async () => {
++  const { planAttachments } = await loadSubject();
++
++  const plan = planAttachments([
++    file("report.csv", 2 * MB, "text/csv"),
++    file("notes.md", 1024, "text/markdown"),
++    file("archive.zip", 9 * MB, "application/zip"),
++  ]);
++
++  assert.deepEqual(plan.upload.map((f) => f.name), ["report.csv", "notes.md", "archive.zip"]);
++  assert.deepEqual(plan.referenceInPlace, []);
++  assert.deepEqual(plan.skipped, []);
++});
++
++test("超过每文件上限但有本地路径 → 直接就地把路径写进消息", async () => {
++  const { planAttachments } = await loadSubject();
++
++  const big = file("video.mp4", 60 * MB, "video/mp4");
++  const plan = planAttachments([big], { pathOf: () => "/Users/me/Downloads/video.mp4" });
++
++  assert.deepEqual(plan.upload, []);
++  assert.deepEqual(plan.referenceInPlace, [{ file: big, path: "/Users/me/Downloads/video.mp4" }]);
++  assert.deepEqual(plan.skipped, []);
++});
++
++test("超过每文件上限又没有本地路径 → 显式跳过并给出原因（不再静默丢）", async () => {
++  const { planAttachments } = await loadSubject();
++
++  const big = file("video.mp4", 60 * MB, "video/mp4");
++  const plan = planAttachments([big]);
++
++  assert.deepEqual(plan.upload, []);
++  assert.deepEqual(plan.referenceInPlace, []);
++  assert.deepEqual(plan.skipped, [{ file: big, reason: "too-large" }]);
++});
++
++test("合计预算按顺序消耗，超预算但有路径的仍能就地引用", async () => {
++  const { planAttachments } = await loadSubject();
++
++  // 六个 20MB：前五个刚好 100MB，第六个超预算
++  const plan = planAttachments([
++    file("a.bin", 20 * MB), file("b.bin", 20 * MB), file("c.bin", 20 * MB),
++    file("d.bin", 20 * MB), file("e.bin", 20 * MB), file("f.bin", 20 * MB),
++  ], { pathOf: (f) => (f.name === "f.bin" ? "/tmp/f.bin" : null), uploadBudgetBytes: 100 * MB });
++
++  assert.deepEqual(plan.upload.map((f) => f.name), ["a.bin", "b.bin", "c.bin", "d.bin", "e.bin"]);
++  assert.deepEqual(plan.referenceInPlace.map((entry) => entry.file.name), ["f.bin"]);
++  assert.deepEqual(plan.skipped, []);
++});
++
++test("合计预算耗尽且无路径 → 逐个显式跳过", async () => {
++  const { planAttachments } = await loadSubject();
++
++  const plan = planAttachments([
++    file("a.bin", 20 * MB), file("b.bin", 20 * MB), file("c.bin", 20 * MB),
++    file("d.bin", 20 * MB), file("e.bin", 20 * MB), file("f.bin", 20 * MB),
++  ], { uploadBudgetBytes: 100 * MB });
++
++  assert.deepEqual(plan.upload.map((f) => f.name), ["a.bin", "b.bin", "c.bin", "d.bin", "e.bin"]);
++  assert.deepEqual(plan.skipped.map((entry) => entry.file.name), ["f.bin"]);
++  assert.deepEqual(plan.referenceInPlace, []);
++});
++
++test("每文件上限优先于合计预算：30MB 文件在 100MB 预算下仍然不能上传", async () => {
++  const { planAttachments } = await loadSubject();
++
++  // 这条语义是刻意的：上传路由的封套（每文件 25MB）不因新功能被撞大
++  const plan = planAttachments([file("big.bin", 30 * MB)], { uploadBudgetBytes: 100 * MB });
++  assert.deepEqual(plan.upload, []);
++  assert.deepEqual(plan.skipped.map((entry) => entry.file.name), ["big.bin"]);
++
++  // 有本地路径时，同样大小反而能引用（路径本来就没大小限制）
++  const withPath = planAttachments([file("big.bin", 30 * MB)], { pathOf: () => "/tmp/big.bin" });
++  assert.deepEqual(withPath.referenceInPlace.map((entry) => entry.file.name), ["big.bin"]);
++});
++
++test("预算为 0 时全部走引用或跳过，不会误上传", async () => {
++  const { planAttachments } = await loadSubject();
++
++  const plan = planAttachments([file("a.txt", 10)], { uploadBudgetBytes: 0 });
++  assert.deepEqual(plan.upload, []);
++  assert.deepEqual(plan.skipped.map((entry) => entry.file.name), ["a.txt"]);
++});
++
++test("文件名清洗拦住目录穿越与非法名字", async () => {
++  const { sanitizeAttachmentName } = await loadSubject();
++
++  assert.equal(sanitizeAttachmentName("report.csv"), "report.csv");
++  assert.equal(sanitizeAttachmentName("  带空格 名字 .txt  "), "带空格 名字 .txt");
++  assert.equal(sanitizeAttachmentName("../etc/passwd"), null);
++  assert.equal(sanitizeAttachmentName("a/b.csv"), null);
++  assert.equal(sanitizeAttachmentName("a\\b.csv"), null);
++  assert.equal(sanitizeAttachmentName(".."), null);
++  assert.equal(sanitizeAttachmentName(""), null);
++  assert.equal(sanitizeAttachmentName("bad\0name"), null);
++  assert.equal(sanitizeAttachmentName(`${"x".repeat(201)}.txt`), null);
++});
++
++test("重名时给出 -2/-3 后缀而不是覆盖", async () => {
++  const { nextAvailableAttachmentName } = await loadSubject();
++
++  assert.equal(nextAvailableAttachmentName("report.csv", []), "report.csv");
++  assert.equal(nextAvailableAttachmentName("report.csv", ["report.csv"]), "report-2.csv");
++  assert.equal(nextAvailableAttachmentName("report.csv", ["report.csv", "report-2.csv"]), "report-3.csv");
++  assert.equal(nextAvailableAttachmentName("README", ["README"]), "README-2");
++  assert.equal(nextAvailableAttachmentName(".env", [".env.2", ".env"]), ".env-2");
++});
++
++test("路径引用复用 @ 的插入规则（含空格时加引号）", async () => {
++  const { buildAttachmentReference } = await loadSubject();
++
++  assert.deepEqual(buildAttachmentReference("/tmp/a.csv"), { text: "@/tmp/a.csv ", cursorOffset: 12 });
++  assert.deepEqual(
++    buildAttachmentReference("/tmp/my report.csv"),
++    { text: '@"/tmp/my report.csv" ', cursorOffset: 22 },
++  );
++});
++
++test("提示条只在有话说的时候出现", async () => {
++  const { attachmentNotice } = await loadSubject();
++
++  assert.equal(attachmentNotice({ referenced: [] }), "none");
++  assert.equal(attachmentNotice({ referenced: [], images: 2 }), "references");
++  assert.equal(attachmentNotice({ referenced: ["a.csv"] }), "references");
++  assert.equal(
++    attachmentNotice({ referenced: ["a.csv"], skipped: [{ name: "big.bin", reason: "too-large" }] }),
++    "skipped",
++  );
++});
+--- a/app/api/attachments/route.ts
++++ b/app/api/attachments/route.ts
+@@ -0,0 +1,54 @@
++import { NextRequest, NextResponse } from "next/server";
++import fs from "node:fs";
++import { join } from "node:path";
++import { getAgentDir } from "@earendil-works/pi-coding-agent";
++import { allowFileRoot } from "@/lib/file-access";
++import { isApiRequestAllowed } from "@/lib/request-security";
++
++/**
++ * fork:gap07-attachments — composer 附件的落盘目录。
++ *
++ * 为什么需要这个路由：任意文件的字节**没法**直接进消息（pi 的 prompt 内容块只有
++ * `text` 与 `image`，见 `lib/image-attachments.ts` 的 `validateAgentImages`），所以
++ * 「加附件」在本仓只能是「落到磁盘 + 把路径写进消息」。既有上传路由
++ * （`app/api/files/[...path]/route.ts` 的 POST）已经能写、有 25MB/文件与 100MB/单次
++ * 的封套、有冲突策略，但它要求**目标目录必须在允许根内**——而允许根来自会话 cwd、
++ * 项目根这些用户仓库位置，往用户仓库里随手写附件是不能接受的。
++ *
++ * 所以这里只做一件事：给出一个专用的、位于 pi agent 目录下的附件目录，并把它登记为
++ * 允许根。字节仍然走既有的上传路由（不新开写通道），冲突仍然由它判定。
++ *
++ * 目录按天分桶（`<agentDir>/attachments/YYYY-MM-DD/`）：既是暂存区，也好清理，
++ * 而且不会在一个目录里堆成千上万个文件。
++ *
++ * GET /api/attachments → { dir }
++ */
++export const dynamic = "force-dynamic";
++
++export function attachmentsDirectory(now: Date = new Date()): string {
++  const day = [
++    now.getFullYear(),
++    String(now.getMonth() + 1).padStart(2, "0"),
++    String(now.getDate()).padStart(2, "0"),
++  ].join("-");
++  return join(getAgentDir(), "attachments", day);
++}
++
++export async function GET(request: NextRequest) {
++  if (!isApiRequestAllowed(request)) {
++    return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
++  }
++
++  try {
++    const dir = attachmentsDirectory();
++    fs.mkdirSync(dir, { recursive: true });
++    // 登记为允许根：上传路由会用同一个允许根集合校验写入目标，文件树/预览也才能读回。
++    allowFileRoot(dir);
++    return NextResponse.json({ dir });
++  } catch (error) {
++    return NextResponse.json(
++      { error: error instanceof Error ? error.message : String(error) },
++      { status: 500 },
++    );
++  }
++}
+--- a/app/api/attachments/route.test.mjs
++++ b/app/api/attachments/route.test.mjs
+@@ -0,0 +1,50 @@
++import assert from "node:assert/strict";
++import { existsSync, mkdirSync, mkdtempSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import test from "node:test";
++import { createJiti } from "jiti";
++import { NextRequest } from "next/server.js";
++
++// 附件目录必须在 agent 目录下 —— 用临时目录当 agent 目录，绝不碰真实的那份。
++const agentDir = mkdtempSync(join(tmpdir(), "pi-web-attachments-"));
++mkdirSync(agentDir, { recursive: true });
++process.env.PI_CODING_AGENT_DIR = agentDir;
++
++const jiti = createJiti(import.meta.url, {
++  alias: { "@": process.cwd() },
++  interopDefault: true,
++  moduleCache: false,
++});
++const { GET, attachmentsDirectory } = await jiti.import("./route.ts");
++
++function request(headers = {}) {
++  return new NextRequest("http://localhost/api/attachments", {
++    method: "GET",
++    headers: {
++      Host: "localhost",
++      Origin: "http://localhost",
++      "Sec-Fetch-Site": "same-origin",
++      ...headers,
++    },
++  });
++}
++
++test("按天分桶，且位于 agent 目录下", () => {
++  const dir = attachmentsDirectory(new Date("2026-09-18T10:00:00Z"));
++  assert.ok(dir.startsWith(agentDir), `${dir} should live under ${agentDir}`);
++  assert.match(dir, /attachments[\\/]2026-09-18$/);
++});
++
++test("GET 创建目录并返回路径", async () => {
++  const res = await GET(request());
++  assert.equal(res.status, 200);
++  const body = await res.json();
++  assert.ok(body.dir.startsWith(agentDir));
++  assert.equal(existsSync(body.dir), true);
++});
++
++test("跨站请求在创建目录之前就被拒", async () => {
++  const res = await GET(request({ Origin: "http://evil.example", "Sec-Fetch-Site": "cross-site" }));
++  assert.equal(res.status, 403);
++});
+--- a/components/ChatInput.tsx
++++ b/components/ChatInput.tsx
+@@ -62,6 +62,16 @@
+   type ReferenceSessionSource,
+ } from "@/lib/composer-references";
+ import { ComposerReferenceMenu } from "./ComposerReferenceMenu";
++// fork:gap07-attachments — 任意文件：分类 / 上限 / 路径引用
++import {
++  MAX_ATTACHED_FILE_BYTES,
++  buildAttachmentReference,
++  nextAvailableAttachmentName,
++  planAttachments,
++  type AttachmentSkipReason,
++} from "@/lib/composer-attachments";
++import { encodeFilePathForApi, joinFilePath } from "@/lib/file-paths";
++import { desktopFilePathFor } from "@/lib/desktop-shell";
+ import { TEXT } from "@/lib/typography";
+ 
+ export { filterModelOptions } from "./ModelSelector";
+@@ -133,6 +143,8 @@
+   replaceMessage: (message: UserMessage) => void;
+   prependText: (text: string) => void;
+   addImages: (files: File[]) => void;
++  /** fork:gap07-attachments — 任意文件（图片内联，其余落盘后插路径引用）。 */
++  addFiles: (files: File[]) => void;
+   addSelectionContext: (context: SelectionContext) => void;
+   removeSelectionContext: (id: string) => void;
+   clearSelectionContexts: () => void;
+@@ -666,6 +678,12 @@
+   /** 防止同一个数据源被并发拉取。 */
+   const referenceFetchRef = useRef<{ sessions: boolean; mcp: string | null }>({ sessions: false, mcp: null });
+   const [imageWarningDismissed, setImageWarningDismissed] = useState(false);
++  /** fork:gap07-attachments — 附件落盘结果提示；每一次拖入都有可见交代，不静默丢。 */
++  const [attachmentNotice, setAttachmentNotice] = useState<{
++    added: string[];
++    skipped: Array<{ name: string; reason: AttachmentSkipReason }>;
++    failed: string[];
++  } | null>(null);
+   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
+   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
+   const [builtinCommandPending, setBuiltinCommandPending] = useState(false);
+@@ -952,6 +970,9 @@
+     addImages(files: File[]) {
+       processImageFiles(files);
+     },
++    addFiles(files: File[]) {
++      void attachFiles(files);
++    },
+     addSelectionContext(context: SelectionContext) {
+       const normalized = normalizeSelectionContext(context);
+       if (!normalized) return;
+@@ -1042,6 +1063,150 @@
+     }
+   }, [compact]);
+ 
++  // ---------------------------------------------------------------------------
++  // fork:gap07-attachments — 任意文件 → 落盘（或就地引用）→ 插入 `@路径`
++  // ---------------------------------------------------------------------------
++
++  /** 把引用路径插到光标处（与 `@` 菜单插入的文本同构，所以 agent 侧无需特殊处理）。 */
++  const appendAttachmentReferences = useCallback((paths: string[]) => {
++    if (paths.length === 0) return;
++    const current = valueRef.current;
++    const ta = textareaRef.current;
++    const cursor = ta?.selectionStart ?? current.length;
++    const insert = paths.map((path) => buildAttachmentReference(path).text).join("");
++    const needsSpace = cursor > 0 && !/\s/.test(current.slice(cursor - 1, cursor));
++    const next = current.slice(0, cursor) + (needsSpace ? " " : "") + insert + current.slice(cursor);
++    const nextCursor = cursor + (needsSpace ? 1 : 0) + insert.length;
++    valueRef.current = next;
++    setValue(next);
++    requestAnimationFrame(() => {
++      const el = textareaRef.current;
++      if (!el) return;
++      el.focus();
++      el.setSelectionRange(nextCursor, nextCursor);
++      el.style.height = "auto";
++      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
++    });
++  }, []);
++
++  /**
++   * 上传到附件目录。字节走的是**既有**文件上传路由（同一个 25MB/文件、100MB/单次封套、
++   * 同一个冲突策略校验），这里只负责把目录要到手、把结果拼回绝对路径。
++   *
++   * 同名不覆盖：先用 `conflict=skip`，被跳过的那几个改名重试（`report.csv` →
++   * `report-2.csv` → `report-3.csv`）。覆盖会让**旧消息里的引用指向新内容**，
++   * 那种错误事后很难发现。
++   *
++   * 待重试的队列必须同时带着「本地 File」——只记服务端名字会丢了对应关系（名字被改过）。
++   */
++  const uploadAttachmentFiles = useCallback(async (files: File[]) => {
++    const dirResponse = await fetch("/api/attachments");
++    if (!dirResponse.ok) throw new Error(`attachments directory failed: ${dirResponse.status}`);
++    const { dir } = await dirResponse.json() as { dir?: string };
++    if (!dir) throw new Error("attachments directory missing");
++    const url = `/api/files/${encodeFilePathForApi(dir)}?type=upload&conflict=skip`;
++
++    const send = async (entries: Array<{ file: File; name: string }>) => {
++      const form = new FormData();
++      for (const entry of entries) {
++        form.append(
++          "files",
++          entry.name === entry.file.name
++            ? entry.file
++            : new File([entry.file], entry.name, { type: entry.file.type }),
++        );
++      }
++      const response = await fetch(url, { method: "POST", body: form });
++      const body = await response.json().catch(() => null) as {
++        uploaded?: string[];
++        skipped?: string[];
++        errors?: Array<{ name: string; error: string }>;
++        error?: string;
++      } | null;
++      if (!response.ok && !(body?.uploaded?.length)) {
++        throw new Error(body?.error ?? `upload failed: ${response.status}`);
++      }
++      return body ?? {};
++    };
++
++    const uploaded: string[] = [];
++    const failed: string[] = [];
++    const taken = new Set<string>();
++    let pending: Array<{ file: File; name: string }> = files.map((file) => ({ file, name: file.name }));
++
++    for (let attempt = 0; attempt < 5 && pending.length > 0; attempt += 1) {
++      const body = await send(pending);
++      uploaded.push(...(body.uploaded ?? []));
++      failed.push(...(body.errors ?? []).map((entry) => entry.name));
++      const conflicts = new Set(body.skipped ?? []);
++      pending = pending.flatMap((entry) => {
++        if (!conflicts.has(entry.name)) return [];
++        taken.add(entry.name);
++        return [{ file: entry.file, name: nextAvailableAttachmentName(entry.name, taken) }];
++      });
++    }
++
++    return {
++      paths: uploaded.map((name) => joinFilePath(dir, name)),
++      names: uploaded,
++      failed: [...failed, ...pending.map((entry) => entry.name)],
++    };
++  }, []);
++
++  /**
++   * 所有入口（按钮 / 拖拽 / 粘贴）统一走这里。
++   *
++   * 图片先走既有内联管道（10MB/10 张 + 压缩，**保持不变**）；剩下的 —— 包括超出图片
++   * 上限的那部分 —— 按 `planAttachments` 分成上传 / 就地引用 / 跳过。
++   */
++  const attachFiles = useCallback(async (files: File[]) => {
++    if (compact || files.length === 0) return;
++    const imageSlots = Math.max(
++      0,
++      MAX_ATTACHED_IMAGES - attachedImagesRef.current.length - pendingImageCountRef.current,
++    );
++    const inlineImages = files
++      .filter((file) => file.type.startsWith("image/") && file.size <= MAX_ATTACHED_IMAGE_BYTES)
++      .slice(0, imageSlots);
++    const rest = files.filter((file) => !inlineImages.includes(file));
++
++    if (inlineImages.length > 0) await processImageFiles(inlineImages);
++    if (rest.length === 0) return;
++
++    const entries = rest.map((file) => ({ file, facts: { name: file.name, size: file.size, type: file.type } }));
++    const plan = planAttachments(entries.map((entry) => entry.facts), {
++      pathOf: (facts) => {
++        const match = entries.find((entry) => entry.facts === facts);
++        return match ? desktopFilePathFor(match.file) : null;
++      },
++    });
++
++    const added = plan.referenceInPlace.map((entry) => entry.file.name);
++    const paths = plan.referenceInPlace.map((entry) => entry.path);
++    const skipped = plan.skipped.map((entry) => ({ name: entry.file.name, reason: entry.reason }));
++    const failed: string[] = [];
++
++    if (plan.upload.length > 0) {
++      const uploadFiles = plan.upload.flatMap((facts) => {
++        const match = entries.find((entry) => entry.facts === facts);
++        return match ? [match.file] : [];
++      });
++      try {
++        const result = await uploadAttachmentFiles(uploadFiles);
++        paths.push(...result.paths);
++        added.push(...result.names);
++        failed.push(...result.failed);
++      } catch {
++        failed.push(...plan.upload.map((facts) => facts.name));
++      }
++    }
++
++    appendAttachmentReferences(paths);
++    if (added.length > 0 || skipped.length > 0 || failed.length > 0) {
++      setAttachmentNotice({ added, skipped, failed });
++    }
++  }, [appendAttachmentReferences, compact, processImageFiles, uploadAttachmentFiles]);
++
+   const removeImage = useCallback((index: number) => {
+     setAttachedImages((prev) => {
+       const next = [...prev];
+@@ -1810,11 +1975,12 @@
+ 
+   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+     const items = Array.from(e.clipboardData?.items ?? []);
+-    const imageItems = items.filter((item) => item.type.startsWith("image/"));
+-    if (!compact && imageItems.length) {
++    // fork:gap07-attachments — 粘贴的文件不再限定图片：图片内联，其余落盘后插路径引用。
++    const fileItems = items.filter((item) => item.kind === "file");
++    if (!compact && fileItems.length) {
+       e.preventDefault();
+-      const files = imageItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
+-      processImageFiles(files);
++      const files = fileItems.map((item) => item.getAsFile()).filter((f): f is File => f !== null);
++      void attachFiles(files);
+       return;
+     }
+ 
+@@ -1863,7 +2029,7 @@
+       ta.focus();
+       ta.setSelectionRange(start + markdown.length, start + markdown.length);
+     });
+-  }, [compact, processImageFiles, updateAtQuery]);
++  }, [attachFiles, compact, updateAtQuery]);
+ 
+   useEffect(() => {
+     if (slashQuery === null) {
+@@ -2125,12 +2291,12 @@
+       {!compact && <input
+         ref={fileInputRef}
+         type="file"
+-        accept="image/*"
+         multiple
+         style={{ display: "none" }}
+         onChange={(e) => {
+           const files = Array.from(e.target.files ?? []);
+-          processImageFiles(files);
++          // fork:gap07-attachments — 任意文件（原来只收图片，其余静默丢弃）
++          void attachFiles(files);
+           e.target.value = "";
+         }}
+       />}
+@@ -2685,6 +2851,67 @@
+               </div>
+             );
+           })()}
++          {/* fork:gap07-attachments — 附件落盘结果：每次拖入都有可见交代（新增了什么、跳过了什么） */}
++          {attachmentNotice && (
++            <div
++              role="status"
++              aria-live="polite"
++              style={{
++                display: "flex",
++                alignItems: "flex-start",
++                gap: 8,
++                // 宽度由外层 composer 容器（`--composer-max-width`）统一约束，
++                // 这里不再声明自己的 maxWidth —— 上层的 ChatAppearance 测试
++                // 就要求这个变量在文件里只出现一次。
++                margin: "0 0 6px",
++                padding: "5px 8px 5px 10px",
++                border: "1px solid var(--border-faint)",
++                borderRadius: "var(--radius-md)",
++                background: "var(--bg-panel)",
++                color: "var(--text-muted)",
++                fontSize: TEXT.xs,
++                lineHeight: 1.5,
++              }}
++            >
++              <div style={{ display: "grid", gap: 2, minWidth: 0 }}>
++                {attachmentNotice.added.length > 0 && (
++                  <span>{t("chat.attachmentAdded", { names: attachmentNotice.added.join("、") })}</span>
++                )}
++                {attachmentNotice.skipped.length > 0 && (
++                  <span style={{ color: "var(--warning)" }}>
++                    {t("chat.attachmentSkipped", {
++                      limit: Math.round(MAX_ATTACHED_FILE_BYTES / (1024 * 1024)),
++                      names: attachmentNotice.skipped.map((entry) => entry.name).join("、"),
++                    })}
++                  </span>
++                )}
++                {attachmentNotice.failed.length > 0 && (
++                  <span style={{ color: "var(--danger, #ef4444)" }}>
++                    {t("chat.attachmentFailed", { names: attachmentNotice.failed.join("、") })}
++                  </span>
++                )}
++              </div>
++              <button
++                type="button"
++                onClick={() => setAttachmentNotice(null)}
++                aria-label={t("chat.close")}
++                title={t("chat.close")}
++                style={{
++                  marginLeft: "auto",
++                  flexShrink: 0,
++                  padding: "0 4px",
++                  border: "none",
++                  background: "transparent",
++                  color: "var(--text-dim)",
++                  cursor: "pointer",
++                  fontSize: TEXT.md,
++                  lineHeight: 1,
++                }}
++              >
++                ×
++              </button>
++            </div>
++          )}
+           <div
+             className="chat-input-shell"
+             style={{
+@@ -2789,7 +3016,7 @@
+           <div style={{ flex: isMobile ? "1 1 auto" : "0 0 auto", minWidth: 0, display: "flex", alignItems: "center", gap: 2 }}>
+             <button
+               onClick={() => fileInputRef.current?.click()}
+-             title={t("chat.attachImage")}
++             title={t("chat.attachFile")}
+               style={{
+                 flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+                 width: "var(--spacing-token-button-composer, 28px)", height: "var(--spacing-token-button-composer, 28px)", padding: 0,
+--- a/components/ChatWindow.tsx
++++ b/components/ChatWindow.tsx
+@@ -906,7 +906,8 @@
+   useEffect(() => () => { onContextUsageChange?.(null); }, [onContextUsageChange]);
+ 
+   const onDrop = useCallback((files: File[]) => {
+-    chatInputRef?.current?.addImages(files);
++    // fork:gap07-attachments — 拖拽入口与其他入口统一：图片内联，其余落盘后插路径引用
++    chatInputRef?.current?.addFiles(files);
+   }, [chatInputRef]);
+ 
+   const { isDragOver, isRejectedDrag, handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = useDragDrop(onDrop);
+@@ -1177,7 +1178,7 @@
+             boxShadow: "var(--shadow-md)",
+           }}
+         >
+-          {t("chat.dropImagesOnly")}
++          {t("chat.dropFilesOnly")}
+         </div>
+       )}
+       {isDragOver && (
+--- a/hooks/useDragDrop.ts
++++ b/hooks/useDragDrop.ts
+@@ -17,8 +17,10 @@
+   const handleDragEnter = useCallback((e: React.DragEvent) => {
+     const items = Array.from(e.dataTransfer.items);
+     if (items.length === 0) return;
+-    const hasImages = items.some((item) => item.type.startsWith("image/"));
+-    if (!hasImages) {
++    // fork:gap07-attachments — 任意文件都可拖入（之前非图片直接标为“拒收”）。
++    // `kind === "file"` 才是文件；拖选中的文本/HTML 仍然不算。
++    const hasFiles = items.some((item) => item.kind === "file");
++    if (!hasFiles) {
+       flagRejected();
+       return;
+     }
+@@ -28,8 +30,8 @@
+   }, [flagRejected]);
+ 
+   const handleDragOver = useCallback((e: React.DragEvent) => {
+-    const hasImages = Array.from(e.dataTransfer.items).some((item) => item.type.startsWith("image/"));
+-    if (!hasImages) return;
++    const hasFiles = Array.from(e.dataTransfer.items).some((item) => item.kind === "file");
++    if (!hasFiles) return;
+     e.preventDefault();
+   }, []);
+ 
+--- a/lib/desktop-shell.ts
++++ b/lib/desktop-shell.ts
+@@ -29,6 +29,13 @@
+   setKeepAwake(active: boolean): void;
+   openExternal(url: string): void;
+   revealPath(target: string): void;
++  /**
++   * fork:gap07-attachments — 拖入文件的真实磁盘路径。
++   *
++   * 浏览器拿不到 `File` 的路径（安全限制），桌面外壳可以（`webUtils.getPathForFile`）。
++   * 只有拿到路径，超过上传上限的文件才能「就地引用」而不是被跳过。
++   */
++  filePathFor?(file: File): string | null;
+   onAction(callback: (action: DesktopAction) => void): () => void;
+ }
+ 
+@@ -48,6 +55,25 @@
+ }
+ 
+ /**
++ * fork:gap07-attachments — 拿拖入文件的本地路径；浏览器里恒返回 `null`。
++ *
++ * 桥不可用、旧版外壳没有这个方法、或 Electron 拒绝这个 File（例如它来自
++ * `new File([...])` 而不是真实拖拽）时，都会安静地退到 `null` —— 调用方据此走上传，
++ * 而不是抛错。
++ */
++export function desktopFilePathFor(file: File | null | undefined): string | null {
++  if (!file) return null;
++  const bridge = getDesktopBridge();
++  if (!bridge?.filePathFor) return null;
++  try {
++    const path = bridge.filePathFor(file);
++    return typeof path === "string" && path.length > 0 ? path : null;
++  } catch {
++    return null;
++  }
++}
++
++/**
+  * Leading inset the app's top bar must leave for the macOS traffic lights when the
+  * title bar is hidden. The web layout already reserves one icon button; the window
+  * controls need ~64px more.
+--- a/electron/preload.js
++++ b/electron/preload.js
+@@ -8,7 +8,7 @@
+ // a browser tab — native notifications, the Dock badge, keep-awake during a run, and a
+ // channel for main-process events (notification clicks).
+ 
+-const { contextBridge, ipcRenderer } = require("electron");
++const { contextBridge, ipcRenderer, webUtils } = require("electron");
+ 
+ const DESKTOP_ACTIONS = ["notification-clicked", "theme-changed", "open-session"];
+ 
+@@ -25,6 +25,21 @@
+   openExternal: (url) => ipcRenderer.send("desktop:open-external", url),
+   /** Ask the main process to reveal a path in Finder. */
+   revealPath: (target) => ipcRenderer.send("desktop:reveal", target),
++  /**
++   * fork:gap07-attachments — real on-disk path of a dropped File.
++   *
++   * Browsers deliberately hide it; Electron exposes it through webUtils. Composer
++   * attachments use it to reference an oversized file in place instead of uploading
++   * (or dropping) it. Returns null when Electron refuses the object, which is the
++   * signal for the renderer to fall back to uploading.
++   */
++  filePathFor: (file) => {
++    try {
++      return webUtils.getPathForFile(file) || null;
++    } catch {
++      return null;
++    }
++  },
+   onAction: (callback) => {
+     const listener = (_event, action) => {
+       if (!action || !DESKTOP_ACTIONS.includes(action.kind)) return;
+--- a/lib/i18n/messages/en.ts
++++ b/lib/i18n/messages/en.ts
+@@ -702,7 +702,12 @@
+     "chat.sessionReferenceLabel": "Session {count}",
+     "chat.removeSessionReference": "Remove session reference",
+     "chat.attachImage": "Attach image",
+-    "chat.dropImagesOnly": "Only image files can be dropped here",
++    // fork:gap07-attachments — 附件不再限定图片
++    "chat.attachFile": "Attach file",
++    "chat.attachmentAdded": "Added as a reference: {names}",
++    "chat.attachmentSkipped": "Skipped (over {limit}MB and no local path to reference): {names}",
++    "chat.attachmentFailed": "Upload failed: {names}",
++    "chat.dropFilesOnly": "Only files can be dropped here",
+     "chat.previewImage": "Preview image",
+     "chat.filterModels": "Filter models…",
+     "chat.noMatchingModels": "No matching models",
+--- a/lib/i18n/messages/zh-CN.ts
++++ b/lib/i18n/messages/zh-CN.ts
+@@ -701,7 +701,12 @@
+     "chat.sessionReferenceLabel": "会话{count}",
+     "chat.removeSessionReference": "移除会话引用",
+     "chat.attachImage": "附加图片",
+-    "chat.dropImagesOnly": "这里只能拖入图片文件",
++    // fork:gap07-attachments — 附件不再限定图片
++    "chat.attachFile": "添加附件",
++    "chat.attachmentAdded": "已作为引用加入：{names}",
++    "chat.attachmentSkipped": "已跳过（超过 {limit}MB 且拿不到本地路径）：{names}",
++    "chat.attachmentFailed": "上传失败：{names}",
++    "chat.dropFilesOnly": "这里只能拖入文件",
+     "chat.previewImage": "预览图片",
+     "chat.filterModels": "筛选模型…",
+     "chat.noMatchingModels": "没有匹配的模型",
+--- a/lib/i18n/messages/zh-TW.ts
++++ b/lib/i18n/messages/zh-TW.ts
+@@ -701,7 +701,12 @@
+     "chat.sessionReferenceLabel": "工作階段{count}",
+     "chat.removeSessionReference": "移除工作階段引用",
+     "chat.attachImage": "附加圖片",
+-    "chat.dropImagesOnly": "這裡只能拖入圖片檔案",
++    // fork:gap07-attachments — 附件不再限定圖片
++    "chat.attachFile": "加入附件",
++    "chat.attachmentAdded": "已作為引用加入：{names}",
++    "chat.attachmentSkipped": "已略過（超過 {limit}MB 且拿不到本機路徑）：{names}",
++    "chat.attachmentFailed": "上傳失敗：{names}",
++    "chat.dropFilesOnly": "這裡只能拖入檔案",
+     "chat.previewImage": "預覽圖片",
+     "chat.filterModels": "篩選模型…",
+     "chat.noMatchingModels": "找不到相符的模型",

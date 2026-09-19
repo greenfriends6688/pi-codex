@@ -59,23 +59,29 @@ export function createTodoExtension(): InlineExtension {
         name: "todo",
         label: "Todo",
         description: [
-          "Manage the task list for this session. Actions:",
+          "Manage the task list for this session. The user watches this list live, so every call shows up immediately.",
+          "Actions:",
           "list — show the current list",
           "set (items: string[]) — replace the whole list, e.g. to record a plan before starting",
           "add (text) — append one item",
-          "toggle (id) — mark an item done / reopened",
+          "toggle (id, or text) — mark an item done / reopened",
           "remove (id) — delete one item",
           "clear — empty the list",
         ].join("\n"),
         promptSnippet: "Track the steps of a multi-step task in a visible todo list",
         promptGuidelines: [
-          "Use todo with action set when a task has three or more steps, then toggle each id as it completes.",
+          "Use todo with action set before starting work whenever a task has three or more steps, so the user can follow the plan while it runs.",
+          // fork:ui-todo-live — a run that only toggles at the end shows the user
+          // an unchanged list for the whole session and then a fully ticked one,
+          // which reads as a static summary rather than live progress.
+          "Toggle a todo's id in the very next tool call after that step's work has landed — never hold the updates back for the end of the run. A batch of toggles issued at the finish is indistinguishable from never updating the list.",
+          "Mark an id done only for work that has actually finished; never tick an item because you are about to start it.",
           "Keep the list in sync: do not toggle an id that is not in the list, and re-read it with list after a long gap.",
         ],
         executionMode: "parallel",
         parameters: Type.Object({
           action: Type.Union(TODO_ACTIONS.map((action) => Type.Literal(action))),
-          text: Type.Optional(Type.String({ description: "Todo text (add)" })),
+          text: Type.Optional(Type.String({ description: "Todo text (add, or toggle by text)" })),
           items: Type.Optional(Type.Array(Type.String(), { description: "Full list of todo texts (set)" })),
           id: Type.Optional(Type.Number({ description: "Todo id (toggle / remove)" })),
         }),
