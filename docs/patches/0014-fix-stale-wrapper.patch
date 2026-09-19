@@ -1,0 +1,29 @@
+--- a/app/api/agent/[id]/route.ts
++++ b/app/api/agent/[id]/route.ts
+@@ -37,9 +37,23 @@
+       });
+     }
+     if (existing?.isAlive()) {
+-      const result = await existing.send(body);
+-      promptAccepted = body.type === "prompt";
+-      return NextResponse.json({ success: true, data: result });
++      try {
++        const result = await existing.send(body);
++        promptAccepted = body.type === "prompt";
++        return NextResponse.json({ success: true, data: result });
++      } catch (error) {
++        // fork:fix-stale-wrapper — dev 热更新后，`globalThis.__piSessions` 里缓存的
++        // wrapper 实例仍挂在**旧模块**的 prototype 上（AGENTS.md 记录过这个行为）。
++        // 它的 `send()` 认不得新加的命令，于是新功能在旧会话上直接报
++        // “Unsupported command: xxx”，看起来像功能坏了。
++        //
++        // 这里让它自愈：认不出命令就把这个陈旧实例丢掉，用当前代码重建一个再发一次。
++        // 只在确认是这一种情况时重试（其它错误照旧往上抛），避免把真实故障也吞了。
++        const message = error instanceof Error ? error.message : String(error);
++        if (!/Unsupported command/i.test(message)) throw error;
++        console.warn(`[pi-web] discarding a stale session wrapper for ${id} (${message})`);
++        existing.destroy();
++      }
+     }
+ 
+     const filePath = await resolveSessionPath(id);
