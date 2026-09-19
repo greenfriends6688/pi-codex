@@ -28,7 +28,11 @@ test("renders as a compact left-positioned dropdown without a centered inner wid
 });
 
 test("shows persisted completion states while live running state takes precedence", () => {
-  assert.match(source, /const status: SubagentSessionStatus = running \? "running" : relation\?\.status \?\? "completed"/);
+  // fork:proma-06-delegation — 状态不再就地算：
+  // 「不在跑 + 持久化是活状态」必须变成 interrupted（重启后不再假装在跑），
+  // 这条不变式在 lib/subagent-status.ts 里实现，这里只钉「组件确实走它 + 不再自己判」。
+  assert.match(source, /const status: SubagentSessionStatus = effectiveSubagentStatus\(relation\?\.status, \{ running \}\)/);
+  assert.doesNotMatch(source, /running \? "running" : relation\?\.status/);
   assert.match(source, /t\(`agentSwitcher\.status\.\$\{status\}`\)/);
   assert.match(source, /status === "failed"/);
   assert.match(source, /status === "aborted" \|\| status === "interrupted"/);

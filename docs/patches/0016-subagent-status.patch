@@ -98,6 +98,21 @@
    const primary = main ? t("agentSwitcher.main") : relation?.description || sessionTitle(session);
    const secondary = main
      ? sessionTitle(session)
+--- a/components/AgentSessionPanel.test.mjs
++++ b/components/AgentSessionPanel.test.mjs
+@@ -28,7 +28,11 @@
+ });
+ 
+ test("shows persisted completion states while live running state takes precedence", () => {
+-  assert.match(source, /const status: SubagentSessionStatus = running \? "running" : relation\?\.status \?\? "completed"/);
++  // fork:proma-06-delegation — 状态不再就地算：
++  // 「不在跑 + 持久化是活状态」必须变成 interrupted（重启后不再假装在跑），
++  // 这条不变式在 lib/subagent-status.ts 里实现，这里只钉「组件确实走它 + 不再自己判」。
++  assert.match(source, /const status: SubagentSessionStatus = effectiveSubagentStatus\(relation\?\.status, \{ running \}\)/);
++  assert.doesNotMatch(source, /running \? "running" : relation\?\.status/);
+   assert.match(source, /t\(`agentSwitcher\.status\.\$\{status\}`\)/);
+   assert.match(source, /status === "failed"/);
+   assert.match(source, /status === "aborted" \|\| status === "interrupted"/);
 --- a/lib/i18n/messages/en.ts
 +++ b/lib/i18n/messages/en.ts
 @@ -208,6 +208,7 @@
