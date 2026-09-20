@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import {
+  favoriteModelKey,
+  getFavoriteModelsServerSnapshot,
+  getFavoriteModelsSnapshot,
+  subscribeFavoriteModels,
+  toggleFavoriteModel,
+} from "@/lib/favorite-models";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { ModelIcon } from "./ProviderIcon";
 import { TEXT } from "@/lib/typography";
@@ -62,6 +69,12 @@ export function ModelSelector({
   placement = "up",
 }: ModelSelectorProps) {
   const { t } = useI18n();
+  // fork:ui — 行内星标的数据源（与设置页 ModelsConfig / 输入框菜单共用同一 store）。
+  const favorites = useSyncExternalStore(
+    subscribeFavoriteModels,
+    getFavoriteModelsSnapshot,
+    getFavoriteModelsServerSnapshot,
+  );
   const isMobile = useIsMobile();
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -298,16 +311,21 @@ export function ModelSelector({
                       {group.provider}
                     </div>
                   )}
-                  {group.options.map((option) => (
-                    <ModelOptionButton
-                      key={`${option.provider}:${option.modelId}`}
-                      active={option.modelId === value?.modelId && option.provider === value?.provider}
-                      label={option.name}
-                      provider={option.provider}
-                      modelId={option.modelId}
-                      onClick={() => choose(option)}
-                    />
-                  ))}
+                  {group.options.map((option) => {
+                    const favKey = favoriteModelKey(option.provider, option.modelId);
+                    return (
+                      <ModelOptionButton
+                        key={`${option.provider}:${option.modelId}`}
+                        active={option.modelId === value?.modelId && option.provider === value?.provider}
+                        label={option.name}
+                        provider={option.provider}
+                        modelId={option.modelId}
+                        isFavorite={favorites.has(favKey)}
+                        onToggleFavorite={() => toggleFavoriteModel(option.provider, option.modelId)}
+                        onClick={() => choose(option)}
+                      />
+                    );
+                  })}
                 </div>
               ))}
             </div>
@@ -318,14 +336,15 @@ export function ModelSelector({
   );
 }
 
-function ModelOptionButton({ active, label, provider, modelId, onClick }: { active: boolean; label: string; provider?: string; modelId?: string; onClick: () => void }) {
+function ModelOptionButton({ active, label, provider, modelId, isFavorite, onToggleFavorite, onClick }: { active: boolean; label: string; provider?: string; modelId?: string; isFavorite?: boolean; onToggleFavorite?: () => void; onClick: () => void }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
       role="option"
       aria-selected={active}
       onClick={onClick}
-      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 12px", border: "none", background: active ? "var(--bg-selected)" : "none", color: active ? "var(--text)" : "var(--text-muted)", cursor: "pointer", fontSize: TEXT.sm, fontWeight: active ? 600 : 400, textAlign: "left", whiteSpace: "nowrap" }}
+      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "7px 8px 7px 12px", border: "none", background: active ? "var(--bg-selected)" : "none", color: active ? "var(--text)" : "var(--text-muted)", cursor: "pointer", fontSize: TEXT.sm, fontWeight: active ? 600 : 400, textAlign: "left", whiteSpace: "nowrap" }}
       onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = "var(--bg-hover)"; }}
       onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = "none"; }}
     >
@@ -333,7 +352,36 @@ function ModelOptionButton({ active, label, provider, modelId, onClick }: { acti
         ? <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true"><polyline points="1.5 5 4 7.5 8.5 2.5" /></svg>
         : <span style={{ width: 10, flexShrink: 0 }} />}
       <ModelIcon provider={provider ?? ""} modelId={modelId ?? ""} modelName={label} size={14} />
-      <span title={label} style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      <span title={label} style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{label}</span>
+      {/* fork:ui — 行内星标（收藏）。用 <span role="button"> 而不是 <button>：
+          嵌套 button 是非法 HTML，会触发 hydration 报错（本仓补丁 0019 修过一次）。 */}
+      {onToggleFavorite && (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={isFavorite ? t("models.unfavoriteModel") : t("models.favoriteModel")}
+          title={isFavorite ? t("models.unfavoriteModel") : t("models.favoriteModel")}
+          onClick={(event) => { event.stopPropagation(); onToggleFavorite(); }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleFavorite();
+            }
+          }}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: 22, height: 22, flexShrink: 0,
+            borderRadius: "var(--radius-sm)",
+            color: isFavorite ? "var(--accent)" : "var(--text-dim)",
+            cursor: "pointer",
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill={isFavorite ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 3.2l2.7 5.5 6 .9-4.3 4.2 1 6-5.4-2.8-5.4 2.8 1-6L3.3 9.6l6-.9z" />
+          </svg>
+        </span>
+      )}
     </button>
   );
 }
