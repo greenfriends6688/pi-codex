@@ -28,15 +28,19 @@ const BASE = "http://127.0.0.1:30141/";
 // 本皮肤的期望值。改调色板时同步更新这里。
 // 比较走浏览器解析后的 RGB（见文件头），所以 hex / oklch 两种写法都可以写。
 //
-// fork:zn-11 — light / dark 两套换成 Zeno 的中性灰阶梯（纯灰、实色 hover、
-// 代码底色比画布更暗），mist / rose / pine 保持自己的色相但同样改为实色面。
-// 改这些值时三处要一起改：这里、app/globals.css、visual-spec.md §1 表格。
+// fork:boardui（PR-02）—— 颜色槽位已交给 BoardUI 的语义 token（见
+// app/globals.css 末尾的 `fork:boardui-bridge`）：六套 palette 的 --bg/--text/
+// --accent/--primary-bg 都引用 --color-*，所以只剩 BoardUI 的亮/暗两组值。
+// 改这些值时三处要一起改：这里、app/globals.css 的桥接层、visual-spec.md。
+const BOARDUI_ACCENT = "oklch(0.623 0.214 259.815)"; // accent-500（默认蓝）
+const BOARDUI_LIGHT = { dark: false, bg: "#ffffff", text: "oklch(0.145 0 0)", accent: BOARDUI_ACCENT, primaryBg: BOARDUI_ACCENT };
+const BOARDUI_DARK = { dark: true, bg: "#121212", text: "oklch(0.985 0 0)", accent: BOARDUI_ACCENT, primaryBg: BOARDUI_ACCENT };
 const EXPECTED = {
-  light: { dark: false, bg: "#ffffff", text: "#171717", accent: "oklch(0.61 0.16 250)", primaryBg: "#171717" },
-  dark: { dark: true, bg: "#191919", text: "oklch(0.985 0.004 260)", accent: "oklch(0.78 0.12 253)", primaryBg: "oklch(0.985 0.004 260)" },
-  mist: { dark: false, bg: "oklch(0.985 0.005 165)", text: "oklch(0.27 0.02 165)", accent: "oklch(0.46 0.07 178)", primaryBg: "oklch(0.27 0.02 165)" },
-  rose: { dark: false, bg: "oklch(0.987 0.005 20)", text: "oklch(0.28 0.015 12)", accent: "oklch(0.47 0.1 5)", primaryBg: "oklch(0.28 0.015 12)" },
-  pine: { dark: true, bg: "oklch(0.22 0.008 155)", text: "oklch(0.95 0.012 155)", accent: "oklch(0.82 0.05 155)", primaryBg: "oklch(0.94 0.012 155)" },
+  light: { ...BOARDUI_LIGHT },
+  dark: { ...BOARDUI_DARK },
+  mist: { ...BOARDUI_LIGHT },
+  rose: { ...BOARDUI_LIGHT },
+  pine: { ...BOARDUI_DARK },
 };
 
 // 先做一次零成本的重复选择器检查，给出比浏览器报错更直接的提示。

@@ -12,6 +12,14 @@
 约束：改动以 CSS 为主。组件里内联写死的值（圆角、尺寸、层级）由 `app/fork-ui.css`
 与 `globals.css` 末尾的覆盖层收敛；确需改 `.tsx` 时带 `// fork:zn-xx` 标记。
 
+> **fork:boardui（2026-09-20，PR-02）**：颜色层已交给 **BoardUI 语义 token**。
+> `app/globals.css` 末尾的 `fork:boardui-bridge` 把 `--bg` / `--text*` / `--border*` /
+> `--accent*` / `--primary-*` / 状态色全部指向 `--color-*`（定义在
+> `app/boardui/theme.css`），所以六套 palette 的颜色槽位收敛为 BoardUI 的亮/暗
+> 两组值：light / mist / rose 同亮色，dark / pine 同暗色。版式（圆角、阴影、排版
+> 刻度）仍是 Zeno 的，组件结构在后续 PR 逐个换成 BoardUI。
+> `docs/codex-skin/verify-themes.mjs` 的期望值已同步。
+
 参考对象：`参考项目/zeno-main`（`apps/desktop/src/renderer/styles.css`）。
 
 ---

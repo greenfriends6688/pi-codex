@@ -1,5 +1,9 @@
 @import "@xterm/xterm/css/xterm.css";
 @import "tailwindcss";
+/* BoardUI 地基（fork:boardui）：466 个语义色 token + 52 个复合排版样式。
+   只引入 token 层与排版层，不引入它的 globals.css（全局规则与 pi-codex 冲突）。 */
+@import "./boardui/theme.css";
+@import "./boardui/typography.css";
 
 @theme {
   --color-bg: var(--bg);
@@ -3112,4 +3116,68 @@ button.process-file-chip:hover {
   height: 1px;
   margin: 4px -4px;
   background: var(--border);
+}
+
+/* ---------------------------------------------------------------------------
+   fork:boardui-bridge — BoardUI 语义 token 接管 Zeno 的颜色槽位。
+
+   值全部写成 `var(--color-*)`（BoardUI 的语义 token）而不是字面值：BoardUI
+   的 `:root` 定义亮色语义、`.dark` 定义暗色语义，浏览器在计算时重新解析
+   `var()`，所以这一块只写一次就自动跟随明暗。六套 palette 的颜色槽位从此
+   都由 BoardUI 决定（Zeno 自己的色值有意让位）。
+
+   特异性：`:root:root` (0,2,0) 必须高于暗色主题块的 `html.dark` (0,1,1)，
+   否则那些块里残留的 Zeno 色值会压过这里。放在文件末尾是第二重保险。
+--------------------------------------------------------------------------- */
+:root:root {
+  /* 面 */
+  --bg: var(--color-background-full);
+  --bg-panel: var(--color-background-secondary-default);
+  --bg-elev: var(--color-background-primary-default);
+  --bg-hover: var(--color-background-primary-hover);
+  --bg-selected: var(--color-background-tertiary-default);
+  --bg-subtle: var(--color-background-secondary-default);
+  --bg-composer: var(--color-background-primary-default);
+  --code-bg: var(--color-background-secondary-default);
+  --user-bg: var(--color-background-secondary-default);
+  --assistant-bg: var(--color-background-full);
+  --tool-bg: var(--color-background-secondary-default);
+
+  /* 文字 */
+  --text: var(--color-text-primary);
+  --text-muted: var(--color-text-secondary);
+  --text-dim: var(--color-text-tertiary);
+
+  /* 边框 */
+  --border: var(--color-separator-border);
+  --border-strong: var(--color-separator-border-strong);
+  --border-faint: var(--color-separator-border);
+
+  /* 强调色 —— BoardUI 的 accent ramp（默认蓝） */
+  --accent: var(--color-accent-500);
+  --accent-hover: var(--color-accent-600);
+  --accent-text: var(--color-accent-600);
+  --accent-contrast: var(--color-white);
+  --accent-soft: color-mix(in oklab, var(--color-accent-500) 12%, transparent);
+  --accent-border: var(--color-accent-300);
+
+  /* 主操作 —— BoardUI 的 primary 按钮是 accent 渐变实心，这里取实色 */
+  --primary-bg: var(--color-accent-500);
+  --primary-hover: var(--color-accent-600);
+  --primary-fg: var(--color-text-white);
+
+  /* 状态色 */
+  --danger: var(--color-red-600);
+  --danger-contrast: var(--color-white);
+  --danger-soft: color-mix(in oklab, var(--color-red-500) 12%, transparent);
+  --success: var(--color-green-600);
+  --success-contrast: var(--color-white);
+  --success-soft: color-mix(in oklab, var(--color-green-500) 14%, transparent);
+  --warning: var(--color-yellow-600);
+  --warning-soft: color-mix(in oklab, var(--color-yellow-500) 16%, transparent);
+
+  /* 其余 */
+  --scrim: rgb(0 0 0 / 0.2);
+  --diff-added: var(--color-green-600);
+  --diff-removed: var(--color-red-600);
 }

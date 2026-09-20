@@ -86,6 +86,7 @@
     "remark-parse": "^11.0.0",
     "remark-stringify": "^11.0.0",
     "semver": "7.8.0",
+    "tailwind-merge": "^3.7.0",
     "undici": "8.10.0",
     "unified": "^11.0.5",
     "web-push": "^3.6.7"
@@ -100,6 +101,8 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/semver": "7.8.0",
     "@types/web-push": "^3.6.4",
+    "electron": "^39.0.0",
+    "electron-builder": "^25.1.8",
     "eslint": "^9",
     "eslint-config-next": "16.3.1",
     "jiti": "^2.7.0",
@@ -116,9 +119,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwindcss": "^4.2.2",
-    "typescript": "^5",
-    "electron": "^39.0.0",
-    "electron-builder": "^25.1.8"
+    "typescript": "^5"
   },
   "productName": "Pi Codex",
   "main": "electron/main.js",
