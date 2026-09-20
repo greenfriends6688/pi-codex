@@ -8,6 +8,8 @@ import { skillExpansionToCommand } from "@/lib/slash-display";
 import { chatProjectOf, getProjectActivity, getRecentProjects, sessionsForProject, withoutChatProject } from "@/lib/project-groups";
 import type { RecentProject } from "@/lib/project-groups";
 import { SESSION_TAG_TONES, applySessionFlags, archivedSessions, useSessionFlags, type SessionTag } from "@/lib/session-flags";
+import { bucketOf, groupByTimeBucket, timeBucketKey, type TimeBucket, type TimeGroupEntry } from "@/lib/time-groups";
+import { loadCollapsedTimeGroups, saveCollapsedTimeGroups, type CollapsedTimeGroups } from "@/lib/time-group-state";
 import { desktopTrafficLightInset } from "@/lib/desktop-shell";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
@@ -516,7 +518,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // ponytail: 每個項目獨立展開，避免只能看選中項的傻折疊
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set());
   // fork:ui-10 — list order + the "expand/collapse all" switch.
-  const [sessionSort, setSessionSort] = useState<"updated" | "created">("updated");
+  // fork:ui — 排序开关已移除（用户要求）：会话固定按最后修改时间倒序，state 一并删掉。
+  // PR-03 — 时间分组头的折叠状态（earlier 默认折叠），写 localStorage 跨刷新保留。
+  const [collapsedGroups, setCollapsedGroups] = useState<CollapsedTimeGroups>(() => loadCollapsedTimeGroups());
+  const toggleGroup = useCallback((bucket: TimeBucket) => {
+    setCollapsedGroups((prev) => {
+      const next = { ...prev, [bucket]: !prev[bucket] };
+      saveCollapsedTimeGroups(next);
+      return next;
+    });
+  }, []);
   // 归档区默认折叠；每个项目独立记忆展开状态（取消归档的右键菜单入口）。
   const [expandedArchivedProjects, setExpandedArchivedProjects] = useState<Set<string>>(new Set());
   const toggleArchivedSection = useCallback((projectKey: string) => {
@@ -1211,10 +1222,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const orderedProjectSessions = useCallback((projectKey: string) => {
     const rows = sessionsForProject(allSessions, projectKey);
     const sorted = [...rows].sort((a, b) => (
-      sessionSort === "created" ? b.created.localeCompare(a.created) : b.modified.localeCompare(a.modified)
+      // fork:ui — 排序开关已移除，固定按最后修改时间倒序。
+      b.modified.localeCompare(a.modified)
     ));
     return applySessionFlags(sorted, sessionFlags);
-  }, [allSessions, sessionFlags, sessionSort]);
+  }, [allSessions, sessionFlags]);
 
   const selectedProject = projectFor(selectedCwd);
   const projectChoices = useMemo(() => {
@@ -1285,6 +1297,25 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
 
   const sessionFamilies = listSessionFamilies(applySessionFlags(filteredSessions, sessionFlags));
 
+  // PR-03 — 时间分组：pinned 单独成桶并置顶（延续 applySessionFlags 的分区意图），
+  // 其余按 family.latestModified 的本地日历日分桶。同一桶内保持传入顺序，
+  // 因此 sessionSort / worktree 合并后的相对顺序不会被重排。
+  const pinnedSessionIds = useMemo(() => new Set(sessionFlags.pinned), [sessionFlags.pinned]);
+  const bucketOfFamily = useCallback(
+    (family: SessionFamily): TimeBucket => (
+      pinnedSessionIds.has(family.root.id) ? "pinned" : bucketOf(family.latestModified)
+    ),
+    [pinnedSessionIds],
+  );
+  // 虚拟列表关键坑：分组头与条目共用这条扁平数组，每个元素恰好占一个
+  // SESSION_LIST_ITEM_HEIGHT 槽位（TimeGroupHeader 也强制同高）。因此
+  // getSessionListIndices 用 entries.length 计数后，index 与实际槽位一一对应，
+  // 插入分组头不会造成偏移或越界；折叠分组只是从数组里移除条目。
+  const sessionListEntries = useMemo(
+    () => groupByTimeBucket(sessionFamilies, bucketOfFamily, collapsedGroups),
+    [sessionFamilies, bucketOfFamily, collapsedGroups],
+  );
+
   useLayoutEffect(() => {
     const list = listScrollRef.current;
     const section = sessionListRef.current;
@@ -1302,13 +1333,35 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     observer.observe(list);
     observer.observe(section);
     return () => observer.disconnect();
-  }, [expandedProjects, selectedProject?.key, sessionFamilies.length, visibleProjects.length]);
+  }, [expandedProjects, selectedProject?.key, sessionListEntries.length, visibleProjects.length]);
 
   const virtualIndices = getSessionListIndices(
-    sessionFamilies.length,
+    sessionListEntries.length,
     Math.max(0, listScrollTop - sessionListOffsetTop),
     listViewportH,
-    sessionFamilies.findIndex((family) => family.root.id === focusedSessionId),
+    sessionListEntries.findIndex((entry) => entry.type === "item" && entry.item.root.id === focusedSessionId),
+  );
+
+  // 所有列表表面共用的行渲染；分组头渲染也走同一份 collapsedGroups。
+  const renderFamilyRow = (family: SessionFamily) => {
+    const familySessions = [family.root, ...family.subagents];
+    const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
+    return (
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+      </div>
+    );
+  };
+  const renderGroupHeader = (bucket: TimeBucket, count: number) => (
+    <TimeGroupHeader
+      bucket={bucket}
+      count={count}
+      collapsed={collapsedGroups[bucket]}
+      onToggle={() => toggleGroup(bucket)}
+    />
+  );
+  const sessionEntryKey = (entry: TimeGroupEntry<SessionFamily>) => (
+    entry.type === "header" ? `time-group-${entry.bucket}` : entry.item.root.id
   );
 
   return (
@@ -1803,6 +1856,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             const isChatExpanded = expandedProjects.has(chatProject.key);
             const chatFamilies = listSessionFamilies(orderedProjectSessions(chatProject.key));
             const chatArchivedFamilies = listSessionFamilies(archivedSessions(sessionsForProject(allSessions, chatProject.key), sessionFlags));
+            // 聊天列表复用同一套时间分组与折叠状态；窗口单独计算，避免与项目
+            // 列表的 entries 长度耦合，index 永远落在 chatEntries 范围内。
+            const chatEntries = groupByTimeBucket(chatFamilies, bucketOfFamily, collapsedGroups);
+            const chatVirtualIndices = getSessionListIndices(
+              chatEntries.length,
+              Math.max(0, listScrollTop - sessionListOffsetTop),
+              listViewportH,
+              chatEntries.findIndex((entry) => entry.type === "item" && entry.item.root.id === focusedSessionId),
+            );
             const chatArchivedSection = (
               <ArchivedSessionsSection
                 families={chatArchivedFamilies}
@@ -1853,36 +1915,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 {isChatExpanded && (chatFamilies.length === 0 && chatArchivedFamilies.length === 0 ? (
                   <div style={{ padding: "6px 0 6px 24px", color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("sidebar.noTasks")}</div>
                 ) : isSelectedChat ? (
-                  <div ref={sessionListRef} style={{ minHeight: chatFamilies.length * SESSION_LIST_ITEM_HEIGHT }}>
-                    <div style={{ position: "relative", height: chatFamilies.length * SESSION_LIST_ITEM_HEIGHT }}>
-                      {virtualIndices.map((index) => {
-                        const family = chatFamilies[index];
-                        const familySessions = [family.root, ...family.subagents];
-                        const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
-                        return (
-                          <div key={family.root.id} data-session-id={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
+                  <div ref={sessionListRef} style={{ minHeight: chatEntries.length > 0 ? chatEntries.length * SESSION_LIST_ITEM_HEIGHT : 34 }}>
+                    {chatEntries.length > 0 && (
+                      <div style={{ position: "relative", height: chatEntries.length * SESSION_LIST_ITEM_HEIGHT }}>
+                        {chatVirtualIndices.map((index) => {
+                          const entry = chatEntries[index];
+                          if (!entry) return null;
+                          const isItem = entry.type === "item";
+                          return (
+                            <div key={sessionEntryKey(entry)} data-session-id={isItem ? entry.item.root.id : undefined} onFocus={isItem ? () => setFocusedSessionId(entry.item.root.id) : undefined} onBlur={isItem ? () => setFocusedSessionId(null) : undefined} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
+                              {isItem ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
                             </div>
-                          </div>
-                        );
-                      })}
-                    </div>
+                          );
+                        })}
+                      </div>
+                    )}
                     {chatArchivedSection}
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                    {chatFamilies.map((family) => {
-                      const familySessions = [family.root, ...family.subagents];
-                      const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
-                      return (
-                        <div key={family.root.id}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
-                          </div>
-                        </div>
-                      );
-                    })}
+                    {chatEntries.map((entry) => (
+                      <div key={sessionEntryKey(entry)}>
+                        {entry.type === "item" ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
+                      </div>
+                    ))}
                     {chatArchivedSection}
                   </div>
                 ))}
@@ -1910,31 +1966,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {t("sidebar.projects")}
             </span>
             <div className="fork-section-actions" style={{ display: "flex", alignItems: "center", gap: 2 }}>
-              {/* fork:ui-10 — order of the session lists (updated vs created). */}
-              <button
-                type="button"
-                onClick={() => setSessionSort((current) => (current === "updated" ? "created" : "updated"))}
-                title={`${t("sidebar.sortBy")}: ${t(sessionSort === "updated" ? "sidebar.sortUpdated" : "sidebar.sortCreated")}`}
-                aria-label={t("sidebar.sortBy")}
-                style={{
-                  height: 28,
-                  padding: "0 7px",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  background: "transparent",
-                  border: "none",
-                  borderRadius: "var(--radius-md)",
-                  color: "var(--text-dim)",
-                  cursor: "pointer",
-                  fontSize: TEXT.xs,
-                }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M4 7h10M4 12h7M4 17h4" /><path d="m17 9 3 3-3 3" />
-                </svg>
-                {t(sessionSort === "updated" ? "sidebar.sortUpdated" : "sidebar.sortCreated")}
-              </button>
+              {/* fork:ui — 「按更新时间 / 按创建时间」排序开关已按用户要求移除：
+                  会话固定按最后修改时间倒序（见 orderedProjectSessions）。 */}
               {/* fork:ui-10 — expand / collapse every project at once. */}
               <button
                 type="button"
@@ -2118,6 +2151,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     const projectSessions = orderedProjectSessions(project.key);
                     const families = listSessionFamilies(projectSessions);
                     const archivedFamilies = listSessionFamilies(archivedSessions(projectSessions, sessionFlags));
+                    const projectEntries = groupByTimeBucket(families, bucketOfFamily, collapsedGroups);
                     const archivedSection = (
                       <ArchivedSessionsSection
                         families={archivedFamilies}
@@ -2139,18 +2173,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     }
                     if (project.key === selectedProject?.key) {
                       return (
-                        <div ref={sessionListRef} style={{ minHeight: sessionFamilies.length > 0 ? sessionFamilies.length * SESSION_LIST_ITEM_HEIGHT : 34 }}>
-                          {sessionFamilies.length > 0 && (
-                            <div style={{ position: "relative", height: sessionFamilies.length * SESSION_LIST_ITEM_HEIGHT }}>
+                        <div ref={sessionListRef} style={{ minHeight: sessionListEntries.length > 0 ? sessionListEntries.length * SESSION_LIST_ITEM_HEIGHT : 34 }}>
+                          {sessionListEntries.length > 0 && (
+                            <div style={{ position: "relative", height: sessionListEntries.length * SESSION_LIST_ITEM_HEIGHT }}>
                               {virtualIndices.map((index) => {
-                                const family = sessionFamilies[index];
-                                const familySessions = [family.root, ...family.subagents];
-                                const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
+                                const entry = sessionListEntries[index];
+                                if (!entry) return null;
+                                const isItem = entry.type === "item";
                                 return (
-                                  <div key={family.root.id} data-session-id={family.root.id} onFocus={() => setFocusedSessionId(family.root.id)} onBlur={() => setFocusedSessionId(null)} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
-                                    <div style={{ flex: 1, minWidth: 0 }}>
-                                      <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
-                                    </div>
+                                  <div key={sessionEntryKey(entry)} data-session-id={isItem ? entry.item.root.id : undefined} onFocus={isItem ? () => setFocusedSessionId(entry.item.root.id) : undefined} onBlur={isItem ? () => setFocusedSessionId(null) : undefined} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
+                                    {isItem ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
                                   </div>
                                 );
                               })}
@@ -2162,17 +2194,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     }
                     return (
                       <div style={{ display: "flex", flexDirection: "column", gap: 1, marginLeft: 8, borderLeft: "1px solid var(--border-faint)", paddingLeft: 4 }}>
-                        {families.map((family) => {
-                          const familySessions = [family.root, ...family.subagents];
-                          const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
-                          return (
-                            <div key={family.root.id}>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => handleSelectSessionFromList(family.root)} onRenamed={loadSessions} onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }} />
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {projectEntries.map((entry) => (
+                          <div key={sessionEntryKey(entry)}>
+                            {entry.type === "item" ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
+                          </div>
+                        ))}
                         {archivedSection}
                       </div>
                     );
@@ -2306,6 +2332,70 @@ function showProjectActivity(
         </span>
       )}
     </span>
+  );
+}
+
+/**
+ * PR-03 — 会话列表的时间分组头（可点击折叠，earlier 默认折叠）。
+ *
+ * 高度固定为 SESSION_LIST_ITEM_HEIGHT 是关键：虚拟列表把分组头和会话行当成同一种
+ * 槽位来计算 index，若头部高度不同，绝对定位的 top 就会错位/越界。
+ */
+function TimeGroupHeader({ bucket, count, collapsed, onToggle }: {
+  bucket: TimeBucket;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useI18n();
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      title={t(collapsed ? "session.expandGroup" : "session.collapseGroup")}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        width: "100%",
+        height: SESSION_LIST_ITEM_HEIGHT,
+        boxSizing: "border-box",
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "0 8px",
+        background: hovered ? "var(--bg-hover)" : "transparent",
+        border: "none",
+        borderRadius: "var(--radius-md)",
+        color: "var(--text-dim)",
+        cursor: "pointer",
+        textAlign: "left",
+        fontSize: TEXT.xs,
+        fontWeight: 600,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        userSelect: "none",
+      }}
+    >
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        style={{ flexShrink: 0, transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}
+      >
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
+      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {t(timeBucketKey(bucket), { count })}
+      </span>
+    </button>
   );
 }
 
