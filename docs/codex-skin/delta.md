@@ -216,7 +216,7 @@ html[data-theme="pine"],
 
 上游 439 个 PR 里，**已合并的全部已在 v0.9.1 基线内**（v0.9.1 tag 之后上游 merge 数为 0），
 所以候选就是当时 **61 个 open PR**。收件箱（patch + 元数据 + 索引）在
-`~/Desktop/pi-web-pr-inbox/`，整目录可删。
+`~/Desktop/pi-codex/pi-web-pr-inbox/`，整目录可删。
 
 关键实测：大多数 open PR 的 base 就是 `8366762fa` = **"Release v0.9.1" 本身**；
 `git apply --check` 直接过 23/61，`git apply -3 --check` 过 57/61。
