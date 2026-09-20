@@ -24,7 +24,7 @@
     "!.next/dev",
     "!.next/**/*.js.map",
     "public",
-    "next.config.ts",
+    "next.config.mjs",
     "package.json"
   ],
   "scripts": {
@@ -149,7 +149,13 @@
       "!.context/**",
       "!node_modules/**/*.{md,markdown,ts,map}",
       "!node_modules/{typescript,eslint,prettier,tailwindcss,postcss,autoprefixer}/**",
+      "!**/node_modules/@next/swc-*/**",
+      "!**/node_modules/caniuse-lite/**",
+      "!**/node_modules/@img/**",
       "!pi参考项目/**",
+      "!设计风格/**",
+      "!pi-codex-release/**",
+      "!pi-web-pr-inbox/**",
       "!.playwright-mcp/**",
       "!assets/**",
       "!.workbuddy/**",
@@ -171,6 +177,11 @@
       "category": "public.app-category.developer-tools",
       "minimumSystemVersion": "12.0",
       "x64ArchFiles": "**/Resources/app/node_modules/**",
+      "electronLanguages": [
+        "en",
+        "zh_CN",
+        "zh_TW"
+      ],
       "target": [
         "dir",
         "dmg",

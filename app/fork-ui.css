@@ -322,13 +322,24 @@ html.keyboard-open .extension-status-shelf {
  * absolutely positioned siblings that overlap its first and last 28px, and a drag region
  * swallows any click inside its shape unless the target is an explicitly `no-drag`
  * descendant — a sibling is not. Instead a real handle element carries the drag, inset
- * past both toggles, so the region cannot reach them at all. */
+ * past both toggles, so the region cannot reach them at all.
+ *
+ * The handle must also stay BELOW the controls in paint order: as a positioned element it
+ * otherwise paints over the ordinary (static) buttons in the same bar, so a click lands on
+ * the handle instead of the button — that is what made the top-right icons and the file
+ * tab close button dead in the packaged app while working in the browser. The header is
+ * promoted to a stacking context so `z-index: -1` puts the handle above the bar's
+ * background (its drag rect still counts) and below every in-flow control. */
+[data-desktop-shell="true"] .main-workspace-header {
+  z-index: 0;
+}
 [data-desktop-shell="true"] .desktop-drag-handle {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 28px;
   right: 28px;
+  z-index: -1;
   -webkit-app-region: drag;
 }
 [data-desktop-shell="true"] .main-workspace-header {

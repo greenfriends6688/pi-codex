@@ -1,18 +1,22 @@
-import type { NextConfig } from "next";
+// JavaScript, not TypeScript, on purpose: `next start` compiles this file with SWC
+// when it is TypeScript, which forces `@next/swc-*` into the runtime package (~40 MB
+// per platform, and the other platform's binary is never installed, so an Intel or
+// Windows build would try to download it at startup). Keep this file .mjs.
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { resolveMaxBodySize } from "./bin/max-body-size.mjs";
 
 const configDir = dirname(fileURLToPath(import.meta.url));
-const { version } = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8")) as { version: string };
+const { version } = JSON.parse(readFileSync(join(configDir, "package.json"), "utf8"));
 let piVersion = "unknown";
 try {
   const piPkgPath = join(configDir, "node_modules/@earendil-works/pi-coding-agent/package.json");
-  piVersion = (JSON.parse(readFileSync(piPkgPath, "utf8")) as { version: string }).version;
+  piVersion = JSON.parse(readFileSync(piPkgPath, "utf8")).version;
 } catch { /* package not found, use default */ }
 
-const nextConfig: NextConfig = {
+/** @type {import("next").NextConfig} */
+const nextConfig = {
   outputFileTracingRoot: configDir,
   experimental: {
     // Next buffers the request body whenever a middleware/proxy is present and
