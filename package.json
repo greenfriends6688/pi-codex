@@ -2,13 +2,13 @@
   "name": "@agegr/pi-web",
   "version": "0.1.4",
   "description": "Web UI for the pi coding agent",
-  "homepage": "https://github.com/agegr/pi-web#readme",
+  "homepage": "https://github.com/greenfriends6688/pinkslab#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/agegr/pi-web.git"
+    "url": "git+https://github.com/greenfriends6688/pinkslab.git"
   },
   "bugs": {
-    "url": "https://github.com/agegr/pi-web/issues"
+    "url": "https://github.com/greenfriends6688/pinkslab/issues"
   },
   "license": "MIT",
   "engines": {
@@ -169,6 +169,8 @@
     },
     "mac": {
       "category": "public.app-category.developer-tools",
+      "minimumSystemVersion": "12.0",
+      "x64ArchFiles": "**/Resources/app/node_modules/**",
       "target": [
         "dir",
         "dmg",

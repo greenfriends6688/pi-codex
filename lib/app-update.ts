@@ -1,3 +1,11 @@
+/**
+ * This fork publishes GitHub releases, not npm packages — upstream owns the
+ * `@agegr/pi-web` package on npm, so asking the registry for "latest" would
+ * advertise a different product (and a version number from another line).
+ */
+export const RELEASE_REPO = "greenfriends6688/pinkslab";
+export const LATEST_RELEASE_API = `https://api.github.com/repos/${RELEASE_REPO}/releases/latest`;
+
 const STABLE_VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)$/;
 
 function parseStableVersion(version: string): [number, number, number] | null {
@@ -24,5 +32,5 @@ export function isNewerStableVersion(candidate: string, current: string): boolea
 
 export function getPiWebReleaseUrl(version: string): string | null {
   if (!parseStableVersion(version)) return null;
-  return `https://github.com/agegr/pi-web/releases/tag/v${version}`;
+  return `https://github.com/${RELEASE_REPO}/releases/tag/v${version}`;
 }

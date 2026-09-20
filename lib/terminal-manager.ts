@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
+import { existsSync } from "fs";
 import { homedir } from "os";
+import { join } from "path";
 import type { IPty } from "node-pty";
 import { samePath } from "./paths";
 
@@ -40,6 +42,21 @@ function registry(): Map<string, TerminalRecord> {
     process.once("SIGTERM", shutdown);
   }
   return globalThis.__piWebTerminals;
+}
+
+/**
+ * The embedded terminal used to hand Windows users `%ComSpec%` (cmd.exe), which is a
+ * poor shell to work in next to an agent. Prefer PowerShell 7 when it is on PATH, fall
+ * back to the Windows PowerShell 5.1 that ships with Windows 10+, and let
+ * PI_WEB_WINDOWS_SHELL override both.
+ */
+export function windowsShell(): string {
+  if (process.env.PI_WEB_WINDOWS_SHELL) return process.env.PI_WEB_WINDOWS_SHELL;
+  const pathEnv = process.env.Path ?? process.env.PATH ?? "";
+  for (const dir of pathEnv.split(";")) {
+    if (dir && existsSync(join(dir, "pwsh.exe"))) return "pwsh.exe";
+  }
+  return "powershell.exe";
 }
 
 function shellEnvironment(): Record<string, string> {
@@ -90,10 +107,9 @@ export function createTerminal(cwd: string, cols: number, rows: number, id: stri
       { cause: error },
     );
   }
-  const shell = process.platform === "win32"
-    ? process.env.ComSpec ?? "cmd.exe"
-    : process.env.SHELL || "/bin/sh";
-  const args = process.platform === "win32" ? [] : ["-l"];
+  const shell = process.platform === "win32" ? windowsShell() : process.env.SHELL || "/bin/sh";
+  // -l gives a POSIX login shell; PowerShell only needs its banner suppressed.
+  const args = process.platform === "win32" ? ["-NoLogo"] : ["-l"];
   const pty = spawn(shell, args, {
     name: "xterm-256color",
     cols: dimension(cols, 80),
