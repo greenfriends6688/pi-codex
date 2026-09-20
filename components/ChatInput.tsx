@@ -3,6 +3,8 @@
 import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, KeyboardEvent, useSyncExternalStore } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { SkillsResponse } from "@/lib/api-types";
+// fork:ds-chat-motion（DS-24）—— BoardUI 的 composer 忙碌光环（端口在 components/ui）。
+import { ComposerLoader } from "./ui/composer-loader";
 import type { TextContent, UserMessage } from "@/lib/types";
 import {
   clearDraft,
@@ -3617,6 +3619,18 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
           {/* fork:zn-04 — the protrusion strip's slot: immediately before the
               card, after every banner. */}
           {protrusion}
+          {/* fork:ds-chat-motion（DS-24）—— BoardUI 的 composer-loader：等模型/跑工具时，
+              一条光带沿 composer 边缘匀速绕行（尖端是清晰的折射线，后面跟着向内渗的柔光）。
+              上游要求“被包的 composer 自己不画底”，所以下面把暂存面交给 loader（它画的
+              bg-background-primary-default 就是本仓的 --bg-elev，同一颜色），streaming 时
+              shell 背景置为透明，光带才看得见。 */}
+          <ComposerLoader
+            active={isStreaming}
+            radius={24}
+            intensity={0.55}
+            bloom={14}
+            className="min-w-0"
+          >
           <div
             ref={inputShellRef}
             className={`chat-input-shell${manualMode ? " is-manual-height" : ""}${readingCompact ? " is-compact" : ""}`}
@@ -3633,7 +3647,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               minWidth: 0,
               display: "flex",
               flexDirection: "column",
-              background: compact ? "none" : "var(--bg-elev)",
+              background: compact || isStreaming ? "none" : "var(--bg-elev)",
               border: compact ? "none" : `1px solid ${bashMode ? "var(--border-strong)" : isStreaming && (onSteer || onFollowUp)
                 ? "var(--warning)"
                 : "var(--border)"}`,
@@ -4263,6 +4277,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         </div>}
         {/* Close composer panel (wraps textarea + bottom controls) */}
         </div>
+        </ComposerLoader>
         {/* Close main-input relative wrapper (anchors history / @-mention menus) */}
         </div>
       </div>

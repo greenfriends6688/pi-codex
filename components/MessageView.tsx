@@ -1019,7 +1019,20 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
 }
 
 function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent; isStreaming?: boolean; cwd?: string; onOpenFile?: (filePath: string) => void }) {
-  return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
+  return (
+    <SafeMarkdownBody
+      isStreaming={isStreaming}
+      cwd={cwd}
+      onOpenFile={onOpenFile}
+      // fork:ds-typeset（DS-26）+ fork:ds-chat-motion（DS-24）——
+      // typeset 只提供“三控节奏 + 流式稳定间距”（它自己的元素规则全部 :where() 包裹，
+      // 特异性为 0，所以原有 .markdown-body 规则仍然赢）；stream-blocks 让**本次新出现的块**
+      // 淡入 + 轻微模糊，已在屏幕上的块不会重播（旧 DOM 节点没有 @starting-style）。
+      className={`typeset typeset-chat${isStreaming ? " stream-blocks" : ""}`}
+    >
+      {block.text}
+    </SafeMarkdownBody>
+  );
 }
 
 export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex, isStreaming }: {

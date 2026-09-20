@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useState, useRef, useCallback, useMemo, typ
 import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import { FILE_CODE_STYLE, FILE_LINE_NUMBER_STYLE } from "@/lib/file-source-styles";
+// fork:ds-states（DS-08）—— 加载骨架。
+import { Skeleton } from "./ui/skeleton";
 import { LazyFileSourceView, useHighlighterReady } from "./useLazyHighlighter";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -2396,10 +2398,17 @@ function TextFileViewer({
     requestedInitialDisplayMode,
   ]);
 
+  // fork:ds-states（DS-08）—— 文件加载从“居中一行 Loading…”换成骨架行（宽度参差，像真内容）。
   if ((loading && !data) || (requestedInitialDisplayMode === "diff" && gitDiffLoading && !data)) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: TEXT.md }}>
-        {t("i18n.loading")}
+      <div
+        className="flex h-full flex-col gap-2 p-4"
+        aria-busy="true"
+        aria-label={t("i18n.loading")}
+      >
+        {[92, 78, 84, 60, 88, 70, 46].map((width, index) => (
+          <Skeleton key={index} className="h-3.5" style={{ width: `${width}%` }} />
+        ))}
       </div>
     );
   }

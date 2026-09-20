@@ -1,0 +1,148 @@
+/* scroll-fade —— 滚动感知的边缘渐隐（fork:ds-fade / DS-27）
+ * ---------------------------------------------------------------------------
+ * 规范来源：shadcn/ui `docs/utils/scroll-fade`。要点照抄：
+ *   - 用 `mask-image` 而不是叠一层渐变：溶解的是内容本身，所以能适配任何背景，不用配置颜色。
+ *   - 用 CSS **scroll-driven animation**（`animation-timeline: scroll(self y)`）实现“滚动位置感知”，
+ *     **零 JS、零 scroll 监听**。
+ *   - 静止时：上边清晰、下边渐隐；滚动中：两边都渐隐；**到底时下边收紧**（说明你已到最后一项）。
+ *   - 不支持 scroll-driven animation 的浏览器回退为静态渐隐（下面的基础规则即回退形态）。
+ *
+ * 对外只暴露两个旋钮（沿用站方命名）：
+ *   `--scroll-fade-size`   渐隐深度，默认 12% 且上限 40px
+ *   `--scroll-fade-reveal` 渐隐出现/消失的滚动距离（站方默认 96px）
+ *
+ * 本仓用法：聊天滚动容器（`.scroll-fade .scroll-fade-b`，替代原先的静态 `.fork-scroll-fade-b`）。
+ * ⚠️ 站方提醒的两个坑，本仓同样适用：
+ *   1. mask 作用在滚动容器自身上，**滚动条也会跟着被渐隐** —— 本仓聊天滚动条已用
+ *      `[scrollbar-width:none]` 隐藏，所以不受影响；
+ *   2. 若滚动区在卡片里，背景与边框要留在**外层**，否则渐隐会把卡片边框一起溶解。
+ * 注意：本文件只负责“滚动感知”；**内容不溢出时是否该挂这个类，由调用方决定**
+ * （滚动驱动动画在无滚动区间时会停在 from 帧，因此不适合无脑挂到短列表上）。
+ */
+
+/* 需要可插值的自定义属性：@property 注册后才参与动画 */
+@property --sf-top {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+@property --sf-bottom {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0%;
+}
+
+.scroll-fade {
+  --scroll-fade-size: min(12%, 40px);
+  --sf-size: var(--scroll-fade-size);
+  /* 静态回退（也是不支持 scroll-driven animation 时的形态）：两侧渐隐 */
+  --sf-mask: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--sf-size),
+    #000 calc(100% - var(--sf-size)),
+    transparent 100%
+  );
+  -webkit-mask-image: var(--sf-mask);
+  mask-image: var(--sf-mask);
+}
+
+.scroll-fade-b {
+  --sf-mask: linear-gradient(to bottom, #000 calc(100% - var(--sf-size)), transparent 100%);
+  -webkit-mask-image: var(--sf-mask);
+  mask-image: var(--sf-mask);
+}
+
+.scroll-fade-t {
+  --sf-mask: linear-gradient(to bottom, transparent 0, #000 var(--sf-size));
+  -webkit-mask-image: var(--sf-mask);
+  mask-image: var(--sf-mask);
+}
+
+.scroll-fade-x {
+  --sf-mask: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--sf-size),
+    #000 calc(100% - var(--sf-size)),
+    transparent 100%
+  );
+  -webkit-mask-image: var(--sf-mask);
+  mask-image: var(--sf-mask);
+}
+
+.scroll-fade-none {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* 关键帧：progress 0（顶端）→ 下边渐隐；progress 1（底端）→ 下边收紧 */
+@keyframes sf-scroll {
+  from {
+    --sf-top: 0%;
+    --sf-bottom: var(--sf-size);
+  }
+
+  to {
+    --sf-top: var(--sf-size);
+    --sf-bottom: 0%;
+  }
+}
+
+@keyframes sf-scroll-b {
+  from {
+    --sf-bottom: var(--sf-size);
+  }
+
+  to {
+    --sf-bottom: 0%;
+  }
+}
+
+@keyframes sf-scroll-t {
+  from {
+    --sf-top: 0%;
+  }
+
+  to {
+    --sf-top: var(--sf-size);
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  /* 两侧版本 */
+  .scroll-fade {
+    --scroll-fade-reveal: 96px;
+    --sf-mask: linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 var(--sf-top),
+      #000 calc(100% - var(--sf-bottom)),
+      transparent 100%
+    );
+    -webkit-mask-image: var(--sf-mask);
+    mask-image: var(--sf-mask);
+    animation: sf-scroll linear both;
+    animation-timeline: scroll(self y);
+    animation-range: 0 var(--scroll-fade-reveal),
+      calc(100% - var(--scroll-fade-reveal)) 100%;
+  }
+
+  /* 单侧版本：只动那一侧，其余保持静态形态 */
+  .scroll-fade-b {
+    --sf-mask: linear-gradient(to bottom, #000 0, #000 calc(100% - var(--sf-bottom)), transparent 100%);
+    -webkit-mask-image: var(--sf-mask);
+    mask-image: var(--sf-mask);
+    animation: sf-scroll-b linear both;
+    animation-timeline: scroll(self y);
+  }
+
+  .scroll-fade-t {
+    --sf-mask: linear-gradient(to bottom, transparent 0, #000 var(--sf-top));
+    -webkit-mask-image: var(--sf-mask);
+    mask-image: var(--sf-mask);
+    animation: sf-scroll-t linear both;
+    animation-timeline: scroll(self y);
+  }
+}

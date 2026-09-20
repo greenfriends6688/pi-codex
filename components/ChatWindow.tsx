@@ -18,6 +18,10 @@ import { MarkdownBody } from "./MarkdownBody";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import type { FileLocationTarget } from "./FileViewer";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
+// fork:ds-chat-motion（DS-24）—— BoardUI 的思考指示器（端口在 components/ui）。
+import { ThinkingIndicator } from "./ui/thinking-indicator";
+// fork:ds-chat-motion（DS-24）—— BoardUI 的 shimmer 文字（正在进行的行）。
+import { ShimmerText } from "./ui/stream-reveal";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { SessionStatsBar } from "./SessionStatsBar";
 import { NewSessionHome } from "./fork/NewSessionHome";
@@ -1338,7 +1342,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         {!isEmptyNew && <>
         <div
           ref={scrollContainerRef}
-          className={`min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]${showScrollToBottom ? " fork-scroll-fade-b" : ""}`}
+          className={`min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]${showScrollToBottom ? " scroll-fade scroll-fade-b" : ""}`}
           style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING_CSS}` }}>
@@ -1756,14 +1760,21 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (
-              <div className="break-words py-2 text-xs text-text-muted" role="status" aria-live="polite">
-                <span>{phaseLabel(agentPhase, t)}</span>
-              </div>
+              // fork:ds-chat-motion（DS-24）—— 原先是“一行静态文案”，现在换成 BoardUI 的
+              // 思考指示器：同一句阶段文案（带 shimmer）+ 已用时计时器；role="status" 由组件自带，
+              // 所以不再包一层 aria-live（避免双重宣告）。
+              <ThinkingIndicator
+                label={phaseLabel(agentPhase, t) ?? ""}
+                variant="wave"
+                className="py-2"
+              />
             )}
 
             {bashRunning && !pendingBash && (
-              <div className="py-2 text-xs text-text-muted" role="status" aria-live="polite">
-                <span>{t("chat.runningCommand")}</span>
+              <div className="py-2 text-xs" role="status" aria-live="polite">
+                {/* fork:ds-chat-motion（DS-24）—— “正在跑命令”改用 BoardUI 的 shimmer 文字
+                    （它自带 reduced-motion 回退，不再需要手写 fork-shimmer）。 */}
+                <ShimmerText>{t("chat.runningCommand")}</ShimmerText>
               </div>
             )}
 

@@ -1,0 +1,249 @@
+/* BoardUI 上游全局层 —— 按需子集（fork:ds-boardui-globals / DS-03）
+ * ---------------------------------------------------------------------------
+ * 来源：https://github.com/BoardUI/boardui 的 `styles/globals.css`（MIT）。
+ * 本仓只 vendored 了上游的 theme.css + typography.css（token 与排版两层），
+ * 而“组件真正跑起来需要的关键帧与全局类”全在上游的 globals.css 里。这个文件
+ * 就是那份 globals 的**勾选式子集**：只搬已被本项目采纳的组件需要的东西。
+ *
+ * 刻意**不搬**的部分（会与本项目外壳冲突）：
+ *   - `html, body { background/color/color-scheme/font-smoothing }`（本项目有自己的底色与外壳）
+ *   - `@media (max-width: 639px)` 的 input 16px 兜底（本项目移动端策略不同）
+ *   - `::view-transition-*` 复位 / `.theme-transitioning`（本项目 hooks/useTheme.ts 自管主题擦除）
+ *   - landing-/contributions-/recharts-/mic-bar 等本产品用不到的样式
+ *
+ * 同步方式：`node scripts/boardui-sync.mjs --check`（见 docs/boardui/VENDOR.md）。
+ */
+
+/* ===== Shimmer 文本（agent-thinking 标签、agent-log 的 ShimmerText 共用）===== */
+
+@keyframes ai-chat-text-shimmer {
+  from {
+    background-position: 200% center;
+  }
+
+  to {
+    background-position: -100% center;
+  }
+}
+
+.agent-progress-loading-text {
+  color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    var(--color-text-secondary) 16%,
+    var(--color-text-secondary) 38%,
+    var(--color-text-primary) 50%,
+    var(--color-text-secondary) 62%,
+    var(--color-text-secondary) 84%
+  );
+  background-position: 200% center;
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: ai-chat-text-shimmer 3.4s linear infinite;
+  will-change: background-position;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-progress-loading-text {
+    color: var(--color-text-secondary);
+    background-image: none;
+    animation: none;
+  }
+}
+
+/* ===== 暗色下把 Tailwind 生成的阴影工具类重定向到暗色 token =====
+ * 上游注释原文：那些生成的工具类会固化浅色 alpha，这里把 --tw-shadow 指回
+ * 活的暗色高度 token，于是类名主题能在不改组件的前提下调整透明度。 */
+
+.dark .shadow-2xs {
+  --tw-shadow: var(--shadow-2xs);
+}
+.dark .shadow-xs {
+  --tw-shadow: var(--shadow-xs);
+}
+.dark .shadow-sm {
+  --tw-shadow: var(--shadow-sm);
+}
+.dark .shadow-md {
+  --tw-shadow: var(--shadow-md);
+}
+.dark .shadow-lg {
+  --tw-shadow: var(--shadow-lg);
+}
+.dark .shadow-xl {
+  --tw-shadow: var(--shadow-xl);
+}
+.dark .shadow-card {
+  --tw-shadow: var(--shadow-card);
+}
+.dark .shadow-dropdown {
+  --tw-shadow: var(--shadow-dropdown);
+}
+.dark .shadow-sidebar {
+  --tw-shadow: var(--shadow-sidebar);
+}
+.dark .shadow-waitlist {
+  --tw-shadow: var(--shadow-waitlist);
+}
+
+/* ===== Checkbox 勾：像手勾一样把描边画出来（pathLength=1，与分辨率无关）===== */
+
+@keyframes check-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.animate-check-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: check-draw 200ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-check-draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ===== 表格：上游 base/table 渲染真实 <table> 元素，样式落在这个类上 ===== */
+
+.bui-table {
+  @apply w-full border-collapse text-left;
+}
+/* Header background + border-y live on the cells: with border-collapse the
+ * browser doesn't paint backgrounds/borders set on the <thead> row group.
+ * Backgrounds/borders are set with explicit CSS (theme vars) rather than
+ * @apply, which drops border-width/bg on these row-group cells. */
+.bui-table th {
+  @apply px-3 py-2.5 text-left align-middle text-body-medium text-text-tertiary whitespace-nowrap outline-none;
+  background-color: var(--color-background-secondary-default);
+  border-top: 1px solid var(--color-separator-border);
+  border-bottom: 1px solid var(--color-separator-border);
+  transition: padding 200ms ease, font-size 200ms ease;
+}
+.bui-table td {
+  @apply px-3 py-2.5 align-middle text-body-medium text-text-primary outline-none;
+  transition: padding 200ms ease, font-size 200ms ease;
+}
+.bui-table tbody tr {
+  @apply transition-colors duration-150;
+  border-bottom: 1px solid var(--color-separator-border);
+}
+.bui-table tbody tr[data-focus-visible] {
+  @apply ring-2 ring-inset ring-border-focus-ring;
+}
+.bui-table.bui-table-sm th,
+.bui-table.bui-table-sm td {
+  @apply px-2.5 py-1.5 text-body-2-medium;
+}
+
+/* ===== Agent Thinking（components/ui/thinking-indicator）=====
+ * 底色与高光都由组件通过 --bui-agent-thinking-tone 设定，所以每种 tone 的
+ * shimmer 表现一致。 */
+
+.bui-agent-thinking-label {
+  color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    color-mix(in oklab, var(--bui-agent-thinking-tone) 55%, transparent) 30%,
+    var(--bui-agent-thinking-tone) 50%,
+    color-mix(in oklab, var(--bui-agent-thinking-tone) 55%, transparent) 70%
+  );
+  background-position: 200% center;
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: ai-chat-text-shimmer 2.6s linear infinite;
+  will-change: background-position;
+}
+
+/* Star sparkle: scale + fade in, settle, and vanish; per-star duration and
+ * stagger come in via inline animation-duration/-delay. */
+@keyframes bui-agent-thinking-star {
+  0%,
+  100% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  60% {
+    transform: scale(0.8);
+    opacity: 0.9;
+  }
+}
+
+.bui-agent-thinking-star {
+  transform: scale(0);
+  animation-name: bui-agent-thinking-star;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+/* Infinity comet: the dash segment laps the normalized (pathLength=100)
+ * figure-eight once per animation-duration. */
+@keyframes bui-agent-thinking-dash {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.bui-agent-thinking-comet {
+  animation-name: bui-agent-thinking-dash;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bui-agent-thinking-label {
+    color: var(--bui-agent-thinking-tone);
+    background-image: none;
+    animation: none;
+  }
+
+  /* Stars rest visible instead of frozen at scale(0). */
+  .bui-agent-thinking-star {
+    animation: none;
+    transform: none;
+    opacity: 0.7;
+  }
+
+  .bui-agent-thinking-comet {
+    animation: none;
+  }
+}
+
+/* Star glyphs read a touch heavier than the dot grids on light backgrounds;
+ * soften only them (not the label) there. Dark mode keeps the full tone. */
+.bui-agent-thinking-stars {
+  color: color-mix(in oklab, currentColor 75%, transparent);
+}
+
+.dark .bui-agent-thinking-stars {
+  color: inherit;
+}
+
+/* ===== Composer Loader（components/ui/composer-loader）=====
+ * 光带沿 pathLength 归一化的 SVG 描边绕行，offset 每次时长绕一圈。 */
+
+@keyframes bui-composer-loader-dash {
+  from {
+    stroke-dashoffset: 0;
+  }
+
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bui-composer-loader-rect {
+    animation: none !important;
+  }
+}

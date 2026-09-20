@@ -1,0 +1,138 @@
+/* Typeset —— markdown 排版的三控节奏 + 流式稳定契约（fork:ds-typeset / DS-26）
+ * ---------------------------------------------------------------------------
+ * 规范来源：shadcn/ui `docs/typeset`（站点原文）。三条要点照抄：
+ *   1. 三控：「--typeset-size / --typeset-leading / --typeset-flow」决定字号、行高、块间距，
+ *      其余（标题级差、列表缩进、分隔线上下距）全部由它们派生 —— “Nobody wants to set a
+ *      dozen variables to make markdown look right.”
+ *   2. 跟随容器：「--typeset-size: 1em」让同一份 markdown 在聊天气泡里小、在文章里大。
+ *   3. **流式稳定**（本项目最需要的一条）：“adding a new block does not change the styles of
+ *      the blocks already on screen.” 做法是：不用 `:last-child` / `:has()` / `:empty` 参与布局；
+ *      间距只走 `margin-block-start`（新块自带间距，旧块不变）；表格分隔线挂在新单元格上。
+ *
+ * 为什么本文件这么“轻”：本仓原本就有 `.markdown-body` 的完整样式（`app/globals.css`）。
+ * 这里的元素规则一律用 `:where()` 包裹（零特异性），所以 .markdown-body 自己的规则仍然赢；
+ * typeset 提供的是**节奏变量**与**流式稳定规则**，不是换掉那套样式。
+ *
+ * 逃生口：`.not-typeset` / `[data-not-typeset]` —— 覆盖其内部整棵子树（含嵌套 typeset）。
+ */
+
+.typeset {
+  /* 三控：默认值贴近本仓既有阅读节奏（--leading-prose: 1.62 见 globals.css） */
+  --typeset-size: 1em;
+  --typeset-leading: var(--leading-prose, 1.62);
+  --typeset-flow: 0.85em;
+
+  font-size: var(--typeset-size);
+  line-height: var(--typeset-leading);
+  color: var(--text, currentColor);
+}
+
+/* 两个预设：聊天里要紧，文档/导出要松（站方同名思路） */
+.typeset-chat {
+  --typeset-flow: 0.7em;
+  --typeset-leading: 1.6;
+}
+
+.typeset-docs {
+  --typeset-size: 0.95em;
+  --typeset-flow: 1.15em;
+  --typeset-leading: 1.75;
+}
+
+/* ---- 块间距：只走 margin-block-start ---------------------------------------
+ * 关键：不给块设 margin-block-end，也不给「最后一个孩子」做特殊处理。
+ * 于是新块到达时，已渲染的块布局不变（流式不重排）。 */
+
+.typeset :where(p, ul, ol, blockquote, pre, table, figure, hr, h1, h2, h3, h4, h5, h6) {
+  margin-block: 0;
+}
+
+.typeset :where(*) + :where(p, ul, ol, blockquote, pre, table, figure, h1, h2, h3, h4, h5, h6) {
+  margin-block-start: var(--typeset-flow);
+}
+
+/* 标题与自己的正文贴紧，与上一块拉开（全部由 flow 派生） */
+.typeset :where(h1, h2, h3, h4, h5, h6) {
+  margin-block-start: calc(var(--typeset-flow) * 1.6);
+}
+
+.typeset :where(h1, h2, h3, h4, h5, h6) + :where(p, ul, ol, blockquote, pre, table, figure) {
+  margin-block-start: calc(var(--typeset-flow) * 0.7);
+}
+
+/* 列表项之间也要间距，但同样只用 block-start */
+.typeset :where(li) + :where(li) {
+  margin-block-start: calc(var(--typeset-flow) * 0.35);
+}
+
+/* ---- 分隔线与表格：分隔线挂在“新元素”上，不回头改旧元素 ---------------------- */
+
+.typeset :where(hr) {
+  border: 0;
+  border-block-start: 1px solid var(--border, currentColor);
+  opacity: 0.5;
+  margin-block-start: calc(var(--typeset-flow) * 1.4);
+}
+
+/* 每个 td/th 自己带上边线（而不是给 `tr:last-child` 去掉下边线）：
+   新行到达不会改变上一行的描边。 */
+.typeset :where(table) {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.typeset :where(th, td) {
+  border-block-start: 1px solid var(--border, currentColor);
+  padding-block: 0.4em;
+  padding-inline: 0.6em;
+  text-align: start;
+}
+
+.typeset :where(th) {
+  font-weight: var(--weight-semibold, 600);
+  color: var(--text-muted, currentColor);
+}
+
+/* 宽表横向滚动（站方的 typeset-scroll）：由调用方包一层，而不是让表格偷改父布局 */
+.typeset-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  max-width: 100%;
+}
+
+/* ---- 流式揭示：新块淡入 + 轻微模糊，已在屏幕上的块永不重播（fork:ds-chat-motion / DS-24）
+ * 为什么用 CSS 而不是把 markdown 拆成行：本项目 assistant 正文是 markdown（列表/代码/公式），
+ * 拆行会碎掉块结构；这里只在**流式中的消息体**上挂 `.stream-blocks`，靠 `@starting-style`
+ * 让“本次渲染新出现的元素”自己播入场，React 复用的旧节点没有 starting-style，所以不会重播。
+ * 与站方 `agent-chat-message.tsx` 的取舍一致：按块/行，不按词；减少动态偏好下直接关掉。 */
+
+.stream-blocks > * {
+  transition:
+    opacity var(--motion-base, 150ms) var(--ease-out, ease-out),
+    filter var(--motion-base, 150ms) var(--ease-out, ease-out),
+    translate var(--motion-base, 150ms) var(--ease-out, ease-out);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .stream-blocks > * {
+    @starting-style {
+      opacity: 0;
+      filter: blur(4px);
+      translate: 0 3px;
+    }
+  }
+}
+
+/* ---- 逃生口（站方的 not-typeset）：被排除的子楝不被 typeset 的节奏影响 ------------ */
+
+.not-typeset,
+[data-not-typeset] {
+  font-size: initial;
+  line-height: initial;
+}
+
+.not-typeset :where(*),
+[data-not-typeset] :where(*) {
+  /* 不让 typeset 的节奏渗进被排除的子树 */
+  margin-block: initial;
+}

@@ -1,13 +1,13 @@
 import { extendTailwindMerge } from "tailwind-merge";
 
 /**
- * Text-style classes from app/boardui/typography.css (BoardUI's type ramp).
+ * Text-style classes from styles/typography.css.
  *
  * IMPORTANT: every text-* utility we define via @theme (e.g. `text-body-medium`,
  * `text-title-1-semibold`) must be listed here. Otherwise tailwind-merge — which
  * has no view of our Tailwind theme — treats them as text-color utilities and
  * silently drops them when they appear in the same className as a real color
- * (`text-text-primary`, etc).
+ * (`text-foreground-full`, `text-text-primary`, etc).
  *
  * If you add or rename a text style in typography.css, mirror the change here.
  */

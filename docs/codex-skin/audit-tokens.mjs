@@ -17,7 +17,21 @@ import { join, extname } from "node:path";
 
 const SCAN_DIRS = ["app", "components", "lib", "hooks"];
 const EXT = new Set([".ts", ".tsx", ".css", ".mjs"]);
-const CSS_FILES = ["app/globals.css", "app/settings.css", "app/wallpaper.css", "app/fork-ui.css"];
+const CSS_FILES = [
+  "app/globals.css",
+  "app/settings.css",
+  "app/wallpaper.css",
+  "app/fork-ui.css",
+  // fork:ds-gates（DS-04）—— 定义文件清单必须包含“被 vendored / 新增的 CSS 层”，
+  // 否则它们里的 token 会全部被读成「未定义」（自 PR-02 引入 BoardUI token 层起，
+  // 这个门禁一直在假报错，此修正之前 --color-blue-* / --color-neutral-* 这类
+  // 纯上游 token 也在报）。新增样式层时记得同时加到这里。
+  "app/boardui/theme.css",
+  "app/boardui/typography.css",
+  "app/boardui/globals-subset.css",
+  "app/design-system/typeset.css",
+  "app/design-system/scroll-fade.css",
+];
 
 // 由 JS 在运行时写进 inline style / next-font 的变量，不是缺失。
 const RUNTIME_SET = new Set([
@@ -45,6 +59,16 @@ const RUNTIME_SET = new Set([
   "--app-ui-scale",
   // Written by hooks/useWallpaper.ts (scrim opacity percentage).
   "--wallpaper-scrim",
+  // fork:ds-gates（DS-04）—— 以下三类不是“缺失的定义”，是门禁看不见的定义方式：
+  // ① 由 JS 写进 inline style（thinking-indicator 给每档 tone 设底色）；
+  // ② 由 `@property` 注册、供滚动驱动动画插值（@property 行尾是 `{`，没有冒号，
+  //    定义采集正则抓不到）；
+  // ③ next/font 在运行时提供的字体变量。
+  "--bui-agent-thinking-tone",
+  "--sf-top",
+  "--sf-bottom",
+  "--font-inter",
+  "--font-mono-source",
 ]);
 
 // 每套主题都必须完整重定义的色板。少一个就会从 :root 泄漏成另一套主题的值。
@@ -71,9 +95,13 @@ function walk(dir, out = []) {
 }
 
 const used = new Map();
+// fork:ds-gates（DS-04）—— 注释里提到的 `var(--foo)` 不算引用（否则注释中写道
+// “值全部写成 `var(--color-*)`”就会造出一个不存在的 token）。
+const stripComments = (src) =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
 for (const dir of SCAN_DIRS) {
   for (const file of walk(dir)) {
-    const src = readFileSync(file, "utf8");
+    const src = stripComments(readFileSync(file, "utf8"));
     for (const m of src.matchAll(/var\((--[a-zA-Z0-9-]+)/g)) {
       if (!used.has(m[1])) used.set(m[1], new Set());
       used.get(m[1]).add(file);
@@ -111,7 +139,23 @@ for (const f of CSS_FILES) {
   }
 }
 
-const missing = [...used].filter(([t]) => !defined.has(t) && !RUNTIME_SET.has(t));
+// fork:ds-gates（DS-04）—— Tailwind v4 默认调色板由 `@import "tailwindcss"` 提供，
+// 不落在任何被扫描的 CSS 文件里，所以引用它们不算“未定义”。
+const TAILWIND_DEFAULT_PALETTE =
+  /^--color-(white|black|transparent|current|inherit|(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3})$/;
+
+// fork:ds-gates（DS-04）—— 名字以 `-` 结尾的，只可能是**模板字面量拼出来的动态名**
+// （例：`components/GitGraphTab.tsx` 写 `vars[`--git-graph-lane-${i}`]`，再用
+// `var(--git-graph-lane-${i})` 读回），静态扫描不可能知道它定义在哪。
+const DYNAMIC_TOKEN_NAME = /-$/;
+
+const missing = [...used].filter(
+  ([t]) =>
+    !defined.has(t) &&
+    !RUNTIME_SET.has(t) &&
+    !TAILWIND_DEFAULT_PALETTE.test(t) &&
+    !DYNAMIC_TOKEN_NAME.test(t),
+);
 
 // 逐主题块统计色板完整度。选择器可能跨行（`:root,` / `html.dark,`），
 // 所以按「以 { 结尾的选择器行」开启一个块。只有声明了 color-scheme 的块才是

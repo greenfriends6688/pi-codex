@@ -7,6 +7,20 @@
    只引入 token 层与排版层，不引入它的 globals.css（全局规则与本项目的全局样式冲突）。 */
 @import "./boardui/theme.css";
 @import "./boardui/typography.css";
+/* fork:ds-boardui-globals（DS-03）—— 上游 styles/globals.css 里被组件依赖的那一小部分，
+   按“已采纳的组件”勾选式搬运：关键帧 + .bui-table + 暗色阴影重定向。
+   刻意不搬它的 html/body 底色与移动端 input 字号（会与本项目外壳冲突）。 */
+@import "./boardui/globals-subset.css";
+/* Typeset（fork:ds-typeset / DS-26）与 scroll-fade（fork:ds-fade / DS-27）：
+   规范来自 shadcn/ui 的 typeset 与 scroll-fade 文档，按本仓 token 落地。 */
+@import "./design-system/typeset.css";
+@import "./design-system/scroll-fade.css";
+
+/* fork:ds-dark-variant（DS-02）—— BoardUI 上游把这条 variant 放在它自己的 globals.css 里，
+   本项目只 vendored 了 token/排版两层，所以此前缺失：后果是任何 BoardUI 组件里的
+   `dark:` 工具类会跟随系统 prefers-color-scheme，而不是本项目的 .dark 类。
+   一行补齐，语义与上游完全一致。 */
+@custom-variant dark (&:where(.dark, .dark *));
 
 /* fork:shadcn（PR-20）—— 声明式状态变体（shadcn/ui 的写法）。
    让弹层/开关可以用 `data-open:` / `data-closed:` 直接声明动效，
@@ -897,7 +911,9 @@ pre, code {
   word-break: break-word;
 }
 .markdown-body p { margin: 0 0 8px; }
-.markdown-body p:last-child { margin-bottom: 0; }
+/* fork:ds-typeset —— 流式稳定（DS-26）：删掉 `p:last-child { margin-bottom: 0 }`。
+   那条规则会让“新段落到达”时**上一段**突然长出 8px 下边距（旧内容被重排）。
+   代价是消息末尾多 8px 空白（被 16px 消息间距吸收），小于流式抖动的代价。 */
 .markdown-body h1, .markdown-body h2, .markdown-body h3,
 .markdown-body h4, .markdown-body h5, .markdown-body h6 {
   font-weight: 600;
@@ -1022,7 +1038,8 @@ pre, code {
   text-align: left;
   vertical-align: top;
 }
-.markdown-body tr:last-child td { border-bottom: 0; }
+/* fork:ds-typeset —— 同上：`tr:last-child td { border-bottom: 0 }` 会在新行到达时
+   让**上一行**的底边线消失（1px 重排）。表格每个单元格自己带上边线就不会回头改旧行。 */
 .markdown-body th {
   background: var(--bg-subtle);
   color: var(--text);

@@ -2,6 +2,9 @@
 
 import { useEffect, useLayoutEffect, useState, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from "react";
 import type { SessionInfo } from "@/lib/types";
+// fork:ds-states（DS-08）—— 加载/空/错误三态的共享组件（端口在 components/ui）。
+import { Skeleton } from "./ui/skeleton";
+import { Empty, EmptyHeader, EmptyTitle, EmptyContent } from "./ui/empty";
 import { listSessionFamilies, type SessionFamily } from "@/lib/session-family";
 import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
@@ -1834,20 +1837,39 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           onScroll={handleListScroll}
           style={{ flex: "1 1 auto", overflowY: "auto", padding: "0 6px 8px", minHeight: 80 }}
         >
+          {/* fork:ds-states（DS-08）—— 加载出骨架（原来是一行 "Loading…" 文案）。
+              骨架宽度递减，读起来像真列表在长出来。 */}
           {loading && projectChoices.length === 0 && (
-            <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: TEXT.sm }}>
-              {t("sidebar.loading")}
+            <div className="flex flex-col gap-1.5 px-3.5 py-4" aria-busy="true" aria-label={t("sidebar.loading")}>
+              {[0, 1, 2, 3, 4].map((row) => (
+                <Skeleton key={row} className="h-4" style={{ width: `${72 - row * 9}%` }} />
+              ))}
             </div>
           )}
+          {/* fork:ds-states（DS-08）—— 错误态补“重试”（原来只有一行红字，没有任何动作）。
+              按钮直接用 BoardUI 的 token + 复合字型；将来端口 base/buttons 后换成 Button。 */}
           {error && (
-            <div style={{ padding: "12px 14px", color: "var(--danger)", fontSize: TEXT.sm }}>
-              {error}
-            </div>
+            <Empty className="px-3.5 py-6">
+              <EmptyHeader>
+                <EmptyTitle className="text-body-2-medium text-text-error-primary">{error}</EmptyTitle>
+              </EmptyHeader>
+              <EmptyContent>
+                <button
+                  type="button"
+                  onClick={() => void loadSessions(false, true)}
+                  className="rounded-2lg border border-border-button-default bg-background-primary-default px-3 py-1.5 text-body-2-medium text-text-primary outline-none transition-colors hover:bg-background-secondary-hover focus-visible:ring-2 focus-visible:ring-border-focus-ring"
+                >
+                  {t("error.boundaryRetry")}
+                </button>
+              </EmptyContent>
+            </Empty>
           )}
           {!loading && !error && visibleProjects.length === 0 && !chatProject && (
-            <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: TEXT.sm }}>
-              {t("sidebar.noSessions")}
-            </div>
+            <Empty className="px-3.5 py-6">
+              <EmptyHeader>
+                <EmptyTitle className="text-body-2-medium">{t("sidebar.noSessions")}</EmptyTitle>
+              </EmptyHeader>
+            </Empty>
           )}
           {/* fork:chat-workspace — 聊天分区：固定在最上面，自带标题行（新建 / 设置目录 /
               折叠），会话列表沿用项目那套高亮与虚拟窗口逻辑。 */}

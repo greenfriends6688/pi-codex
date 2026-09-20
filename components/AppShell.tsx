@@ -83,6 +83,8 @@ import {
 } from "@/lib/composer-context";
 import type { SessionRowContextMenuDetail } from "@/lib/session-row-context-menu";
 import { ContextMenuProvider } from "./ContextMenu";
+// fork:ds-toast（DS-12）—— 应用级 toast 宿主（BoardUI 卡片视觉 + shadcn 的 manager 语义）。
+import { ToastHost, toast } from "./ui/toast";
 import type { NewSessionProject, NewSessionTargets } from "./fork/ProjectChip";
 // fork:proma-05-explore — 右栏并排看探索分支（只读）
 import { ExplorationPane } from "./fork/ExplorationPane";
@@ -2046,6 +2048,12 @@ export function AppShell() {
           onClick={() => {
             if (!selectedSession) return;
             window.open(`/api/sessions/${encodeURIComponent(selectedSession.id)}/export?format=md`, "_blank", "noopener,noreferrer");
+            // fork:ds-toast（DS-12）—— 导出以前没有任何反馈（新标签页可能被拦），
+            // 现在给一条 toast：BoardUI 卡片视觉 + shadcn 的 manager 语义。
+            toast.success({
+              title: translate("session.exportMarkdown"),
+              description: selectedSession.name ?? selectedSession.id,
+            });
             if (mobile && isNarrowMobile) setMobileToolbarMoreOpen(true);
           }}
           disabled={!selectedSession}
@@ -2280,6 +2288,9 @@ export function AppShell() {
         }
       }
     `}</style>
+    {/* fork:ds-toast（DS-12）—— 应用级 toast 宿主，挂一次即可。
+        聊天内的 NoticeShelf 语义不变：会话事件流 ≠ 应用操作反馈，两者不合并。 */}
+    <ToastHost />
     {/* The tree is rendered in two places: as the panel's own content when no tab
         is open, and as a right-hand column beside the active viewer. One node
         keeps the two spots from drifting apart. */}
