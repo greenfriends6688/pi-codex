@@ -327,20 +327,28 @@ html.keyboard-open .extension-status-shelf {
  * The handle must also stay BELOW the controls in paint order: as a positioned element it
  * otherwise paints over the ordinary (static) buttons in the same bar, so a click lands on
  * the handle instead of the button — that is what made the top-right icons and the file
- * tab close button dead in the packaged app while working in the browser. The header is
- * promoted to a stacking context so `z-index: -1` puts the handle above the bar's
- * background (its drag rect still counts) and below every in-flow control. */
-[data-desktop-shell="true"] .main-workspace-header {
-  z-index: 0;
-}
+ * tab close button dead in the packaged app while working in the browser.
+ *
+ * The controls are lifted with `position: relative` and NO z-index: positioned boxes paint
+ * after static ones, which is already enough. Giving them (or the header) a z-index would
+ * create a stacking context instead, and the system-prompt popover rendered inside this
+ * header is `position: fixed; z-index: 500` — trapping it there lets the chat content
+ * paint over the popover. */
 [data-desktop-shell="true"] .desktop-drag-handle {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 28px;
   right: 28px;
-  z-index: -1;
   -webkit-app-region: drag;
+}
+[data-desktop-shell="true"] .main-workspace-header button,
+[data-desktop-shell="true"] .main-workspace-header [role="tab"],
+[data-desktop-shell="true"] .main-workspace-header a,
+[data-desktop-shell="true"] .main-workspace-header input,
+[data-desktop-shell="true"] .main-workspace-header select,
+[data-desktop-shell="true"] .main-workspace-header textarea {
+  position: relative;
 }
 [data-desktop-shell="true"] .main-workspace-header {
   -webkit-app-region: no-drag;
