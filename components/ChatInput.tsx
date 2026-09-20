@@ -79,6 +79,7 @@ import { ComposerReferenceMenu } from "./ComposerReferenceMenu";
 import {
   MAX_ATTACHED_FILE_BYTES,
   buildAttachmentReference,
+  expandAttachmentReferences,
   nextAvailableAttachmentName,
   planAttachments,
   type AttachmentSkipReason,
@@ -1141,6 +1142,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const draftKeyRef = useRef(draftKey);
   const initialSelectionContextsRef = useRef(initialSelectionContexts);
   const valueRef = useRef(value);
+  // fork:ui — 本次输入里插入过的附件完整路径（`@文件名` ↔ 完整路径 的还原表）。
+  // 输入框里只显示短名，发出去的是路径（见 expandAttachmentReferences）。
+  const attachedReferencePathsRef = useRef<string[]>([]);
   const attachedImagesRef = useRef(attachedImages);
   const selectionContextsRef = useRef(selectionContexts);
   const sessionReferencesRef = useRef(sessionReferences);
@@ -1497,6 +1501,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     const ta = textareaRef.current;
     const cursor = ta?.selectionStart ?? current.length;
     const insert = paths.map((path) => buildAttachmentReference(path).text).join("");
+    // fork:ui — 记下这批附件的完整路径：输入框里只会出现 `@文件名`，
+    // 发送时再还原成路径（expandAttachmentReferences）。
+    for (const path of paths) {
+      if (!attachedReferencePathsRef.current.includes(path)) attachedReferencePathsRef.current.push(path);
+    }
     const needsSpace = cursor > 0 && !/\s/.test(current.slice(cursor - 1, cursor));
     const next = current.slice(0, cursor) + (needsSpace ? " " : "") + insert + current.slice(cursor);
     const nextCursor = cursor + (needsSpace ? 1 : 0) + insert.length;
@@ -1679,6 +1688,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const clearInput = useCallback(() => {
     valueRef.current = "";
     setValue("");
+    // fork:ui — 清掉附件路径还原表：下一轮输入里若出现同名 `@文件`，不应再
+    // 被当成上一轮的附件还原成路径。
+    attachedReferencePathsRef.current = [];
     selectionContextsRef.current = [];
     setSelectionContexts([]);
     sessionReferencesRef.current = [];
@@ -1789,7 +1801,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   }, [attachedImages.length, clearInput, onBuiltinCommand]);
 
   const handleSend = useCallback(async () => {
-    const question = value.trim();
+    // fork:ui — 附件在输入框里显示为 `@文件名`，发给模型前还原成完整路径
+    // （pi 的 prompt 只支持 text/image 两种内容块，文件必须靠路径引用）。
+    const question = expandAttachmentReferences(value.trim(), attachedReferencePathsRef.current);
     if (!question && !attachedImages.length) return;
     const contexts = selectionContextsRef.current;
     const references = sessionReferencesRef.current;

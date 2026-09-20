@@ -41,7 +41,7 @@
     "test:terminal": "node e2e/terminal.mjs",
     "test:e2e": "node e2e/run.mjs",
     "test:themes": "node e2e/themes.mjs",
-    "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\"",
+    "test": "node --experimental-strip-types --test \"app/**/*.test.mjs\" \"components/**/*.test.mjs\" \"hooks/**/*.test.mjs\" \"lib/**/*.test.mjs\" \"public/**/*.test.mjs\" \"electron/**/*.test.mjs\"",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish --access public",
     "desktop": "electron .",
     "desktop:verify": "node scripts/verify-desktop-bundle.mjs",
@@ -122,11 +122,11 @@
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
   },
-  "productName": "Pi Codex",
+  "productName": "Pinkslab",
   "main": "electron/main.js",
   "build": {
-    "appId": "com.greenfriends6688.picodex",
-    "productName": "Pi Codex",
+    "appId": "com.greenfriends6688.pinkslab",
+    "productName": "Pinkslab",
     "asar": false,
     "npmRebuild": false,
     "files": [
@@ -203,9 +203,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Pi Codex",
+      "shortcutName": "Pinkslab",
       "artifactName": "${productName}-Setup-${version}.${ext}",
-      "uninstallDisplayName": "Pi Codex ${version}"
+      "uninstallDisplayName": "Pinkslab ${version}"
     },
     "portable": {
       "artifactName": "${productName}-Portable-${version}.${ext}"

@@ -124,8 +124,35 @@ export function nextAvailableAttachmentName(name: string, taken: Iterable<string
  * 把本地路径变成消息里的引用文本，复用 `@` 文件菜单的插入规则：
  * `@path `（含空格时 `@"path" `）。
  */
+/** 跨平台的取文件名（不能用 node:path：这段代码会打进浏览器包）。 */
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]/).pop() || path;
+}
+
+/**
+ * fork:ui — 附件插入的不再是完整路径，而是 `@文件名`。
+ *
+ * 原因：`@/Users/…/.pi/agent/attachments/2026-09-20/9201-9269-2.docx` 这种路径
+ * 会把输入框整个撑爆，用户要求“输入框里只显文件名，发给 AI 时仍是路径”。
+ * 发送前由 `expandAttachmentReferences()` 还原（见下）。
+ */
 export function buildAttachmentReference(path: string): { text: string; cursorOffset: number } {
-  return buildAtInsertText(path, false, false);
+  return buildAtInsertText(fileNameOf(path), false, false);
+}
+
+/**
+ * 发送前把 `@文件名` 还原成 `@完整路径`。
+ *
+ * 只还原本次输入过程中插入过的附件（`paths`），不碰用户手打的其他 `@` 文本；
+ * 同一文件名出现多次时全部替换（同一个附件被插了两次的情况）。
+ */
+export function expandAttachmentReferences(text: string, paths: readonly string[]): string {
+  let out = text;
+  for (const path of paths) {
+    const token = `@${fileNameOf(path)}`;
+    if (out.includes(token)) out = out.replaceAll(token, `@${path}`);
+  }
+  return out;
 }
 
 /** 提示条要展示的文案键：没有任何需要说明的出口时返回 `null`。 */
