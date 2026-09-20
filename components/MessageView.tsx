@@ -3,6 +3,8 @@
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
+import { useFileIndex, useSkillInfo } from "@/hooks/useProjectContext";
+import type { MentionValidators } from "@/lib/mention-tokens";
 import { CopyStateIcon } from "./fork/CopyStateIcon";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
@@ -374,6 +376,21 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
       ? []
       : message.content.filter((b): b is ImageContent => b.type === "image");
 
+  // D2-PR-12 — 用户消息正文里的 @file / /skill: 高亮。
+  // 校验数据来自共享缓存（模块级 + 30s TTL + 并发去重）；未加载时返回 undefined，
+  // 高亮一律不猜。代码块禁改由 remark 插件只遍历 text 节点保证。
+  const fileIndex = useFileIndex(cwd);
+  const skillInfo = useSkillInfo(cwd);
+  const mentionValidators = useMemo<MentionValidators>(() => ({
+    fileExists: (path) => {
+      if (!fileIndex) return undefined;
+      const key = path.toLowerCase();
+      return fileIndex.paths.has(key) || fileIndex.dirs.has(key);
+    },
+    isSkill: (name) => (skillInfo ? skillInfo.has(name) : undefined),
+  }), [fileIndex, skillInfo]);
+  const markdownMentionProps = { cwd, onOpenFile, highlightMentions: true, mentionValidators } as const;
+
   const commandText = skillExpansionToCommand(content);
   const commandSeparator = commandText?.search(/\s/) ?? -1;
   const commandName = commandText
@@ -514,13 +531,13 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                 )}
               </div>
               {expanded && (
-                <MarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</MarkdownBody>
+                <MarkdownBody className="markdown-user-message" {...markdownMentionProps}>{content}</MarkdownBody>
               )}
             </div>
           ) : (
           <>
           {imageBlocksNode}
-          {content && <SafeMarkdownBody className="markdown-user-message" cwd={cwd} onOpenFile={onOpenFile}>{content}</SafeMarkdownBody>}
+          {content && <SafeMarkdownBody className="markdown-user-message" {...markdownMentionProps}>{content}</SafeMarkdownBody>}
           </>
           )}
         </div>
@@ -935,17 +952,22 @@ function AssistantMessageView({
       {/* Usage / copy / timestamp row — fork:zn-12, same hover gate as the user
           message's action row. Token counts and copy stay in the same place,
           they just stop competing with the answer for attention. */}
+      {/* fork:ui-stats-inline — usage 行**常显**（用户明确要求：token 统计不该藏在
+          hover 门里）。它曾和 copy/时间戳同处 `.fork-msg-actions`，而那个容器默认
+          `opacity: 0`（fork:zn-12 的 hover 门）——父级 opacity 无法被子元素覆盖，
+          所以必须把它移出容器才能常显。 */}
+      {message.usage && !isStreaming && (
+        <div style={{ fontSize: TEXT.xs, color: "var(--text-dim)", marginTop: 6 }}>
+          {formatUsage(message.usage)}
+        </div>
+      )}
+
       <div
         className="fork-msg-actions"
         style={{
           display: "flex", alignItems: "center", gap: 8, marginTop: 4,
         }}
       >
-        {message.usage && !isStreaming && (
-          <div style={{ fontSize: TEXT.xs, color: "var(--text-dim)" }}>
-            {formatUsage(message.usage)}
-          </div>
-        )}
         {textContent && !isStreaming && (
           <button
             onClick={copyContent}
@@ -1726,6 +1748,9 @@ function PairedResult({ text, isEmpty, isError }: {
 
 function CompactionMessageView({ message }: { message: CustomMessage }) {
   const { t } = useI18n();
+  // fork:pr15-compaction — 压缩卡默认收起：折叠态只留一行概览 + caret，展开后
+  // 正文限高滚动。文件清单（CompactionFileMetadata）原样保留在展开区里。
+  const [expanded, setExpanded] = useState(false);
   const summary = getMessageText(message.content);
   const parsedSummary = useMemo(() => parseCompactionSummary(summary), [summary]);
   const time = formatTime(message.timestamp);
@@ -1740,37 +1765,63 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
           background: "var(--bg)",
         }}
       >
-        <div
+        <button
+          type="button"
+          onClick={() => setExpanded((value) => !value)}
+          aria-expanded={expanded}
           style={{
             display: "flex",
             alignItems: "center",
             gap: 8,
+            width: "100%",
             padding: "7px 10px",
-            borderBottom: "1px solid var(--border)",
+            border: "none",
+            borderBottom: expanded ? "1px solid var(--border)" : "none",
             background: "var(--bg-panel)",
             color: "var(--text-muted)",
+            cursor: "pointer",
+            textAlign: "left",
           }}
         >
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.xs, fontWeight: 650 }}>
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{ flexShrink: 0, transition: "transform 0.15s", transform: expanded ? "rotate(90deg)" : "none" }}
+          >
+            <path d="m9 6 6 6-6 6" />
+          </svg>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.xs, fontWeight: 650, flexShrink: 0 }}>
             compaction
           </span>
-          {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: TEXT["2xs"] }}>{time}</span>}
-        </div>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: TEXT.sm }}>
+            {t("i18n.conversationCompacted")}
+          </span>
+          {time && <span style={{ marginLeft: "auto", flexShrink: 0, color: "var(--text-dim)", fontSize: TEXT["2xs"] }}>{time}</span>}
+        </button>
 
-        <div style={{ padding: "11px 13px 12px" }}>
-          <div style={{ color: "var(--text)", fontSize: "calc(15px + var(--chat-font-size-offset, 0px))", fontWeight: 700, lineHeight: 1.35 }}>
-             {t("i18n.conversationCompacted")}
+        {expanded && (
+          <div style={{ maxHeight: 280, overflowY: "auto", padding: "11px 13px 12px" }}>
+            <div style={{ color: "var(--text)", fontSize: "calc(15px + var(--chat-font-size-offset, 0px))", fontWeight: 700, lineHeight: 1.35 }}>
+               {t("i18n.conversationCompacted")}
+            </div>
+            <div style={{ marginTop: 3, marginBottom: 10, color: "var(--text)", fontSize: "calc(14px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
+               {t("i18n.compactionDescription")}
+            </div>
+            {parsedSummary.body ? (
+              <MarkdownBody className="markdown-compaction-message">{parsedSummary.body}</MarkdownBody>
+            ) : (
+               <span style={{ color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("i18n.noSummary")}</span>
+            )}
+            <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
           </div>
-          <div style={{ marginTop: 3, marginBottom: 10, color: "var(--text)", fontSize: "calc(14px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
-             {t("i18n.compactionDescription")}
-          </div>
-          {parsedSummary.body ? (
-            <MarkdownBody className="markdown-compaction-message">{parsedSummary.body}</MarkdownBody>
-          ) : (
-             <span style={{ color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("i18n.noSummary")}</span>
-          )}
-          <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
-        </div>
+        )}
       </div>
     </div>
   );

@@ -300,7 +300,7 @@ html.keyboard-open .extension-status-shelf {
 /* The message rhythm already reads this variable (globals.css:2356 applies it as
    a margin), so scaling the variable scales the whole conversation. */
 :root {
-  --conversation-item-gap: calc(24px * var(--fork-density));
+  --conversation-item-gap: calc(16px * var(--fork-density));
 }
 .settings-general-section {
   margin-bottom: calc(20px * var(--fork-density));
@@ -632,4 +632,122 @@ html.keyboard-open .extension-status-shelf {
     opacity: 0;
     pointer-events: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * D2-PR-12 — @file / /skill: mention 高亮。
+ *
+ * 同一个 .mention-token 同时用于输入框高亮层与消息正文（remark 插件产出）。
+ * 字号必须和文本域共用 --chat-content-font-size：写死会在换行/滚动时逐行错位
+ * （AGENTS.md 记录的坑：文本域与高亮层必须共享字号）。
+ * ------------------------------------------------------------------------- */
+.mention-token {
+  color: var(--accent);
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+/* 输入框高亮层：viewport 由 JS 同步成 textarea 的 clientWidth/clientHeight，
+   绝对定位盖住内容盒并裁剪溢出行；layer 用 transform 跟随 textarea 滚动。 */
+.chat-input-highlight-viewport {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.chat-input-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  font-family: inherit;
+  font-size: var(--chat-content-font-size, 13px);
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  text-align: left;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:pr23-resize — composer 顶部手柄的竖向缩放。
+ *
+ * composer 卡片的高度全是内联样式（ChatInput.tsx），所以这里用 `!important`
+ * 只做两件事：
+ *   1. 给卡片补 `position: relative`，让绝对定位的手柄骑在上边缘（内联没写
+ *      position，不会互相覆盖）；
+ *   2. 手动高度模式下把 textarea 撑满卡片并改为内部滚动 —— 行内 `style.height`
+ *      是自动增高的产物，普通声明压不住它，必须 `!important`。
+ * 自动模式不产生任何高度声明，完全不受影响。
+ * ------------------------------------------------------------------------- */
+.chat-input-shell {
+  position: relative;
+}
+.chat-input-shell > .chat-input-resize-handle {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 9px;
+  z-index: 3;
+  cursor: row-resize;
+  touch-action: none;
+  outline: none;
+}
+.chat-input-shell > .chat-input-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--motion-fast);
+  /* 两端淡出的高亮条 */
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, #000 18%, #000 82%, transparent 100%);
+}
+.chat-input-shell > .chat-input-resize-handle:hover::before,
+.chat-input-shell > .chat-input-resize-handle:focus-visible::before,
+.chat-input-shell > .chat-input-resize-handle.is-resizing::before {
+  opacity: 1;
+}
+/* 手动高度：编辑行填满卡片，textarea 100% 高度 + 内部滚动。行内 `align-items:
+   center` 在这里必须让位给 stretch，否则 textarea 不会被拉到卡片高度。 */
+.chat-input-shell.is-manual-height .chat-input-editor-row {
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: stretch !important;
+}
+.chat-input-shell.is-manual-height .chat-input-textarea {
+  height: 100% !important;
+  max-height: none !important;
+  min-height: 0 !important;
+  overflow: auto;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:pr14-compact — 阅读态输入框塌陷（见 lib/input-compact.ts 的振荡坑注释）。
+ *
+ * 收起后 composer 只留一行文本，工具栏与缩放手柄隐藏。高度声明用 `!important`
+ * 压过手动模式的内联 height 与 textarea 的行内自动增高；展开时类名移除，自然
+ * 还原。顺序必须排在 .is-manual-height 规则之后：两者同时存在时塌陷优先。
+ * ------------------------------------------------------------------------- */
+.chat-input-shell.is-compact {
+  height: auto !important;
+}
+.chat-input-shell.is-compact .chat-input-toolbar,
+.chat-input-shell.is-compact .chat-input-resize-handle {
+  /* !important 压过工具栏的内联 display。 */
+  display: none !important;
+}
+.chat-input-shell.is-compact .chat-input-textarea {
+  min-height: 0 !important;
+  height: 24px !important; /* 一行文本（约 13px 字号 × 1.6 行高） */
+  overflow: hidden !important;
 }
