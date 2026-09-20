@@ -32,9 +32,10 @@ const BASE = "http://127.0.0.1:30141/";
 // app/globals.css 末尾的 `fork:boardui-bridge`）：六套 palette 的 --bg/--text/
 // --accent/--primary-bg 都引用 --color-*，所以只剩 BoardUI 的亮/暗两组值。
 // 改这些值时三处要一起改：这里、app/globals.css 的桥接层、visual-spec.md。
-const BOARDUI_ACCENT = "oklch(0.623 0.214 259.815)"; // accent-500（默认蓝）
-const BOARDUI_LIGHT = { dark: false, bg: "#ffffff", text: "oklch(0.145 0 0)", accent: BOARDUI_ACCENT, primaryBg: BOARDUI_ACCENT };
-const BOARDUI_DARK = { dark: true, bg: "#121212", text: "oklch(0.985 0 0)", accent: BOARDUI_ACCENT, primaryBg: BOARDUI_ACCENT };
+const BOARDUI_ACCENT = "oklch(0.623 0.214 259.815)"; // accent-500（默认蓝，边框/选中底）
+const BOARDUI_PRIMARY = "oklch(0.546 0.245 262.881)"; // accent-600（实心底，白字 4.9:1）
+const BOARDUI_LIGHT = { dark: false, bg: "#ffffff", text: "oklch(0.145 0 0)", accent: BOARDUI_ACCENT, primaryBg: BOARDUI_PRIMARY };
+const BOARDUI_DARK = { dark: true, bg: "#121212", text: "oklch(0.985 0 0)", accent: BOARDUI_ACCENT, primaryBg: BOARDUI_PRIMARY };
 const EXPECTED = {
   light: { ...BOARDUI_LIGHT },
   dark: { ...BOARDUI_DARK },

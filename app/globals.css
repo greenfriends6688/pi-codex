@@ -3144,27 +3144,31 @@ button.process-file-chip:hover {
   --assistant-bg: var(--color-background-full);
   --tool-bg: var(--color-background-secondary-default);
 
-  /* 文字 */
+  /* 文字 —— BoardUI 的 text-secondary/tertiary 在亮色下是 neutral-500/400，
+     实测对侧栏底（#f7f7f7）只有 4.4 / 2.4:1，低于 WCAG AA。这里各加深一档，
+     层级不变：正文 19.8 / 次要 7.4 / 辅助 4.7:1。暗色在文件末尾的 .dark 块里调。 */
   --text: var(--color-text-primary);
-  --text-muted: var(--color-text-secondary);
-  --text-dim: var(--color-text-tertiary);
+  --text-muted: var(--color-neutral-600);
+  --text-dim: var(--color-neutral-500);
 
   /* 边框 */
   --border: var(--color-separator-border);
   --border-strong: var(--color-separator-border-strong);
   --border-faint: var(--color-separator-border);
 
-  /* 强调色 —— BoardUI 的 accent ramp（默认蓝） */
+  /* 强调色 —— BoardUI 的 accent ramp（默认蓝）。文字用 600 而不是 500：
+     accent-500 做底配白字只有 3.8:1，BoardUI 自己也是拿 accent-600 做链接与
+     ghost 按钮文字（见 base/buttons/link-button.tsx）。 */
   --accent: var(--color-accent-500);
-  --accent-hover: var(--color-accent-600);
+  --accent-hover: var(--color-accent-700);
   --accent-text: var(--color-accent-600);
   --accent-contrast: var(--color-white);
   --accent-soft: color-mix(in oklab, var(--color-accent-500) 12%, transparent);
   --accent-border: var(--color-accent-300);
 
-  /* 主操作 —— BoardUI 的 primary 按钮是 accent 渐变实心，这里取实色 */
-  --primary-bg: var(--color-accent-500);
-  --primary-hover: var(--color-accent-600);
+  /* 主操作 —— 实心底取 accent-600（白字 4.9:1），不用 500（3.8:1） */
+  --primary-bg: var(--color-accent-600);
+  --primary-hover: var(--color-accent-700);
   --primary-fg: var(--color-text-white);
 
   /* 状态色 */
@@ -3181,4 +3185,14 @@ button.process-file-chip:hover {
   --scrim: rgb(0 0 0 / 0.2);
   --diff-added: var(--color-green-600);
   --diff-removed: var(--color-red-600);
+}
+
+/* 暗色：BoardUI 的 text-secondary 仍是 neutral-500、tertiary 更暗（neutral-600），
+   在 #121212 上只有 3.9 / 2.4:1。各提亮一档保 AA（6.9 / 3.7:1）。
+   `:root:root.dark` (0,3,0) 高于上面的 `:root:root`，也高于主题块。 */
+:root:root.dark {
+  --text-muted: var(--color-neutral-400);
+  /* BoardUI 暗色的 ghost/link 文字用 accent-300/400；accent-600 在 #121212
+     上只有 3.6:1。 */
+  --accent-text: var(--color-accent-400);
 }
