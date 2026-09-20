@@ -68,13 +68,23 @@ function normalizeForComparison(p: string): string {
  *
  * Compares lexically: callers wanting symlinks resolved should realpath first.
  */
+
+/** A drive-letter path (`C:\…` / `c:/…`) carries Windows semantics anywhere. */
+const WINDOWS_DRIVE_PATH = /^[a-zA-Z]:[\\/]/;
+
 export function samePath(a: string, b: string): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
   const normalizedA = normalizeForComparison(a);
   const normalizedB = normalizeForComparison(b);
-  if (process.platform === "win32") {
-    return normalizedA.toLowerCase() === normalizedB.toLowerCase();
+  // Drive-letter paths are case-folded and separator-folded even off Windows:
+  // git metadata and cross-platform configs hand them to a mac unchanged, where
+  // `normalize()` treats `\` as an ordinary filename character.
+  if (process.platform === "win32" || WINDOWS_DRIVE_PATH.test(a) || WINDOWS_DRIVE_PATH.test(b)) {
+    return (
+      normalizedA.replaceAll("\\", "/").toLowerCase() ===
+      normalizedB.replaceAll("\\", "/").toLowerCase()
+    );
   }
   return normalizedA === normalizedB;
 }
