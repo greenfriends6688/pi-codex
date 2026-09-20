@@ -37,12 +37,10 @@ import { SkillsConfig } from "./SkillsConfig";
 import { AgentsConfig } from "./AgentsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
-import { PiThemePicker } from "./PiThemePicker";
 import { WallpaperSettings } from "./WallpaperSettings";
 import { useBorderDepth } from "@/hooks/useBorderDepth";
 import { useUiDensity } from "@/hooks/useUiDensity";
 import type { UiDensity } from "@/lib/ui-density";
-import { usePiTheme } from "@/hooks/usePiTheme";
 import {
   PROCESS_RENDERER_STORAGE_KEY,
   useProcessDisplayMode,
@@ -92,7 +90,6 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
 function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange }: Pick<Props, "cwd" | "sessionId" | "onSessionReloaded" | "quoteSelectionEnabled" | "onQuoteSelectionChange">) {
   const { locale, setLocale, supportedLocales, t } = useI18n();
   const { preference, setThemePreference } = useTheme();
-  const { piThemeName, setPiTheme } = usePiTheme();
   const { borderDepth, setBorderDepth } = useBorderDepth();
   const { uiDensity, setUiDensity } = useUiDensity();
   const { displayMode: processDisplayMode, setDisplayMode: setProcessDisplayMode } = useProcessDisplayMode();
@@ -196,10 +193,9 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
         <h3 className="settings-general-heading">{t("settings.appearance")}</h3>
         <div role="radiogroup" aria-label={t("settings.appearance")} className="settings-theme-options">
           {THEME_OPTIONS.map((option) => {
-            // A Codex palette and a pi theme are mutually exclusive: the palette
-            // block is what paints those colours, so selecting one has to drop
-            // the inline pi-theme overrides first.
-            const selected = piThemeName === "" && preference === option.id;
+            // A palette is the only theme source now: the pi CLI overlay was
+            // removed, so selection is a plain comparison.
+            const selected = preference === option.id;
             return (
               <label
                 key={option.id}
@@ -211,7 +207,6 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
                   value={option.id}
                   checked={selected}
                   onChange={() => {
-                    if (piThemeName) void setPiTheme("");
                     setThemePreference(option.id);
                   }}
                   className="sr-only"
@@ -222,10 +217,6 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
             );
           })}
         </div>
-
-        {/* One section, two sources: a separate "pi 主题" section read as a
-            competing second theme picker. */}
-        <PiThemePicker cwd={cwd} />
 
         <div className="settings-chat-option settings-chat-range-option">
           <div className="settings-chat-range-header">
