@@ -2983,7 +2983,7 @@ button.process-file-chip:hover {
 
    值全部写成 `var(--color-*)`（BoardUI 的语义 token）而不是字面值：BoardUI
    的 `:root` 定义亮色语义、`.dark` 定义暗色语义，浏览器在计算时重新解析
-   `var()`，所以这一块只写一次就自动跟随明暗。六套 palette 的颜色槽位从此
+   `var()`，所以这一块只写一次就自动跟随明暗。颜色槽位从此
    都由 BoardUI 决定（Zeno 自己的色值有意让位）。
 
    特异性：`:root:root` (0,2,0) 必须高于暗色主题块的 `html.dark` (0,1,1)，
