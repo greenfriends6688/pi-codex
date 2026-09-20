@@ -15,9 +15,12 @@
 > **fork:boardui（2026-09-20，PR-02）**：颜色层已交给 **BoardUI 语义 token**。
 > `app/globals.css` 末尾的 `fork:boardui-bridge` 把 `--bg` / `--text*` / `--border*` /
 > `--accent*` / `--primary-*` / 状态色全部指向 `--color-*`（定义在
-> `app/boardui/theme.css`），所以六套 palette 的颜色槽位收敛为 BoardUI 的亮/暗
-> 两组值：light / mist / rose 同亮色，dark / pine 同暗色。版式（圆角、阴影、排版
-> 刻度）仍是 Zeno 的，组件结构在后续 PR 逐个换成 BoardUI。
+> `app/boardui/theme.css`），亮/暗两组自动跟随。
+>
+> **PR-06（同日）**：主题收敛为 **light / dark / auto** —— 雾青、蔷薇、松夜三套
+> palette 已删除（颜色由 BoardUI 语义 token 接管后，palette 不再有取值意义）。
+> 版式（圆角、阴影、排版刻度）已在 PR-03/04 换到 BoardUI 的尺度，组件结构在
+> 后续 PR 逐个替换。
 > `docs/codex-skin/verify-themes.mjs` 的期望值已同步。
 
 参考对象：`参考项目/zeno-main`（`apps/desktop/src/renderer/styles.css`）。
@@ -26,7 +29,7 @@
 
 ## 1. 色板规则
 
-6 套主题（`light` / `dark` / `mist` / `rose` / `pine` / `auto`，`auto` 解析为明暗两套）
+3 种主题偏好（`light` / `dark` / `auto`，`auto` 解析为明暗两套）
 共享同一套**中性面阶梯**。
 
 核心变化（fork:zn-11）：
@@ -84,12 +87,9 @@
 |---|---|---|---|---|---|
 | light | 纯白 + 蓝 | `#ffffff` | `#171717` | `oklch(0.61 0.16 250)` | `#171717` |
 | dark | 中性石墨 + 淡蓝 | `#191919` | `oklch(0.985 0.004 260)` | `oklch(0.78 0.12 253)` | `oklch(0.985 0.004 260)` |
-| mist | 暖白 + 青绿 | `oklch(0.985 0.005 165)` | `oklch(0.27 0.02 165)` | `oklch(0.46 0.07 178)` | `oklch(0.27 0.02 165)` |
-| rose | 暖白 + 玫瑰 | `oklch(0.987 0.005 20)` | `oklch(0.28 0.015 12)` | `oklch(0.47 0.1 5)` | `oklch(0.28 0.015 12)` |
-| pine | 深绿灰 + 淡绿 | `oklch(0.22 0.008 155)` | `oklch(0.95 0.012 155)` | `oklch(0.82 0.05 155)` | `oklch(0.94 0.012 155)` |
 
 > 每套色板仍必须写全 `audit-tokens.mjs` 里的 **34 个 token**；漏写会从 `:root` 泄漏。
-> mist / rose / pine 保留各自色相，但交互层同样是实色（不再用 alpha）。
+
 
 ### 状态色
 
@@ -220,7 +220,7 @@ z-index 阶梯（`--z-base` … `--z-toast`）不变：0 / 10 / 40 / 100 / 500 /
 node_modules/.bin/tsc --noEmit          # 仅 CSS/样式改动，应无变化
 npm run lint
 npm test
-node docs/codex-skin/audit-tokens.mjs   # 34 token × 6 套 + 括号配平 + token 定义齐全
+node docs/codex-skin/audit-tokens.mjs   # light/dark 两套 × 34 token + 括号配平 + token 定义齐全
 npm run dev                             # 另开终端
 node docs/codex-skin/verify-themes.mjs  # 5 套调色板（像素比较）+ 三档圆角
 ```

@@ -42,7 +42,7 @@ const EXPECTED = {
 };
 
 // 先做一次零成本的重复选择器检查，给出比浏览器报错更直接的提示。
-// 注意选择器可能写成两行（`html[data-theme="pine"],` + `[data-theme="pine"] {`），
+// 注意选择器可能写成两行（`html.dark,` + `[data-theme="pine"] {`），
 // 所以要数「带 { 的那一行」，而不是数选择器名出现几次。
 const css = readFileSync("app/globals.css", "utf8");
 
