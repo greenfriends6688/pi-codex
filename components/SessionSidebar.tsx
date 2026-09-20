@@ -2529,6 +2529,11 @@ function SessionItem({
   onToggleCollapse?: () => void;
 }) {
   const { locale, t } = useI18n();
+  // fork:ui — 置顶/归档的行内入口。与右键菜单共用 session-flags store
+  //（useSyncExternalStore，toggle 后所有订阅者自动重渲）。
+  const { flags: sessionFlagState, pin, archive } = useSessionFlags();
+  const isPinned = sessionFlagState.pinned.includes(session.id);
+  const isArchived = sessionFlagState.archived.includes(session.id);
   const [hovered, setHovered] = useState(false);
   const showHover = hovered;
   const [renaming, setRenaming] = useState(false);
@@ -2787,6 +2792,61 @@ function SessionItem({
               delete reflows the list (see syncPointerSession). */}
           {showHover && !session.transient ? (
             <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+              {/* fork:ui — 置顶（选中态实心 + accent 色）。 */}
+              <button
+                onClick={(e) => { e.stopPropagation(); pin(session.id); }}
+                title={t(isPinned ? "session.unpin" : "session.pin")}
+                aria-label={t(isPinned ? "session.unpin" : "session.pin")}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 24, height: 24, padding: 0,
+                  background: "transparent", border: "none",
+                  borderRadius: "var(--radius-md)",
+                  color: isPinned ? "var(--accent)" : "var(--text-muted)",
+                  cursor: "pointer", flexShrink: 0,
+                  transition: "background var(--motion-fast), color var(--motion-fast)",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--accent)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = isPinned ? "var(--accent)" : "var(--text-muted)";
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill={isPinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 17v5M9 4h6l-1 6 3 3v2H7v-2l3-3z" />
+                </svg>
+              </button>
+              {/* fork:ui — 归档（归档后行会落到项目的「已归档」折叠区）。 */}
+              <button
+                onClick={(e) => { e.stopPropagation(); archive(session.id); }}
+                title={t(isArchived ? "session.unarchive" : "session.archive")}
+                aria-label={t(isArchived ? "session.unarchive" : "session.archive")}
+                style={{
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  width: 24, height: 24, padding: 0,
+                  background: "transparent", border: "none",
+                  borderRadius: "var(--radius-md)",
+                  color: isArchived ? "var(--accent)" : "var(--text-muted)",
+                  cursor: "pointer", flexShrink: 0,
+                  transition: "background var(--motion-fast), color var(--motion-fast)",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "var(--bg-hover)";
+                  e.currentTarget.style.color = "var(--accent)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = isArchived ? "var(--accent)" : "var(--text-muted)";
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="4" width="18" height="4" rx="1" />
+                  <path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4" />
+                </svg>
+              </button>
               <button
                 onClick={startRename}
                 title={t("sidebar.rename")}
