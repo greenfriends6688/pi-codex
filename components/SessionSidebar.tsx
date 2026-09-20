@@ -2538,6 +2538,9 @@ function SessionItem({
   // Fixed-height outer wrapper — content swaps in place so the list never reflows
   return (
     <div
+      // fork:boardui — 行入场（BoardUI 的 row-fade-in）+ hover 背景过渡。
+      // 挂在行容器上是安全的：列表 key 稳定时不重挂载，动画只播一次。
+      className="fork-row-enter"
       onClick={confirmDelete || renaming ? undefined : onClick}
       onContextMenu={confirmDelete || renaming ? undefined : handleContextMenu}
       onMouseEnter={() => setHovered(true)}

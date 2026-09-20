@@ -55,7 +55,7 @@ test("keeps visited settings sections mounted and contains nested Escape handlin
 });
 
 test("offers five palettes and system theme selection with native radios", () => {
-  for (const preference of ["light", "dark", "mist", "rose", "pine", "auto"]) {
+  for (const preference of ["light", "dark", "auto"]) {
     assert.match(themeOptionsSource, new RegExp(`id: "${preference}"`));
   }
   assert.match(panelSource, /THEME_OPTIONS\.map/);

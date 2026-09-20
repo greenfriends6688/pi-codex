@@ -39,9 +39,6 @@ const BOARDUI_DARK = { dark: true, bg: "#121212", text: "oklch(0.985 0 0)", acce
 const EXPECTED = {
   light: { ...BOARDUI_LIGHT },
   dark: { ...BOARDUI_DARK },
-  mist: { ...BOARDUI_LIGHT },
-  rose: { ...BOARDUI_LIGHT },
-  pine: { ...BOARDUI_DARK },
 };
 
 // 先做一次零成本的重复选择器检查，给出比浏览器报错更直接的提示。
@@ -113,6 +110,7 @@ for (const [theme, want] of Object.entries(EXPECTED)) {
          尺度已换成字面值，所以改成核对三个实际生效的半径。 */
       radiusMd: v("--radius-md"),
       radiusLg: v("--radius-lg"),
+      radius2xl: v("--radius-2xl"),
       radiusComposer: v("--radius-composer"),
     };
   });
@@ -134,12 +132,16 @@ for (const [theme, want] of Object.entries(EXPECTED)) {
       diffs.push(`${key}=rgba(${gotColors[key]})（应为 rgba(${wantColors[key]})，源码 ${want[key]}）`);
     }
   }
-  // 圆角：--radius-md 会被 --radius-composer 间接引用，浏览器把 var() 原样
-  // 回读，所以要跟着链展开一层再比。
-  const resolvedComposer = got.radiusComposer === "var(--radius-lg)" ? got.radiusLg : got.radiusComposer;
+  // 圆角：--radius-composer 现在指向 --radius-2xl（fork:boardui 的 24px 大圆角
+  // 卡），浏览器把 var() 原样回读，所以要跟着链展开再比。
+  const resolvedComposer =
+    got.radiusComposer === "var(--radius-lg)" ? got.radiusLg
+    : got.radiusComposer === "var(--radius-2xl)" ? got.radius2xl
+    : got.radiusComposer;
   if (got.radiusMd !== "10px") diffs.push(`--radius-md=${got.radiusMd}（应为 10px）`);
   if (got.radiusLg !== "12px") diffs.push(`--radius-lg=${got.radiusLg}（应为 12px）`);
-  if (resolvedComposer !== "12px") diffs.push(`--radius-composer=${resolvedComposer}（应为 12px）`);
+  if (got.radius2xl !== "24px") diffs.push(`--radius-2xl=${got.radius2xl}（应为 24px）`);
+  if (resolvedComposer !== "24px") diffs.push(`--radius-composer=${resolvedComposer}（应为 24px）`);
 
   if (diffs.length) {
     failed = true;

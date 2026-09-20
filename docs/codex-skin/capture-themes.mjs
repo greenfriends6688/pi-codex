@@ -16,7 +16,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
 
 const BASE = "http://127.0.0.1:30141/";
-const THEMES = ["light", "dark", "mist", "rose", "pine"];
+const THEMES = ["light", "dark"];
 const SETTINGS_LABEL = /^(Settings|设置)$/;
 const GENERAL_LABEL = /^(General|通用)$/;
 

@@ -28,9 +28,6 @@ const PAINTING_DIR = "/monet-artworks";
 const PALETTE_PAINTING: Record<string, string> = {
   light: "default",
   dark: "solarized",
-  mist: "aqua",
-  rose: "rose",
-  pine: "gruvbox",
 };
 
 export const DEFAULT_WALLPAPER_PAINTING = "default";

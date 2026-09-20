@@ -6,7 +6,7 @@ import { chromium } from "playwright";
 
 const base = process.env.E2E_BASE_URL || "http://127.0.0.1:30141";
 const artifacts = fileURLToPath(new URL("../test-results/themes/", import.meta.url));
-const themes = ["light", "dark", "mist", "rose", "pine", "auto"];
+const themes = ["light", "dark", "auto"];
 const labels = ["Light", "Dark", "Mist", "Rose", "Pine", "System"];
 await mkdir(artifacts, { recursive: true });
 const browser = await chromium.launch();
@@ -106,8 +106,8 @@ try {
     };
     const expectTheme = async (theme) => {
       await page.waitForFunction((value) => document.documentElement.dataset.theme === value, theme);
-      assert.equal(await page.locator("html").evaluate((root) => root.classList.contains("dark")), theme === "dark" || theme === "pine");
-      assert.equal(await page.locator("html").evaluate((root) => getComputedStyle(root).colorScheme), theme === "dark" || theme === "pine" ? "dark" : "light");
+      assert.equal(await page.locator("html").evaluate((root) => root.classList.contains("dark")), theme === "dark");
+      assert.equal(await page.locator("html").evaluate((root) => getComputedStyle(root).colorScheme), theme === "dark" ? "dark" : "light");
     };
     await openSettings();
     for (const [index, theme] of themes.entries()) {

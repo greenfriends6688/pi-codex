@@ -20,7 +20,7 @@ const require = createRequire(import.meta.url);
 const { chromium } = require("playwright");
 
 const BASE = "http://127.0.0.1:30141/";
-const THEMES = ["light", "dark", "mist", "rose", "pine"];
+const THEMES = ["light", "dark"];
 
 /**
  * 前景/背景组合与最低对比度。

@@ -570,6 +570,32 @@ html.keyboard-open .extension-status-shelf {
 }
 
 /* ---------------------------------------------------------------------------
+ * fork:boardui — 列表行入场（BoardUI globals.css 的 row-fade-in）。
+ *
+ * 新挂载的会话/项目行淡入 + 轻微上移；160ms 是 UI 级入场。不做 stagger：
+ * 列表可能上百行，逐行延迟会变成“加载很慢”的错觉。
+ *
+ * `backwards` fill 的意图：延迟期间先保持透明，避免“先闪一下再动”，
+ * 而不需要动画结束后的 forward fill（那会跟 hover/选中态的规则打架）。
+ * ------------------------------------------------------------------------- */
+@keyframes fork-row-in {
+  from {
+    opacity: 0;
+    translate: 0 -2px;
+  }
+}
+
+.fork-row-enter {
+  animation: fork-row-in 160ms ease-out backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fork-row-enter {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * fork:zn-02 — rail title fade + section-action hover gate.
  *
  * 1. .fork-fade-title: long session/project titles fade at the container edge
