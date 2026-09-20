@@ -1,6 +1,6 @@
 {
   "name": "@agegr/pi-web",
-  "version": "0.1.4",
+  "version": "0.1.4-beta.1",
   "description": "Web UI for the pi coding agent",
   "homepage": "https://github.com/greenfriends6688/pinkslab#readme",
   "repository": {
