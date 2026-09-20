@@ -539,8 +539,6 @@ html.keyboard-open .extension-status-shelf {
     pointer-events: none;
     transition: opacity var(--motion-fast) var(--ease-out);
   }
-  /* `:focus-within` keeps keyboard users on parity: tabbing into the row
-     reveals it before focus lands on a button the user cannot see. */
   [data-message-role]:hover > .fork-msg-actions,
   [data-message-role]:focus-within > .fork-msg-actions,
   .fork-msg-actions:hover,
@@ -548,6 +546,21 @@ html.keyboard-open .extension-status-shelf {
     opacity: 1;
     pointer-events: auto;
   }
+}
+
+/* fork:boardui — 消息操作按钮是内联样式（visual-spec §6 的已知限制：没有
+   `:focus-visible` 钩子），BoardUI 的图标按钮都带 focus-visible:ring-2。
+   这里用 CSS 兜住键盘用户的焦点环，并把圆角对齐 BoardUI 的 rounded-md(6px)
+   （内联值是 4px，4→6 的差很小，但统一后和 process 行的 chip 一致）。
+   `!important`：只有聊到内联样式的属性才用（fork-ui.css 的两条纪律之一）。 */
+.fork-msg-actions button,
+.fork-section-actions button {
+  border-radius: var(--radius-sm) !important;
+}
+.fork-msg-actions button:focus-visible,
+.fork-section-actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 /* ---------------------------------------------------------------------------
