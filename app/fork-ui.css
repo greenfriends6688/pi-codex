@@ -432,7 +432,7 @@ html.keyboard-open .extension-status-shelf {
   --zn-radius-row: 6px;      /* zeno --radius-control (rail rows only) */
   --zn-brand: 18px;          /* zeno sidebar brand */
   --zn-thread: 760px;        /* zeno --thread-max */
-  --zn-send: 28px;           /* zeno composer send/abort circle */
+  --zn-send: 32px;           /* fork:boardui — BoardUI 的发送圆是 36px；28 → 32 向它靠一步，不改 composer 的密度 */
   --zn-header-title: 13px;   /* zeno thread-header h2 */
   --zn-hero-title: 26px;     /* zeno empty hero h1 */
 }
@@ -559,6 +559,12 @@ html.keyboard-open .extension-status-shelf {
 }
 .fork-msg-actions button:focus-visible,
 .fork-section-actions button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+/* composer 的发送/停止/工具菜单/模型按钮同样全是内联样式，没有 :focus-visible
+   钩子。BoardUI 的控件一律带 focus-visible:ring-2，这里统一兜住。 */
+.chat-input-shell button:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
 }
