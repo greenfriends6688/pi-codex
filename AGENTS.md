@@ -268,6 +268,33 @@ Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
 --font-mono
 ```
 
+### BoardUI 体系（fork:boardui，2026-09-20 起）
+
+颜色与排版已换成 **BoardUI**（`app/boardui/theme.css` + `typography.css`）：
+
+- **颜色槽位的唯一来源是 BoardUI 的语义 token**。`app/globals.css` 末尾的
+  `fork:boardui-bridge`（`:root:root` + `:root:root.dark`）把上面的 Zeno 变量
+  指向 `--color-*`。**新代码写 `var(--bg)` 这类 Zeno 名**（它们已跟随明暗）；
+  要直接用 BoardUI 类名也可以（`bg-background-primary-default`、
+  `text-text-primary`），不要再写 hex。
+- **主题只剩 light / dark / auto**（PR-06）。`lib/theme.ts` 的 `THEME_OPTIONS`
+  是唯一清单；不再有 palette 分支。
+- **对比度门禁**：改任何前景/背景色后跑 `node docs/codex-skin/check-contrast.mjs`
+  （8 组组合 × light/dark，需服务在 30141 运行）。BoardUI 原生的
+  `text-secondary`(neutral-500) 与 `text-tertiary` 不达 AA，桥接层已各调一档。
+- **排版**：BoardUI 的 52 个复合样式（`text-body-medium` 等，一次绑齐
+  size/line-height/letter-spacing/weight）已在 `@theme` 注册；用 `cx()`
+  （`utils/cx.ts`，已注册排版类名）合并类名。
+- **圆角**：`--radius-2xl` = 24px（BoardUI 的 rounded-3xl，面板/弹窗）；
+  `--radius-composer` 指向它。控件/行保持 10/6px（与 BoardUI 的
+  rounded-2lg/rounded-md 一致）。
+- **字体**：Inter（`next/font/google`，中文回退 PingFang SC）。
+- **动效**：主题切换走 `view-transition` 圆扩散（`hooks/useTheme.ts`）；
+  列表行入场用 `.fork-row-enter`（fork-ui.css，`prefers-reduced-motion` 下关闭）。
+- **已知缺口**：组件的内联样式按钮没有 `:focus-visible`，fork-ui.css 末尾用
+  CSS 兜底（`.fork-msg-actions button` / `.chat-input-shell button`）；
+  逐组件重写时改成语义类。
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
