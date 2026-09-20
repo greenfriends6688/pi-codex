@@ -112,6 +112,26 @@ for (const [theme, want] of Object.entries(EXPECTED)) {
       radiusLg: v("--radius-lg"),
       radius2xl: v("--radius-2xl"),
       radiusComposer: v("--radius-composer"),
+      /* fork:shadcn — 圆角改成 `calc(var(--radius-base) * N)` 派生后，CSS 变量
+         的 computed value 是**未求值的表达式**（`calc(10px * 1.2)`），不能直接
+         按字符串比。这里挂一个临时元素，把变量用在 `border-radius` 上让浏览器
+         真的算一遍，读回来的才是“实际生效值”。 */
+      radiusResolved: (() => {
+        const probe = document.createElement("div");
+        document.documentElement.appendChild(probe);
+        const read = (name) => {
+          probe.style.borderRadius = `var(${name})`;
+          return getComputedStyle(probe).borderTopLeftRadius;
+        };
+        const out = {
+          md: read("--radius-md"),
+          lg: read("--radius-lg"),
+          xl2: read("--radius-2xl"),
+          composer: read("--radius-composer"),
+        };
+        probe.remove();
+        return out;
+      })(),
     };
   });
 
@@ -132,22 +152,18 @@ for (const [theme, want] of Object.entries(EXPECTED)) {
       diffs.push(`${key}=rgba(${gotColors[key]})（应为 rgba(${wantColors[key]})，源码 ${want[key]}）`);
     }
   }
-  // 圆角：--radius-composer 现在指向 --radius-2xl（fork:boardui 的 24px 大圆角
-  // 卡），浏览器把 var() 原样回读，所以要跟着链展开再比。
-  const resolvedComposer =
-    got.radiusComposer === "var(--radius-lg)" ? got.radiusLg
-    : got.radiusComposer === "var(--radius-2xl)" ? got.radius2xl
-    : got.radiusComposer;
-  if (got.radiusMd !== "10px") diffs.push(`--radius-md=${got.radiusMd}（应为 10px）`);
-  if (got.radiusLg !== "12px") diffs.push(`--radius-lg=${got.radiusLg}（应为 12px）`);
-  if (got.radius2xl !== "24px") diffs.push(`--radius-2xl=${got.radius2xl}（应为 24px）`);
-  if (resolvedComposer !== "24px") diffs.push(`--radius-composer=${resolvedComposer}（应为 24px）`);
+  // 圆角：改读**实际生效值**（见上面 radiusResolved 的说明）。
+  const r = got.radiusResolved;
+  if (r.md !== "10px") diffs.push(`--radius-md=${r.md}（应为 10px）`);
+  if (r.lg !== "12px") diffs.push(`--radius-lg=${r.lg}（应为 12px）`);
+  if (r.xl2 !== "24px") diffs.push(`--radius-2xl=${r.xl2}（应为 24px）`);
+  if (r.composer !== "24px") diffs.push(`--radius-composer=${r.composer}（应为 24px）`);
 
   if (diffs.length) {
     failed = true;
     console.log(`FAIL ${theme.padEnd(6)} ${diffs.join(" | ")}`);
   } else {
-    console.log(`OK   ${theme.padEnd(6)} bg=rgb(${gotColors.bg.slice(0, 3)}) accent=rgb(${gotColors.accent.slice(0, 3)}) radius=${got.radiusMd}/${got.radiusLg}/${resolvedComposer}`);
+    console.log(`OK   ${theme.padEnd(6)} bg=rgb(${gotColors.bg.slice(0, 3)}) accent=rgb(${gotColors.accent.slice(0, 3)}) radius=${r.md}/${r.lg}/${r.composer}`);
   }
 }
 
