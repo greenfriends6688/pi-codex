@@ -789,7 +789,8 @@
   max-height: calc(100dvh - 16px);
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
+  /* fork:boardui — 主设置面板走 BoardUI 的 rounded-3xl（setting modal 同款）*/
+  border-radius: var(--radius-2xl);
   background: var(--bg);
   box-shadow: var(--shadow-lg);
 }

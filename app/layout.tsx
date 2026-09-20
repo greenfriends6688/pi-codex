@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Noto_Sans_Mono } from "next/font/google";
+import { Inter, Noto_Sans_Mono } from "next/font/google";
 import { PwaRegistration } from "@/components/PwaRegistration";
 import { THEME_INIT_SCRIPT } from "@/lib/theme";
 import "katex/dist/katex.min.css";
@@ -40,6 +40,16 @@ const DEV_SERVICE_WORKER_CLEANUP_SCRIPT = `
 const notoSansMono = Noto_Sans_Mono({
   subsets: ["latin", "cyrillic"],
   variable: "--font-noto-mono",
+  display: "swap",
+});
+
+// fork:boardui — BoardUI 的正文字体。Inter 带 optical-size 轴，小字号用 text
+// grade、大字号用 display grade，一个变量字体覆盖全尺寸。中文不在 Inter 的
+// subsets 里，会回退到 body 字体栈里的 PingFang SC。
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  axes: ["opsz"],
   display: "swap",
 });
 
@@ -91,7 +101,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" translate="no" className={`${notoSansMono.variable} notranslate`} suppressHydrationWarning>
+    <html lang="en" translate="no" className={`${notoSansMono.variable} ${inter.variable} notranslate`} suppressHydrationWarning>
       <head>
         <meta name="google" content="notranslate" />
         <link rel="stylesheet" href="/location-highlight.css" />

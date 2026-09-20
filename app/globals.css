@@ -57,7 +57,8 @@
   --radius-md: 10px;
   --radius-lg: 12px;
   --radius-xl: 12px;
-  --radius-2xl: 14px;
+  /* fork:boardui — BoardUI 的 rounded-3xl：面板 / 弹窗 / 大卡片 */
+  --radius-2xl: 24px;
   --radius-pill: 999px;
 
   /* Elevation — Zeno leans on the hairline, not on shadow depth. The ladder
@@ -487,7 +488,7 @@ html, body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   font-feature-settings: "tnum" 1;
   font-size: var(--text-lg);
   overscroll-behavior: none;
