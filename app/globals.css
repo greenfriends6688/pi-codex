@@ -1,9 +1,41 @@
 @import "@xterm/xterm/css/xterm.css";
 @import "tailwindcss";
+/* fork:shadcn（PR-20）—— 声明式入场/退场动效工具类（shadcn/ui 同款）。
+   提供 animate-in/out + fade-in-0 / zoom-in-95 / slide-in-from-{侧}-N。 */
+@import "tw-animate-css";
 /* BoardUI 地基（fork:boardui）：466 个语义色 token + 52 个复合排版样式。
    只引入 token 层与排版层，不引入它的 globals.css（全局规则与 pi-codex 冲突）。 */
 @import "./boardui/theme.css";
 @import "./boardui/typography.css";
+
+/* fork:shadcn（PR-20）—— 声明式状态变体（shadcn/ui 的写法）。
+   让弹层/开关可以用 `data-open:` / `data-closed:` 直接声明动效，
+   而不必写“啰嗦”的 `data-[state=open]:`。同时兼容 Base UI 风格的
+   `[data-open="true"]`（非 "false" 即视为开启）。 */
+@custom-variant data-open {
+  &:where([data-state="open"]),
+  &:where([data-open]:not([data-open="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-closed {
+  &:where([data-state="closed"]),
+  &:where([data-closed]:not([data-closed="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-checked {
+  &:where([data-state="checked"]),
+  &:where([data-checked]:not([data-checked="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-unchecked {
+  &:where([data-state="unchecked"]),
+  &:where([data-unchecked]:not([data-unchecked="false"])) {
+    @slot;
+  }
+}
 
 @theme {
   --color-bg: var(--bg);
@@ -2323,18 +2355,45 @@ textarea,
    =========================================================================== */
 
 /* --- Floating layers: one radius, one elevation ladder -------------------
-   The `.anim-*` classes are inert style hooks now: the entry animations that
-   named them were removed (see delta.md, motion layer removed), but the skin's
-   radius/elevation convergence still targets them. */
-.anim-popover,
-.anim-popover-down,
-.anim-dialog {
+   fork:shadcn（PR-20）— 这里恢复并规范化浮层**入场动效**。
+
+   背景：本仓的 `.anim-*` 曾是纯样式钩子 —— 命名它们的入场动画在早前的
+   动效收敛里被删掉了（见下方旧注释），所以弹层实际是「硬闪出来」的。
+   现在按 shadcn/ui 的配方重建：**状态 × 主开关 × 修饰符 × 方向**。
+   本仓的浮层是挂载驱动的（React 条件渲染，没有 data-state 退场），
+   所以只做入场；方向用类名区分：
+
+     .anim-popover       向上弹 → 从下方 8px 滑入（slide-in-from-bottom-2）
+     .anim-popover-down  向下弹 → 从上方 8px 滑入（slide-in-from-top-2）
+     .anim-dialog        居中弹窗 → 只 fade + zoom，无位移
+
+   时长统一 duration-200（shadcn 的主力档）；缓动走默认。
+   `prefers-reduced-motion` 下由文件末尾的统一规则关掉。 */
+.anim-popover {
   border-radius: var(--radius-xl) !important;
   box-shadow: var(--shadow-md) !important;
+  @apply animate-in fade-in-0 zoom-in-95 slide-in-from-bottom-2 duration-200;
+}
+
+.anim-popover-down {
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--shadow-md) !important;
+  @apply animate-in fade-in-0 zoom-in-95 slide-in-from-top-2 duration-200;
 }
 
 .anim-dialog {
+  border-radius: var(--radius-xl) !important;
   box-shadow: var(--shadow-lg) !important;
+  @apply animate-in fade-in-0 zoom-in-95 duration-200;
+}
+
+/* 系统级「减少动态」偏好下，三档浮层动效全关（其他动效的同类覆盖见各自区块）。 */
+@media (prefers-reduced-motion: reduce) {
+  .anim-popover,
+  .anim-popover-down,
+  .anim-dialog {
+    animation: none !important;
+  }
 }
 
 /* --- Composer: the one floating surface inside the chat column -------------
