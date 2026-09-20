@@ -34,7 +34,11 @@ import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { FileViewer, type FileLocationTarget, type FileSelectionContext } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
-import { SettingsPanel, SettingsSectionIcon } from "./SettingsPanel";
+import { loadSessionList } from "@/lib/session-list";
+import { loadRightTabs, saveRightTabs } from "@/lib/right-tabs-memory";
+import { resolveRestoreTarget } from "@/lib/workspace-restore";
+import { GitGraphTab } from "./GitGraphTab";
+import { SettingsPanel } from "./SettingsPanel";
 import { ExplorerPanel } from "./ExplorerPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { DirectoryPicker } from "./DirectoryPicker";
@@ -112,7 +116,6 @@ import { getSessionFamily } from "@/lib/session-family";
 import { getLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
 import { TEXT } from "@/lib/typography";
 
-type SessionCopyField = "file" | "id" | "projectDir" | "gitBranch" | "gitWorktree";
 type AutoNameStatus =
   | { kind: "idle" }
   | { kind: "naming" }
@@ -126,6 +129,8 @@ const TOP_BAR_ICON_BUTTON_SIZE = 28;
 // comfortable tree+viewer width is what the user wants, and app/fork-ui.css lowers only
 // the *floor* to 560 so a clamped (narrow-window) panel still shows the tree at all.
 const EXPLORER_COLUMN_MIN_PANEL_WIDTH = 760;
+/** fork:git-graph-tab — 单例图谱 tab 的 id（不与文件 tab 的 `file:<path>` 撞名）。 */
+const GIT_GRAPH_TAB_ID = "git-graph";
 const AGENT_PANEL_WIDTH = 420;
 /** Below this rendered panel width the tree column is dropped so the document keeps room. */
 
@@ -385,33 +390,9 @@ export function AppShell() {
   const handleSessionStatsChange = useCallback((stats: SessionStatsInfo | null) => {
     setSessionStats(stats);
   }, []);
-  const [copiedSessionField, setCopiedSessionField] = useState<SessionCopyField | null>(null);
-  const sessionCopyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const handleCopySessionField = useCallback((field: SessionCopyField, value: string) => {
-    void copyText(value).then(() => {
-      if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
-      setCopiedSessionField(field);
-      sessionCopyTimerRef.current = setTimeout(() => setCopiedSessionField(null), 1400);
-    });
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (sessionCopyTimerRef.current) clearTimeout(sessionCopyTimerRef.current);
-      if (autoNameTimerRef.current) clearTimeout(autoNameTimerRef.current);
-    };
-  }, []);
-
-  // Context usage — populated by ChatWindow, displayed in top bar
-  const [contextUsage, setContextUsage] = useState<{ percent: number | null; contextWindow: number; tokens: number | null } | null>(null);
-  const handleContextUsageChange = useCallback((usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => {
-    setContextUsage(usage);
-  }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "session" | "more" | "sessions" | null>(null);
-  /** fork:ui-14 — the ⋯ menu width, so it hangs off the right edge of the bar. */
-  const TOP_BAR_MORE_MENU_WIDTH = 200;
+  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "sessions" | null>(null);
   const TOP_BAR_SESSIONS_MENU_WIDTH = 300;
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
@@ -428,7 +409,7 @@ export function AppShell() {
   }, [hasSubagentSessions]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "session" | "more" | "sessions",
+    panel: "agents" | "branches" | "system" | "tools" | "sessions",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -457,10 +438,11 @@ export function AppShell() {
     });
   }, [activeTopPanel, systemInfoLoading, toggleTopPanel]);
 
+  // fork:ui-stats-inline — 统计面板已搬到 composer 下方的状态条；这里只负责
+  // 把 `/session` 之类的入口变成“展开那块面板”，不再切顶栏浮层。
   const openSessionStatsPanel = useCallback(() => {
     if (isMobile) setSidebarOpen(false);
     setMobileToolbarMoreOpen(false);
-    setActiveTopPanel("session");
   }, [isMobile]);
 
   const handleSidebarToggle = useCallback(() => {
@@ -530,16 +512,6 @@ export function AppShell() {
         });
         return;
       }
-      // fork:ui-14 — the overflow menu is a narrow popover pinned to the right
-      // edge, not a full-width panel like the reference surfaces.
-      if (activeTopPanel === "more") {
-        setTopPanelPos({
-          top: topBarRect.bottom,
-          left: Math.max(8, topBarRect.right - TOP_BAR_MORE_MENU_WIDTH),
-          width: TOP_BAR_MORE_MENU_WIDTH,
-        });
-        return;
-      }
       // fork:ui-18 — the session switcher hangs under the title, so it keeps the
       // left edge of the title area instead of the bar's right edge.
       if (activeTopPanel === "sessions") {
@@ -567,10 +539,77 @@ export function AppShell() {
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [terminalsRestored, setTerminalsRestored] = useState(false);
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
+  // fork:file-tab-keep-alive — 已激活过的文件 tab（首次激活才挂载，关闭后剪枝）。
+  const [mountedFileTabs, setMountedFileTabs] = useState<ReadonlySet<string>>(() => new Set());
+  // fork:git-graph-tab — 每个工作区一个单例 Git 图谱 tab（不持久化：它是“看一眼”的视图）。
+  const [gitGraphOpen, setGitGraphOpen] = useState(false);
   // fork:proma-05-explore — 探索分支的右栏只读 tab（可与主线并排看）
   const [branchTabs, setBranchTabs] = useState<{ id: string; sessionId: string; parentSessionId: string | null; label: string }[]>([]);
   const [browsersRestored, setBrowsersRestored] = useState(false);
-  const panelTabs: Tab[] = [...fileTabs, ...terminalTabs.map((tab) => ({
+  // fork:right-tabs-memory — 每个工作区记一份文件 tab（含激活项）：切工作区或刷新后
+  // 回到该工作区时把 tab 列表恢复回来。只存文件 tab —— 终端持有活 PTY、浏览器有独立
+  // 恢复路径，都不适合序列化。恢复出来的文件若已被删除，由 FileViewer 自己显示错误。
+  const rightTabsWorkspaceRef = useRef<string | null>(null);
+  const fileTabsRef = useRef(fileTabs);
+  fileTabsRef.current = fileTabs;
+  const activeFileTabIdRef = useRef(activeFileTabId);
+  activeFileTabIdRef.current = activeFileTabId;
+  // 注意：这里不能用 activeProjectKeyRef —— 它在文件更下方才声明（effect 里读没问题，
+  // 渲染期读会命中 TDZ）。
+  const activeWorkspaceKey = selectedSession ? workspaceKeyOf(selectedSession) : null;
+
+  useEffect(() => {
+    const key = activeWorkspaceKey;
+    if (!key) return;
+    if (rightTabsWorkspaceRef.current === key) return;
+    const previous = rightTabsWorkspaceRef.current;
+    rightTabsWorkspaceRef.current = key;
+    if (previous) {
+      saveRightTabs(previous, {
+        fileTabs: fileTabsRef.current.map((tab) => ({
+          id: tab.id,
+          label: tab.label,
+          filePath: tab.filePath,
+          sourceSessionId: tab.sourceSessionId ?? null,
+          ...(tab.initialDisplayMode ? { initialDisplayMode: tab.initialDisplayMode } : {}),
+          ...(tab.viewerState ? { viewerState: tab.viewerState } : {}),
+          ...(tab.viewerRevision !== undefined ? { viewerRevision: tab.viewerRevision } : {}),
+        })),
+        activeTabId: activeFileTabIdRef.current,
+      });
+    }
+    const restored = loadRightTabs(key);
+    if (!restored || restored.fileTabs.length === 0) return;
+    setFileTabs(restored.fileTabs.map((tab) => ({
+      id: tab.id,
+      label: tab.label,
+      filePath: tab.filePath,
+      sourceSessionId: tab.sourceSessionId,
+      ...(tab.initialDisplayMode ? { initialDisplayMode: tab.initialDisplayMode } : {}),
+      ...(tab.viewerState ? { viewerState: tab.viewerState } : {}),
+      ...(tab.viewerRevision !== undefined ? { viewerRevision: tab.viewerRevision } : {}),
+    })));
+    setMountedFileTabs(new Set(restored.fileTabs.map((tab) => tab.id)));
+    if (restored.activeTabId) setActiveFileTabId(restored.activeTabId);
+  }, [activeWorkspaceKey]);
+
+  // fork:file-tab-keep-alive — 首次激活才挂载；关闭的 tab 从集合里剪掉，避免常驻实例泄漏。
+  useEffect(() => {
+    setMountedFileTabs((current) => {
+      const open = new Set(fileTabs.map((tab) => tab.id));
+      const next = new Set([...current].filter((id) => open.has(id)));
+      if (activeFileTabId && open.has(activeFileTabId)) next.add(activeFileTabId);
+      if (next.size === current.size && [...next].every((id) => current.has(id))) return current;
+      return next;
+    });
+  }, [activeFileTabId, fileTabs]);
+
+  const panelTabs: Tab[] = [...(gitGraphOpen ? [{
+    id: GIT_GRAPH_TAB_ID,
+    label: translate("git.graph"),
+    filePath: "",
+    kind: "git-graph" as const,
+  }] : []), ...fileTabs, ...terminalTabs.map((tab) => ({
     id: tab.id,
     label: getFileName(tab.cwd) || tab.cwd,
     filePath: tab.cwd,
@@ -759,23 +798,27 @@ export function AppShell() {
   const restoreWorkspaceContext = useCallback((projectKey: string, cwd: string) => {
     const token = ++workspaceRestoreTokenRef.current;
     const lastOpenSessionId = getLastOpenSession(projectKey);
-    if (!lastOpenSessionId) return;
-    void fetch("/api/sessions")
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
+    // fork:workspace-restore — 以前没有记忆就整个 return，于是「从没打开过会话的工作区」
+    // 切过去永远是空白页。现在无论如何都拉一次列表，按 记忆 → 该工作区最新 → 新草稿 兜底。
+    // fork:session-list-cache — 同一帧内的恢复 / 水合 / 侧栏刷新共享一次请求。
+    void loadSessionList()
+      .then((d) => d as { sessions: SessionInfo[] } | null)
       .then((d) => {
         if (token !== workspaceRestoreTokenRef.current) return; // stale switch
-        const s = d?.sessions.find((x) => x.id === lastOpenSessionId);
-        if (!s) {
-          // The list loaded but the remembered session is gone — forget it.
-          // When the list itself failed (d === null) keep the memory so a
-          // later switch retries the restore.
-          if (d) clearLastOpen(projectKey);
-          return;
-        }
-        if (workspaceKeyOf(s) !== projectKey) {
-          // Defensive: the remembered session drifted out of this workspace.
+        if (!d) return; // 列表没拿到：保留记忆，下次切回来重试
+        const target = resolveRestoreTarget({
+          rememberedSessionId: lastOpenSessionId,
+          sessions: d.sessions,
+          workspaceKey: projectKey,
+          keyOf: workspaceKeyOf,
+        });
+        if (target.kind === "new-draft") return;
+        const s = d.sessions.find((x) => x.id === target.sessionId);
+        if (!s) return;
+        if (target.kind === "newest" && lastOpenSessionId) {
+          // 记忆的会话已经不在这个工作区了：顺手把记忆改成真正打开的那条，
+          // 否则每次切回来都要重新兜底一次。
           clearLastOpen(projectKey);
-          return;
         }
         // Keep the temporary composer's draft in its cwd, even when the
         // remembered session belongs to another worktree of this project.
@@ -958,8 +1001,8 @@ export function AppShell() {
   // handleCwdChange relies on. Hydrate it from the session list so switching
   // worktrees right after creating a session doesn't close the chat.
   const hydrateSelectedSession = useCallback((sessionId: string) => {
-    void fetch("/api/sessions", { cache: "no-store" })
-      .then((r) => (r.ok ? (r.json() as Promise<{ sessions: SessionInfo[] }>) : null))
+    void loadSessionList({ force: true })
+      .then((d) => d as { sessions: SessionInfo[] } | null)
       .then((d) => {
         const full = d?.sessions.find((s) => s.id === sessionId);
         if (!full) return;
@@ -1322,7 +1365,20 @@ export function AppShell() {
     setRightPanelOpen(true);
   }, [translate]);
 
+  const openGitGraphTab = useCallback(() => {
+    setGitGraphOpen(true);
+    setActiveFileTabId(GIT_GRAPH_TAB_ID);
+    setRightPanelOpen(true);
+  }, []);
+
   const handleCloseFileTab = useCallback((tabId: string) => {
+    if (tabId === GIT_GRAPH_TAB_ID) {
+      setGitGraphOpen(false);
+      const remaining = [...fileTabs, ...terminalTabs, ...browserTabs, ...branchTabs];
+      setActiveFileTabId((current) => current !== tabId ? current : remaining.at(-1)?.id ?? null);
+      if (!workspaceSwapped && remaining.length === 0) setRightPanelOpen(false);
+      return;
+    }
     if (branchTabs.some((tab) => tab.id === tabId)) {
       const remaining = branchTabs.filter((tab) => tab.id !== tabId);
       setBranchTabs(remaining);
@@ -1609,51 +1665,29 @@ export function AppShell() {
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
         onSessionsChange={handleSessionsChange}
       />
-      <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
-        {([
-          ["models", translate("common.models")],
-          ["skills", translate("common.skills")],
-        ] as const).map(([section, label]) => {
-          const disabled = section !== "models" && !projectTrustCwd;
-          return (
-            <button
-              key={section}
-              type="button"
-              onClick={() => setSettingsSection(section)}
-              disabled={disabled}
-              title={disabled ? translate("settings.projectRequired") : label}
-              aria-label={label}
-              style={{
-                // fork:ui-03 — icon-only footer row: the labels duplicated what
-                // the tooltip already says and ate the whole sidebar width.
-                flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: "none", border: "none",
-                borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: disabled ? "default" : "pointer",
-                fontSize: TEXT.sm, opacity: disabled ? 0.35 : 1,
-                transition: "background 0.12s, color 0.12s",
-              }}
-              onMouseEnter={(event) => { if (!disabled) { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; } }}
-              onMouseLeave={(event) => { event.currentTarget.style.background = "none"; event.currentTarget.style.color = "var(--text-muted)"; }}
-            >
-              <SettingsSectionIcon section={section} size={15} strokeWidth={2} />
-            </button>
-          );
-        })}
+      {/* fork:ui-03b — 底栏收敛成一个齿轮设置入口。模型/技能本来就在设置里，
+          三个图标各占 1/3 宽度反而看不出哪个是哪个。 */}
+      <div style={{ padding: "8px", flexShrink: 0 }}>
         <button
           type="button"
           onClick={() => setSettingsSection(getLastSettingsSection(projectTrustCwd))}
           title={translate("common.settings")}
           aria-label={translate("common.settings")}
           style={{
-            flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0, background: "none", border: "none",
+            width: "100%", display: "flex", alignItems: "center", gap: 8,
+            height: TOP_BAR_ICON_BUTTON_SIZE, padding: "0 10px",
+            background: "none", border: "none",
             borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: "pointer",
             fontSize: TEXT.sm, transition: "background 0.12s, color 0.12s",
           }}
           onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
           onMouseLeave={(event) => { event.currentTarget.style.background = "none"; event.currentTarget.style.color = "var(--text-muted)"; }}
         >
-          <SettingsSectionIcon section="general" size={15} strokeWidth={2} />
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          <span>{translate("common.settings")}</span>
         </button>
       </div>
     </>
@@ -1720,10 +1754,8 @@ export function AppShell() {
     if (!mobile && !showChat) return null;
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        {/* fork:zn-08 — on desktop both of these live in the ⋯ menu below
-            (see activeTopPanel === "more"); the phone keeps them inline because
-            its bar already collapses behind a single ⋯ trigger instead. */}
-        {mobile && (<>
+        {/* fork:ui-14b — 完整历史 / 生成标题 / 导出 / 系统提示词 / 工具定义
+            现在都是顶栏右上角的图标按钮（原来桌面上折进 ⋯ 菜单，点两次才到位）。 */}
         <button
           type="button"
           onClick={() => {
@@ -1765,12 +1797,12 @@ export function AppShell() {
           data-mobile-toolbar-action={mobile ? "history" : undefined}
         >
           <svg
-            width="12"
-            height="12"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="1.8"
             strokeLinecap="round"
             strokeLinejoin="round"
             style={{
@@ -1843,16 +1875,16 @@ export function AppShell() {
               data-mobile-toolbar-action={mobile ? "name" : undefined}
             >
               {autoNameStatus.kind === "naming" ? (
-                <svg className="animate-spin" width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" opacity="0.25" />
-                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.8" opacity="0.25" />
+                  <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
                 </svg>
               ) : isSuccess ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <polyline points="20 6 9 17 4 12" />
                 </svg>
               ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="m15 4 5 5L7 22l-5-5Z" />
                   <path d="m14 5 5 5" />
                   <path d="M6 4V2M5 3H3M19 19v3M17.5 20.5h3" />
@@ -1862,7 +1894,6 @@ export function AppShell() {
             </button>
           );
         })()}
-        </>)}
         {hasSubagentSessions && (
           <button
             type="button"
@@ -1884,7 +1915,7 @@ export function AppShell() {
             }}
             data-mobile-toolbar-action={mobile ? "agents" : undefined}
           >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
             </svg>
 
@@ -1919,7 +1950,7 @@ export function AppShell() {
             }}
             data-mobile-toolbar-action="branches"
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: branchTree.length > 0 ? "var(--accent)" : "var(--text-dim)" }} aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: branchTree.length > 0 ? "var(--accent)" : "var(--text-dim)" }} aria-hidden="true">
               <line x1="6" y1="3" x2="6" y2="15" />
               <circle cx="18" cy="6" r="3" />
               <circle cx="6" cy="18" r="3" />
@@ -1938,9 +1969,6 @@ export function AppShell() {
             hasSession
           />
         ))}
-        {/* fork:ui-14 — on desktop these two live in the ⋯ menu below; the
-            phone keeps them inline because it already overflows. */}
-        {mobile && (<>
         <button
           ref={systemBtnRef}
           type="button"
@@ -1970,7 +1998,7 @@ export function AppShell() {
           }}
           data-mobile-toolbar-action={mobile ? "system" : undefined}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemPrompt ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
             <line x1="8" y1="13" x2="16" y2="13" />
@@ -2006,215 +2034,55 @@ export function AppShell() {
           }}
           data-mobile-toolbar-action={mobile ? "tools" : undefined}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemTools?.some((tool) => tool.active) ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: systemTools?.some((tool) => tool.active) ? "var(--accent)" : "var(--text-dim)", flexShrink: 0 }} aria-hidden="true">
             <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z" />
           </svg>
 
         </button>
-        </>)}
-        {!mobile && (
-          <button
-            type="button"
-            onClick={() => toggleTopPanel("more", false)}
-            title={translate("sidebar.more")}
-            aria-label={translate("sidebar.more")}
-            aria-haspopup="menu"
-            aria-expanded={activeTopPanel === "more"}
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center",
-              width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE,
-              alignSelf: "center", borderRadius: "var(--radius-md)", margin: 0, padding: 0,
-              background: activeTopPanel === "more" ? "var(--bg-selected)" : "none",
-              border: "none",
-              color: activeTopPanel === "more" ? "var(--text)" : "var(--text-muted)",
-              cursor: "pointer", fontSize: TEXT.xs, whiteSpace: "nowrap",
-              transition: "color 0.1s, background 0.1s",
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = activeTopPanel === "more" ? "var(--text)" : "var(--text-muted)"; }}
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" />
-            </svg>
-          </button>
-        )}
+        {/* fork:ui-14b — 导出 Markdown 从 ⋯ 菜单搬成图标：与其它四个动作同一行，
+            一眼看得见；新窗口打开（?format=md 让浏览器直接渲染，方便复制片段）。 */}
+        <button
+          type="button"
+          onClick={() => {
+            if (!selectedSession) return;
+            window.open(`/api/sessions/${encodeURIComponent(selectedSession.id)}/export?format=md`, "_blank", "noopener,noreferrer");
+            if (mobile && isNarrowMobile) setMobileToolbarMoreOpen(true);
+          }}
+          disabled={!selectedSession}
+          title={translate("session.exportMarkdown")}
+          aria-label={translate("session.exportMarkdown")}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE,
+            alignSelf: "center", borderRadius: "var(--radius-md)", margin: 0, padding: 0,
+            background: "none", border: "none",
+            color: selectedSession ? "var(--text-muted)" : "var(--text-dim)",
+            cursor: selectedSession ? "pointer" : "not-allowed",
+            opacity: selectedSession ? 1 : 0.45,
+            fontSize: TEXT.xs, whiteSpace: "nowrap",
+            transition: "color 0.1s, background 0.1s, opacity 0.1s",
+          }}
+          onMouseEnter={(event) => {
+            if (!selectedSession) return;
+            event.currentTarget.style.color = "var(--text)";
+            event.currentTarget.style.background = "var(--bg-hover)";
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.color = selectedSession ? "var(--text-muted)" : "var(--text-dim)";
+            event.currentTarget.style.background = "none";
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <path d="M12 11v6" />
+            <polyline points="9.5 14.5 12 17 14.5 14.5" />
+          </svg>
+        </button>
       </div>
     );
   };
 
-  const renderSessionStatsButton = (mobile: boolean) => {
-    if (!mobile && (!showChat || (!sessionStats && !contextUsage))) return null;
-
-    const tokens = sessionStats?.tokens;
-    const cost = sessionStats?.cost ?? 0;
-    const formatCompact = (value: number) => value >= 1_000_000
-      ? `${(value / 1_000_000).toFixed(1)}M`
-      : value >= 1000
-        ? `${(value / 1000).toFixed(0)}k`
-        : String(value);
-    const costText = cost > 0 ? (cost >= 0.01 ? `$${cost.toFixed(2)}` : `<$0.01`) : null;
-
-    // Session files grow with the message count, and past a few thousand messages
-    // opening or switching to the session is visibly slower.
-    const totalMessages = sessionStats?.totalMessages ?? 0;
-    const messageCountColor = totalMessages > 5000
-      ? "var(--danger)"
-      : totalMessages > 2000
-        ? "var(--warning)"
-        : "var(--text-muted)";
-
-    let contextColor = "var(--text-muted)";
-    let desktopContextText: string | null = null;
-    let mobileContextText: string | null = null;
-    if (contextUsage?.contextWindow) {
-      const percent = contextUsage.percent;
-      if (percent !== null && percent > 90) contextColor = "var(--danger)";
-      else if (percent !== null && percent > 70) contextColor = "var(--warning)";
-      desktopContextText = percent !== null
-        ? `${percent.toFixed(0)}% / ${formatCompact(contextUsage.contextWindow)}`
-        : `? / ${formatCompact(contextUsage.contextWindow)}`;
-      mobileContextText = percent !== null ? `${percent.toFixed(0)}%` : null;
-    }
-
-    const tooltipParts: string[] = [];
-    if (totalMessages > 0) tooltipParts.push(`messages: ${totalMessages.toLocaleString(locale)}`);
-    if (tokens) {
-      tooltipParts.push(`in: ${tokens.input.toLocaleString(locale)}`);
-      tooltipParts.push(`out: ${tokens.output.toLocaleString(locale)}`);
-      tooltipParts.push(`cache read: ${tokens.cacheRead.toLocaleString(locale)}`);
-      tooltipParts.push(`cache write: ${tokens.cacheWrite.toLocaleString(locale)}`);
-      if (cost > 0) tooltipParts.push(`cost: $${cost.toFixed(4)}`);
-    }
-    if (contextUsage?.contextWindow) {
-      const percent = contextUsage.percent;
-      tooltipParts.push(`context: ${percent !== null ? percent.toFixed(1) + "%" : "unknown"} of ${contextUsage.contextWindow.toLocaleString()} tokens`);
-    }
-    const tooltip = tooltipParts.join("  |  ");
-    const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;
-    const hasMobileValues = Boolean(
-      (tokens && (tokens.input > 0 || tokens.output > 0))
-      || costText
-      || mobileContextText,
-    );
-
-    return (
-      <button
-        type="button"
-        onClick={() => toggleTopPanel("session")}
-        disabled={!showChat || covered}
-        tabIndex={covered ? -1 : undefined}
-        title={tooltip || translate("session.title")}
-        aria-label={translate("session.title")}
-        aria-pressed={activeTopPanel === "session"}
-        aria-hidden={covered ? true : undefined}
-        className={mobile ? "mobile-session-stats" : undefined}
-        data-mobile-toolbar-stats={mobile ? "true" : undefined}
-        style={{
-          marginLeft: mobile ? 0 : "auto",
-          display: "flex", alignItems: "center", justifyContent: "flex-end",
-          flex: mobile ? 1 : undefined,
-          minWidth: 0,
-          gap: mobile ? 7 : 10,
-          paddingLeft: mobile ? 6 : 12,
-          paddingRight: mobile ? 6 : 12,
-          height: TOP_BAR_ICON_BUTTON_SIZE,
-          overflow: "hidden",
-          visibility: covered ? "hidden" : "visible",
-          pointerEvents: covered ? "none" : "auto",
-          background: activeTopPanel === "session" ? "var(--bg-selected)" : "none",
-          border: "none",
-          fontSize: TEXT.xs, color: "var(--text-muted)",
-          whiteSpace: "nowrap", cursor: showChat ? "pointer" : "default",
-          fontVariantNumeric: "tabular-nums",
-          transition: "color 0.1s, background 0.1s",
-        }}
-        onMouseEnter={(event) => {
-          if (showChat && !covered) event.currentTarget.style.color = "var(--text)";
-        }}
-        onMouseLeave={(event) => {
-          event.currentTarget.style.color = activeTopPanel === "session" ? "var(--text)" : "var(--text-muted)";
-        }}
-      >
-        {mobile ? (
-          <>
-            {tokens && tokens.input > 0 && (
-              <span className="mobile-session-stat-io" style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
-                </svg>
-                {formatCompact(tokens.input)}
-              </span>
-            )}
-            {tokens && tokens.output > 0 && (
-              <span className="mobile-session-stat-io" style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
-                </svg>
-                {formatCompact(tokens.output)}
-              </span>
-            )}
-            {costText && (
-              <span className="mobile-session-stat-cost" style={{ color: "var(--text)", fontWeight: 500, flexShrink: 0 }}>
-                {costText}
-              </span>
-            )}
-            {mobileContextText && (
-              <span style={{ color: contextColor, flexShrink: 0 }}>
-                {mobileContextText}
-              </span>
-            )}
-            {!hasMobileValues && showChat && (
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", color: "var(--text-dim)" }}>
-                {translate("session.title")}
-              </span>
-            )}
-          </>
-        ) : (
-          <>
-            <span style={{ display: "flex", alignItems: "center", gap: 4, color: messageCountColor, opacity: totalMessages ? 1 : 0.45 }}>
-              <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M1 2.5 Q1 1 2.5 1 L7.5 1 Q9 1 9 2.5 L9 5 Q9 6.5 7.5 6.5 L4 6.5 L2 8.5 L2 6.5 Q1 6.5 1 5 Z" />
-              </svg>
-              {formatCompact(totalMessages)}
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.input ? 1 : 0.45 }}>
-              <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
-              </svg>
-              {formatCompact(tokens?.input ?? 0)}
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.output ? 1 : 0.45 }}>
-              <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
-              </svg>
-              {formatCompact(tokens?.output ?? 0)}
-            </span>
-            <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.cacheRead ? 1 : 0.45 }}>
-              <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
-              </svg>
-              {formatCompact(tokens?.cacheRead ?? 0)}
-            </span>
-            <span style={{ display: "flex", alignItems: "center", color: costText ? "var(--text)" : "var(--text-muted)", fontWeight: 500, opacity: costText ? 1 : 0.6 }}>
-              {costText ?? "$0.00"}
-            </span>
-            {desktopContextText && (
-              <span style={{ display: "flex", alignItems: "center", gap: 4, color: contextColor }}>
-                <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  {/* Usage bars: an arch glyph here read as a second panel icon next
-                      to the real panel toggle. */}
-                  <line x1="2" y1="8.5" x2="2" y2="6" />
-                  <line x1="5" y1="8.5" x2="5" y2="3.5" />
-                  <line x1="8" y1="8.5" x2="8" y2="1.5" />
-                </svg>
-                {desktopContextText}
-              </span>
-            )}
-          </>
-        )}
-      </button>
-    );
-  };
 
   const renderSidebarToggle = (mobile: boolean) => (
     <button
@@ -2245,11 +2113,11 @@ export function AppShell() {
       onMouseLeave={(event) => { event.currentTarget.style.color = "var(--text-muted)"; }}
     >
       {sidebarOpen ? (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
         </svg>
       ) : (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
         </svg>
       )}
@@ -2401,80 +2269,6 @@ export function AppShell() {
     <ContextMenuProvider>
     <>
     <style>{`
-      @keyframes session-info-pop {
-        0% {
-          opacity: 0;
-          transform: translateY(-24px);
-          filter: blur(6px);
-          box-shadow: 0 2px 8px rgba(0,0,0,0);
-        }
-        55% {
-          opacity: 1;
-          transform: translateY(0);
-          filter: blur(0);
-          background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
-          box-shadow: 0 18px 44px color-mix(in srgb, var(--accent) 16%, transparent);
-        }
-        100% {
-          opacity: 1;
-          transform: translateY(0);
-          filter: blur(0);
-          background: var(--bg-panel);
-          box-shadow: 0 10px 28px rgba(0,0,0,0.10);
-        }
-      }
-      @keyframes session-info-light-wash {
-        0% {
-          opacity: 0;
-          transform: translateX(-110%) skewX(-16deg);
-        }
-        24% {
-          opacity: 0.42;
-        }
-        100% {
-          opacity: 0;
-          transform: translateX(115%) skewX(-16deg);
-        }
-      }
-      .session-info-popover {
-        position: relative;
-        overflow: hidden;
-        transform-origin: top right;
-        animation: session-info-pop 360ms ease-out both;
-        /* DSN-06：只提示真正会被动画的属性。原先把 filter/background/box-shadow
-           一起写进 will-change，会常驻提升图层并占用显存，但这段动画只动 transform。 */
-        will-change: transform;
-      }
-      .session-info-popover::after {
-        content: "";
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        left: 0;
-        width: 44%;
-        pointer-events: none;
-        background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 24%, transparent), transparent);
-        animation: session-info-light-wash 620ms ease-out both;
-      }
-      @media (prefers-reduced-motion: reduce) {
-        .session-info-popover,
-        .session-info-popover::after {
-          animation: none;
-        }
-      }
-      .mobile-session-stats {
-        container-type: inline-size;
-      }
-      @container (max-width: 158px) {
-        .mobile-session-stat-io {
-          display: none !important;
-        }
-      }
-      @container (max-width: 88px) {
-        .mobile-session-stat-cost {
-          display: none !important;
-        }
-      }
       @media (max-width: 640px) {
         .sidebar-overlay-backdrop.sidebar-mobile-pending {
           opacity: 0 !important;
@@ -2720,7 +2514,6 @@ export function AppShell() {
                 </button>
               )}
               {!isNarrowMobile && renderChatToolbarActions(true)}
-              {renderSessionStatsButton(true)}
               {renderMainFileToggle(true)}
               {isNarrowMobile && mobileToolbarMoreOpen && (
                 <div
@@ -2751,7 +2544,6 @@ export function AppShell() {
             <div style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 4, marginLeft: "auto", minWidth: 0 }}>
               {renderProjectTrustWarning(false)}
               {renderChatToolbarActions(false)}
-              {renderSessionStatsButton(false)}
               {/* The workspace toggle is rendered once, as the boundary control on
                   .main-panels (line ~2209): a second copy here showed up as two
                   identical panel icons in the same row. */}
@@ -2870,306 +2662,6 @@ export function AppShell() {
                   </button>
                 </div>
               )}
-              {activeTopPanel === "more" && (
-                // fork:ui-14 / fork:zn-08 — desktop overflow menu (upstream
-                // collapses the reference panels into a ⋯ in TaskHeader).
-                // fork:zn-08 extends it to the last two inline icons (回滚历史 /
-                // 生成标题) so the desktop bar carries Zeno's sparse chrome:
-                // title + ⋯ + the workspace toggles. Every action stays one
-                // click away — nothing was removed, only relocated.
-                <div style={{
-                  margin: 4,
-                  padding: 4,
-                  background: "var(--bg-elev)",
-                  border: "1px solid var(--border)",
-                  borderRadius: "var(--radius-lg)",
-                  boxShadow: "var(--shadow-lg)",
-                }}>
-                  {selectedSession && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        toggleTopPanel("more", false);
-                        handleViewFullHistory();
-                      }}
-                      style={{
-                        display: "flex", alignItems: "center", width: "100%", height: 30,
-                        padding: "0 10px", background: "none", border: "none",
-                        borderRadius: "var(--radius-md)", color: "var(--text)",
-                        cursor: "pointer", fontSize: TEXT.md, textAlign: "left",
-                      }}
-                      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
-                      onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
-                    >
-                      {translate("history.full")}
-                    </button>
-                  )}
-                  {selectedSession && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        toggleTopPanel("more", false);
-                        void handleAutoName();
-                      }}
-                      style={{
-                        display: "flex", alignItems: "center", width: "100%", height: 30,
-                        padding: "0 10px", background: "none", border: "none",
-                        borderRadius: "var(--radius-md)", color: "var(--text)",
-                        cursor: "pointer", fontSize: TEXT.md, textAlign: "left",
-                      }}
-                      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
-                      onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
-                    >
-                      {translate("title.generate")}
-                    </button>
-                  )}
-                  {selectedSession && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        toggleTopPanel("more", false);
-                        // ?inline=1 keeps the browser's own text rendering instead of a
-                        // download prompt when the user wants to copy a section.
-                        window.open(`/api/sessions/${encodeURIComponent(selectedSession.id)}/export?format=md`, "_blank", "noopener,noreferrer");
-                      }}
-                      style={{
-                        display: "flex", alignItems: "center", width: "100%", height: 30,
-                        padding: "0 10px", background: "none", border: "none",
-                        borderRadius: "var(--radius-md)", color: "var(--text)",
-                        cursor: "pointer", fontSize: TEXT.md, textAlign: "left",
-                      }}
-                      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
-                      onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
-                    >
-                      {translate("session.exportMarkdown")}
-                    </button>
-                  )}
-                  {(["system", "tools"] as const).map((panel) => (
-                    <button
-                      key={panel}
-                      type="button"
-                      onClick={() => handleSystemInfoToggle(panel)}
-                      style={{
-                        display: "flex", alignItems: "center", width: "100%", height: 30,
-                        padding: "0 10px", background: "none", border: "none",
-                        borderRadius: "var(--radius-md)", color: "var(--text)",
-                        cursor: "pointer", fontSize: TEXT.md, textAlign: "left",
-                        transition: "background 0.12s",
-                      }}
-                      onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; }}
-                      onMouseLeave={(event) => { event.currentTarget.style.background = "none"; }}
-                    >
-                      {panel === "system" ? translate("system.prompt") : translate("tools.title")}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {activeTopPanel === "session" && (
-                <div className="session-info-popover" style={{
-                  background: "var(--bg-elev)",
-                  borderBottom: "1px solid var(--border)",
-                  boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
-                  padding: "12px 16px",
-                }}>
-                  {sessionStats ? (() => {
-                    const formatDuration = (ms: number) => {
-                      if (ms <= 0) return "0s";
-                      const totalSec = Math.floor(ms / 1000);
-                      const h = Math.floor(totalSec / 3600);
-                      const m = Math.floor((totalSec % 3600) / 60);
-                      const s = totalSec % 60;
-                      if (h > 0) return `${h}h ${m}m`;
-                      if (m > 0) return `${m}m ${s}s`;
-                      return `${s}s`;
-                    };
-                    const totalActiveMs = sessionStats.totalActiveMs ?? 0;
-                    const ws = selectedSession;
-                    const sessionRows = [
-                       ...(sessionStats.sessionName ? [{ label: translate("session.name"), value: sessionStats.sessionName, copyField: null }] : []),
-                       { label: translate("session.file"), value: sessionStats.sessionFile ?? translate("session.inMemory"), copyField: "file" as const },
-                       { label: translate("session.id"), value: sessionStats.sessionId, copyField: "id" as const },
-                       ...(totalActiveMs > 0 ? [{ label: translate("session.totalActive"), value: formatDuration(totalActiveMs), copyField: null }] : []),
-                    ];
-                    const projectRows = [
-                      ...(ws ? [{ label: translate("session.projectDir"), value: ws.projectRoot ?? ws.cwd, copyField: "projectDir" as const }] : []),
-                      ...(ws?.branch ? [{ label: translate("session.gitBranch"), value: ws.branch, copyField: "gitBranch" as const }] : []),
-                      ...(ws?.isWorktree ? [{ label: translate("session.gitWorktree"), value: ws.cwd, copyField: "gitWorktree" as const }] : []),
-                    ];
-                    const messageRows = [
-                       [translate("session.user"), sessionStats.userMessages.toLocaleString(locale)],
-                       [translate("session.assistant"), sessionStats.assistantMessages.toLocaleString(locale)],
-                       [translate("session.toolCalls"), sessionStats.toolCalls.toLocaleString(locale)],
-                       [translate("session.toolResults"), sessionStats.toolResults.toLocaleString(locale)],
-                       [translate("session.total"), sessionStats.totalMessages.toLocaleString(locale)],
-                    ];
-                    const tokenRows = [
-                       [translate("session.input"), sessionStats.tokens.input.toLocaleString(locale)],
-                       [translate("session.output"), sessionStats.tokens.output.toLocaleString(locale)],
-                       ...(sessionStats.tokens.cacheRead > 0 ? [[translate("session.cacheRead"), sessionStats.tokens.cacheRead.toLocaleString(locale)]] : []),
-                       ...(sessionStats.tokens.cacheWrite > 0 ? [[translate("session.cacheWrite"), sessionStats.tokens.cacheWrite.toLocaleString(locale)]] : []),
-                       [translate("session.total"), sessionStats.tokens.total.toLocaleString(locale)],
-                    ];
-                    const ctx = contextUsage ?? sessionStats.contextUsage;
-                    const formatCompact = (n: number) => n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(0)}k` : String(n);
-                    const extraTokenRows = [
-                       ...(sessionStats.cost > 0 ? [[translate("session.cost"), `$${sessionStats.cost.toFixed(4)}`]] : []),
-                       ...(ctx?.contextWindow ? [[translate("session.context"), `${ctx.percent !== null ? `${ctx.percent.toFixed(1)}%` : "?"} / ${formatCompact(ctx.contextWindow)}`]] : []),
-                       // Cache hit rate = cache reads / (input + cache writes + cache reads) — the denominator covers all input-class tokens.
-                       ...(sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite > 0 && sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite + sessionStats.tokens.input > 0
-                         ? [[translate("session.cacheHitRate"), `${(sessionStats.tokens.cacheRead / (sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite + sessionStats.tokens.input) * 100).toFixed(1)}%`]]
-                         : []),
-                    ];
-                    const section = (
-                      title: string,
-                      sectionRows: string[][],
-                      valueAlign: "left" | "right" = "left",
-                      compact = false,
-                    ) => (
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: TEXT.xs, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
-                          <div style={{
-                            display: "grid",
-                            gridTemplateColumns: compact ? "max-content max-content" : "auto minmax(0, 1fr)",
-                            columnGap: compact ? 14 : 12,
-                            rowGap: 4,
-                            justifyContent: compact ? "start" : undefined,
-                          }}>
-                            {sectionRows.map(([label, value]) => (
-                              <div key={`${title}:${label}`} style={{ display: "contents" }}>
-                                <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{label}</div>
-                                <div style={{
-                                  color: "var(--text-muted)",
-                                  minWidth: 0,
-                                  overflowWrap: compact ? "normal" : "anywhere",
-                                  textAlign: valueAlign,
-                                  whiteSpace: valueAlign === "right" ? "nowrap" : "normal",
-                                }}>{value}</div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    const copyTitleKey: Record<SessionCopyField, string> = {
-                      file: "session.copyFile",
-                      id: "session.copyId",
-                      projectDir: "session.copyProjectDir",
-                      gitBranch: "session.copyGitBranch",
-                      gitWorktree: "session.copyGitWorktree",
-                    };
-                    const copyButton = (field: SessionCopyField, value: string) => {
-                      const copied = copiedSessionField === field;
-                      return (
-                        <button
-                          type="button"
-                          title={copied ? translate("session.copied") : translate(copyTitleKey[field])}
-                          onClick={() => handleCopySessionField(field, value)}
-                          style={{
-                            alignSelf: "start",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            width: 22,
-                            height: 22,
-                            marginTop: -2,
-                            color: copied ? "var(--accent)" : "var(--text-dim)",
-                            background: "transparent",
-                            border: "1px solid var(--border)",
-                            borderRadius: "var(--radius-xs)",
-                            cursor: "pointer",
-                            flex: "0 0 auto",
-                            transition: "color 0.12s, border-color 0.12s, background 0.12s",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.color = "var(--accent)";
-                            e.currentTarget.style.borderColor = "var(--accent)";
-                            e.currentTarget.style.background = "var(--bg-hover)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.color = copied ? "var(--accent)" : "var(--text-dim)";
-                            e.currentTarget.style.borderColor = "var(--border)";
-                            e.currentTarget.style.background = "transparent";
-                          }}
-                        >
-                          {copied ? (
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                          ) : (
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                            </svg>
-                          )}
-                        </button>
-                      );
-                    };
-                    const sessionInfoSection = (
-                      <div style={{ minWidth: 0 }}>
-                         <div style={{ fontSize: TEXT.xs, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{translate("session.infoSection")}</div>
-                        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
-                          {sessionRows.map((row) => (
-                            <div key={`session-info:${row.label}`} style={{ display: "contents" }}>
-                              <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{row.label}</div>
-                              <div style={{
-                                color: "var(--text-muted)",
-                                minWidth: 0,
-                                overflowWrap: "anywhere",
-                                wordBreak: "break-word",
-                                whiteSpace: "normal",
-                              }}>{row.value}</div>
-                              <div>{row.copyField ? copyButton(row.copyField, row.value) : null}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                    const projectInfoSection = projectRows.length > 0 ? (
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: TEXT.xs, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{translate("session.projectSection")}</div>
-                        <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", columnGap: 12, rowGap: 8, alignItems: "start" }}>
-                          {projectRows.map((row) => (
-                            <div key={`project-info:${row.label}`} style={{ display: "contents" }}>
-                              <div style={{ color: "var(--text-dim)", whiteSpace: "nowrap" }}>{row.label}</div>
-                              <div style={{
-                                color: "var(--text-muted)",
-                                minWidth: 0,
-                                overflowWrap: "anywhere",
-                                wordBreak: "break-word",
-                                whiteSpace: "normal",
-                              }}>{row.value}</div>
-                              <div>{row.copyField ? copyButton(row.copyField, row.value) : null}</div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null;
-
-                    return (
-                      <div style={{
-                        display: "grid",
-                        gridTemplateColumns: isMobile
-                          ? "1fr"
-                          : "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
-                        gap: isMobile ? 16 : 24,
-                        fontSize: TEXT.sm,
-                        lineHeight: 1.5,
-                        fontFamily: "var(--font-mono)",
-                      }}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 16 : 20 }}>
-                          {sessionInfoSection}
-                          {projectInfoSection}
-                        </div>
-                         {section(translate("session.messages"), messageRows)}
-                         {section(translate("session.tokens"), [...tokenRows, ...extraTokenRows], "right", true)}
-                      </div>
-                    );
-                  })() : (
-                    <div style={{ fontSize: TEXT.sm, color: "var(--text-muted)", fontStyle: "italic" }}>
-                       {translate("session.load")}
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
 
@@ -3206,7 +2698,6 @@ export function AppShell() {
               onSystemInfoLoaderChange={handleSystemInfoLoaderChange}
               onSessionStatsChange={handleSessionStatsChange}
               onSessionStatsPanelOpen={openSessionStatsPanel}
-              onContextUsageChange={handleContextUsageChange}
               onOpenFile={handleOpenLinkedFile}
               onOpenSession={handleOpenSession}
               onAskInNewChat={handleAskInNewChat}
@@ -3322,6 +2813,29 @@ export function AppShell() {
               button lives in the tree's own toolbar row, so the panel shows one
               row of icons instead of two stacked ones. */}
           {!showExplorerToolbarRow && browserTabButton}
+          {activeCwd && !gitGraphOpen && (
+            <button
+              type="button"
+              onClick={openGitGraphTab}
+              title={translate("git.graph")}
+              aria-label={translate("git.graph")}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
+                borderRadius: "var(--radius-md)", background: "none", border: "none",
+                color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
+              }}
+              onMouseEnter={(event) => { event.currentTarget.style.color = "var(--accent)"; }}
+              onMouseLeave={(event) => { event.currentTarget.style.color = "var(--text-muted)"; }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="6" y1="3" x2="6" y2="15" />
+                <circle cx="18" cy="6" r="3" />
+                <circle cx="6" cy="18" r="3" />
+                <path d="M18 9a9 9 0 0 1-9 9" />
+              </svg>
+            </button>
+          )}
           {isMobile && (
             <button
               type="button"
@@ -3350,36 +2864,55 @@ export function AppShell() {
             same container so the tree no longer replaces the document. */}
         <div className="file-panel-body">
         <div className="file-panel-main">
-          {activeFileTab?.filePath ? (
-            <FileViewer
-              key={`${activeFileTab.id}:${activeFileTab.viewerRevision ?? 0}`}
-              filePath={activeFileTab.filePath}
-              cwd={activeCwd ?? undefined}
-              sourceSessionId={activeFileTab.sourceSessionId}
-              locationTarget={pendingFileLocation && sameFilePath(pendingFileLocation.filePath, activeFileTab.filePath)
-                ? pendingFileLocation
-                : null}
-              onLocationHandled={handleFileLocationHandled}
-              onLocationFailed={handleFileLocationFailed}
-              gitRefreshKey={explorerRefreshKey}
-              initialDisplayMode={activeFileTab.initialDisplayMode}
-              initialState={activeFileTab.viewerState}
-              watchEnabled={editorVisible}
-              onStateChange={(viewerState) => handleFileViewerStateChange(
-                activeFileTab.id,
-                activeFileTab.viewerRevision ?? 0,
-                viewerState,
-              )}
-              onMentionLines={editorVisible ? handleFileLineMention : undefined}
-              onAskInNewChat={editorVisible ? handleFileSelectionInNewChat : undefined}
-              onAtMention={handleAtMention}
-              onOpenFile={(filePath) => handleOpenFile(
-                filePath,
-                getFileName(filePath),
-                { sourceSessionId: activeFileTab.sourceSessionId },
-              )}
+          {activeFileTabId === GIT_GRAPH_TAB_ID && gitGraphOpen ? (
+            // fork:git-graph-tab — 点提交里的文件直接开 diff 视图（FileViewer 已支持 modeHint）。
+            <GitGraphTab
+              cwd={activeCwd ?? ""}
+              onOpenFile={(filePath, fileName) => handleOpenFile(filePath, fileName, { modeHint: "diff" })}
             />
-          ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) && !browserTabs.some((tab) => tab.id === activeFileTabId) && !branchTabs.some((tab) => tab.id === activeFileTabId) ? (
+          ) : null}
+          {fileTabs.filter((tab) => mountedFileTabs.has(tab.id)).map((tab) => {
+            const isActive = tab.id === activeFileTabId;
+            return (
+              // fork:file-tab-keep-alive — 文件 tab 不再「切走即卸载」：首次激活后常驻，
+              // 切走只 hidden，滚动位置/搜索/未保存的 markdown 编辑态都保留；
+              // 关闭后由下面的剪枝 effect 从 mountedFileTabs 剔除。
+              <div key={`${tab.id}:${tab.viewerRevision ?? 0}`} hidden={!isActive} style={{ width: "100%", height: "100%" }}>
+                <FileViewer
+                  filePath={tab.filePath}
+                  cwd={activeCwd ?? undefined}
+                  sourceSessionId={tab.sourceSessionId}
+                  locationTarget={isActive && pendingFileLocation && sameFilePath(pendingFileLocation.filePath, tab.filePath)
+                    ? pendingFileLocation
+                    : null}
+                  onLocationHandled={handleFileLocationHandled}
+                  onLocationFailed={handleFileLocationFailed}
+                  gitRefreshKey={explorerRefreshKey}
+                  initialDisplayMode={tab.initialDisplayMode}
+                  initialState={tab.viewerState}
+                  watchEnabled={editorVisible && isActive}
+                  onStateChange={(viewerState) => handleFileViewerStateChange(
+                    tab.id,
+                    tab.viewerRevision ?? 0,
+                    viewerState,
+                  )}
+                  onMentionLines={editorVisible && isActive ? handleFileLineMention : undefined}
+                  onAskInNewChat={editorVisible && isActive ? handleFileSelectionInNewChat : undefined}
+                  onAtMention={handleAtMention}
+                  onOpenFile={(filePath) => handleOpenFile(
+                    filePath,
+                    getFileName(filePath),
+                    { sourceSessionId: tab.sourceSessionId },
+                  )}
+                />
+              </div>
+            );
+          })}
+          {fileTabs.length === 0
+            && !terminalTabs.some((tab) => tab.id === activeFileTabId)
+            && !browserTabs.some((tab) => tab.id === activeFileTabId)
+            && !branchTabs.some((tab) => tab.id === activeFileTabId)
+            && activeFileTabId !== GIT_GRAPH_TAB_ID ? (
             activeCwd ? (
               explorerPanel
             ) : (
