@@ -19,6 +19,7 @@ import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import type { FileLocationTarget } from "./FileViewer";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
 import { ExtensionStatusBar } from "./ExtensionStatusBar";
+import { SessionStatsBar } from "./SessionStatsBar";
 import { NewSessionHome } from "./fork/NewSessionHome";
 import { ProjectChip, type NewSessionTargets } from "./fork/ProjectChip";
 import { ComposerTipLine } from "./fork/ComposerTipLine";
@@ -365,6 +366,17 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     setExpandedToolIds(new Set());
   }, [session?.id]);
 
+  // fork:ui-stats-inline — 会话统计面板现在长在 composer 下方（状态条右端），
+  // 原来顶栏那个按钮/浮层已移除；`/session` 等外部入口改为就地展开。
+  const [statsExpanded, setStatsExpanded] = useState(false);
+  useEffect(() => {
+    setStatsExpanded(false);
+  }, [session?.id]);
+  const handleSessionStatsPanelOpen = useCallback(() => {
+    setStatsExpanded(true);
+    onSessionStatsPanelOpen?.();
+  }, [onSessionStatsPanelOpen]);
+
   const {
     loading, error, messages, activeToolResults, entryIds, historyCursor, hasEarlierMessages, streamState,
     agentRunning, bashRunning, pendingBash, modelNames, modelList, modelError, modelScopeWarnings, modelThinkingLevels, modelThinkingLevelMaps, toolPreset, thinkingLevel,
@@ -393,7 +405,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     loadContext, activeLeafId, scrollToBottom, scrollToMessage,
   } = useAgentSession({
     session, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd: wrappedOnAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked,
-    modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen,
+    modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsPanelOpen: handleSessionStatsPanelOpen,
     deferInitialScroll: Boolean(pendingScrollRestore),
   });
   const sessionBusy = agentRunning || bashRunning;
@@ -1293,7 +1305,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         {!isEmptyNew && <>
         <div
           ref={scrollContainerRef}
-          className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]"
+          className={`min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]${showScrollToBottom ? " fork-scroll-fade-b" : ""}`}
           style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING_CSS}` }}>
@@ -1860,7 +1872,24 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
           </div>
         )}
         {chatInputElement}
-        <ExtensionStatusBar statuses={extensionStatuses} widgets={extensionWidgets} />
+        <ExtensionStatusBar
+          statuses={extensionStatuses}
+          widgets={extensionWidgets}
+          trailing={(
+            <SessionStatsBar
+              sessionStats={sessionStats}
+              contextUsage={contextUsage}
+              session={session ? {
+                projectRoot: session.projectRoot ?? null,
+                cwd: session.cwd,
+                branch: session.branch ?? null,
+                isWorktree: session.isWorktree,
+              } : null}
+              expanded={statsExpanded}
+              onToggle={setStatsExpanded}
+            />
+          )}
+        />
       </div>
       {hasChatMinimap && (
         <ChatMinimap

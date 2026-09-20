@@ -300,7 +300,7 @@ html.keyboard-open .extension-status-shelf {
 /* The message rhythm already reads this variable (globals.css:2356 applies it as
    a margin), so scaling the variable scales the whole conversation. */
 :root {
-  --conversation-item-gap: calc(16px * var(--fork-density));
+  --conversation-item-gap: calc(24px * var(--fork-density));
 }
 .settings-general-section {
   margin-bottom: calc(20px * var(--fork-density));
@@ -593,6 +593,20 @@ html.keyboard-open .extension-status-shelf {
   .fork-row-enter {
     animation: none;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:shadcn — 消息区底部渐隐（shadcn message-scroller 的 scroll-fade-b）。
+ *
+ * 还没滚到底时，内容在底部 40px 内渐隐，提示“下面还有”；滚到底时渐隐自动
+ * 收掉（否则会遮住最后一条消息）。
+ *
+ * 复用已有的 `showScrollToBottom` 状态（它本来就是“是否还有内容在下方”），
+ * 而不是再写一套滚动监听，也不用 scroll-driven animation（依赖较新特性）。
+ * ------------------------------------------------------------------------- */
+.fork-scroll-fade-b {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent 100%);
 }
 
 /* ---------------------------------------------------------------------------

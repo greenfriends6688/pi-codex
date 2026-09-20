@@ -189,7 +189,7 @@
   --height-toolbar-pane: 40px;
   --spacing-token-button-composer: 28px;
   /* Consumed by the skin override layer's chat rhythm rule. */
-  --conversation-item-gap: 16px;
+  --conversation-item-gap: 24px;
   /* 14px, not 13: Zeno's transcript is body-sized (its `--ui-font-size`), and
      the chat is the one place where the extra pixel is unmistakable. */
   --chat-content-font-size: 14px;
