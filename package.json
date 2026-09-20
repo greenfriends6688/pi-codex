@@ -208,7 +208,18 @@
         "nsis",
         "portable"
       ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "electronLanguages": [
+        "en-US",
+        "zh-CN",
+        "zh-TW",
+        "ja",
+        "ru",
+        "de",
+        "fr",
+        "es",
+        "ko"
+      ]
     },
     "nsis": {
       "oneClick": false,

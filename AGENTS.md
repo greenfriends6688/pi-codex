@@ -241,6 +241,27 @@ Newer pi emits `compaction_start` / `compaction_end`; older versions emitted `au
 ### Exported session HTML
 - `/api/sessions/[id]/export` delegates to pi's export helper, then patches recursive tree helpers in the generated HTML to iterative versions so very deep linear sessions do not overflow the browser call stack.
 
+### 桌面端打包（macOS 通用包 / Windows 安装包）
+
+- **通用包**：`electron-builder --mac dir --universal` 先各打一份 x64/arm64 再 lipo 合并。
+  合并必须声明 `build.mac.x64ArchFiles = "**/Resources/app/node_modules/**"`：node_modules 里
+  平台预编译产物（node-pty/esbuild/pi-tui 的 `.node` 与 `spawn-helper`）在两架构包里字节相同，
+  不声明会直接报 `same in both x64 and arm64 builds` 并中止。
+- **`mac.files` / `win.files` 是替换而不是叠加主文件匹配器**：写了等于通用 `files` 全部失效
+  （表现：docs、参考项目被一起打进包，甚至因断链符号链接报 ENOENT）。平台级差异只能写进通用 `files`。
+- **`.gitignore` 不参与打包**：`设计风格/`(66M)、`pi-codex-release/`(43M)、`pi-web-pr-inbox/`
+  必须在 `build.files` 里显式排除，否则每个包装进 113M 垃圾。
+- **`next.config.mjs` 不能改回 `.ts`**：TS 配置会让 `next start` 运行时需要 `@next/swc-*`，而 npm 只装
+  构建机架构那份 → Intel/Windows 包启动时联网下载（离线直接挂）。保持 mjs 后可整包剪掉（-40M）。
+  剪掉 `@img/sharp-*` 同理安全（应用代码不 import，实测 `/_next/image` 仍 200）。
+- **Electron Framework 的 85 种 `locale.pak`**（每个 524K）在框架 Resources 里，`electronLanguages`
+  管不到它，要自己删；只留 en/en_GB/zh_CN/zh_TW 等十种。
+- 体积基线：app 756M → 通用 DMG **191M**（ULMO）；Windows nsis **144M**。大头是 Electron 框架
+  （双架构 418M，单架构约 208M），再小只能改成 Next standalone 输出。
+- 打包后必做三件事：`env -u ELECTRON_RUN_AS_NODE` 启动冒烟（`/api/home` 200）、`hdiutil verify`、
+  以及**真 Electron 窗口里的点击验证**（顶栏按钮是否被 `.desktop-drag-handle` 盖住——
+  手柄是绝对定位元素，会绘制在 static 按钮之上，详见 `app/fork-ui.css`）。
+
 ## Pi Session File Format
 
 Location: `~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl`
