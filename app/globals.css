@@ -4,7 +4,7 @@
    提供 animate-in/out + fade-in-0 / zoom-in-95 / slide-in-from-{侧}-N。 */
 @import "tw-animate-css";
 /* BoardUI 地基（fork:boardui）：466 个语义色 token + 52 个复合排版样式。
-   只引入 token 层与排版层，不引入它的 globals.css（全局规则与 pi-codex 冲突）。 */
+   只引入 token 层与排版层，不引入它的 globals.css（全局规则与本项目的全局样式冲突）。 */
 @import "./boardui/theme.css";
 @import "./boardui/typography.css";
 
@@ -2869,6 +2869,81 @@ button.process-file-chip:hover {
 .process-chip:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 1px;
+}
+
+/* fork:process-tabs — 芯片条只放「图标 + 动词 + 目标」；细节在下面的正文窗口。
+   加宽 label 上限会让 12 步重新摊成五行，所以这里刻意收窄。 */
+.process-chip-label {
+  min-width: 0;
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-chip-count {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 正文窗口：与时间轴最新一步同款（max-height + 上下淡出），
+   这样两种模式读长输出的手感一致。 */
+/* fork:process-mode-toggle — 摘要行上的视图切换（时间轴 ⇄ 标签）。 */
+.process-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background-color var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+}
+
+.process-mode-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.process-mode-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.process-tab-body {
+  position: relative;
+  margin-top: 8px;
+}
+
+.process-tab-body-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.process-tab-body-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 24px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.process-tab-body-fade.is-top {
+  top: 0;
+  background: linear-gradient(to bottom, var(--bg), transparent);
+}
+
+.process-tab-body-fade.is-bottom {
+  bottom: 0;
+  background: linear-gradient(to top, var(--bg), transparent);
 }
 
 .process-chip.is-active {

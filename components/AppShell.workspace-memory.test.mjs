@@ -8,6 +8,9 @@ import { createJiti } from "jiti";
 const source = await readFile(new URL("./AppShell.tsx", import.meta.url), "utf8");
 const jiti = createJiti(import.meta.url);
 const draftStore = await jiti.import("../lib/draft-store.ts");
+// fork:workspace-restore — 恢复策略现在是纯函数（lib/workspace-restore.ts），
+// slice 里直接注入真实现即可，不必再写一份桩。
+const workspaceRestore = await jiti.import("../lib/workspace-restore.ts");
 
 function callbackBody(name, nextName) {
   const start = source.indexOf(`const ${name} = useCallback`);
@@ -73,6 +76,7 @@ test("New restores the draft after session navigation and workspace auto-restore
       const response = Promise.withResolvers();
       const context = vm.createContext({
         ...draftStore,
+        ...workspaceRestore,
         crypto: globalThis.crypto,
         queueMicrotask,
         URLSearchParams,
@@ -93,6 +97,8 @@ test("New restores the draft after session navigation and workspace auto-restore
         bashRecoveryIdRef: { current: 0 },
         cancelEventStreamGrace() {},
         closeEvents() {},
+        // fork:stream-update-scheduler — 卸载路径现在会丢弃挂起帧；这段 slice 不关心调度器本身。
+        resetStreamUpdates() {},
         isMobile: false,
         workspaceSwapped: false,
         activeCwd: cwd,
@@ -103,6 +109,11 @@ test("New restores the draft after session navigation and workspace auto-restore
         sessionKey: 0,
       });
       context.invalidateWorkspaceRestore = () => context.workspaceRestoreTokenRef.current++;
+      // fork:session-list-cache — 恢复流程改走共享缓存。这里必须在 context 建好之后再挂，
+      // 否则闭包会捕获 Node 侧的 fetch（而不是 VM 里的桩）。
+      context.loadSessionList = () => Promise.resolve(context.fetch("/api/sessions"))
+        .then((r) => r.json())
+        .catch(() => null);
       for (const [setter] of callbacks.matchAll(/\bset[A-Z]\w*(?=\()/g)) {
         const state = setter[3].toLowerCase() + setter.slice(4);
         context[setter] = (value) => {

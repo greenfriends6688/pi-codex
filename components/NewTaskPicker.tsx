@@ -16,6 +16,15 @@ import { TEXT } from "@/lib/typography";
  *
  * Kept in its own file so the sidebar diff stays a wiring change.
  */
+/** 来源徽标用产品本名（品牌名不翻译）。 */
+const SOURCE_LABELS: Record<string, string> = {
+  vscode: "VS Code",
+  claude: "Claude Code",
+  codex: "Codex",
+  zed: "Zed",
+  opencode: "OpenCode",
+};
+
 export function NewTaskPicker({
   projects,
   activeKey,
@@ -32,6 +41,22 @@ export function NewTaskPicker({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  // fork:recent-projects — 菜单打开时才去读「其它编辑器最近打开的工作区」：
+  // 平时不发请求，读完也只在本地去重一次（同一个目录已经在上面的项目列表里就不再出现，
+  // 这里是个选择器，不是发现列表）。
+  const [recent, setRecent] = useState<{ path: string; source: string }[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void fetch("/api/recent-projects")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { projects?: Array<{ path: string; source: string }> } | null) => {
+        if (!cancelled) setRecent(data?.projects ?? []);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -50,6 +75,11 @@ export function NewTaskPicker({
   }, [open]);
 
   const itemClass = "flex w-full items-center gap-2 border-none bg-transparent px-3 py-[7px] text-left text-[12.5px] text-text-muted hover:bg-bg-hover hover:text-text focus-visible:outline-2 focus-visible:outline-accent";
+
+  const knownRoots = new Set(projects.map((project) => project.root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()));
+  const recentSuggestions = recent
+    .filter((project) => !knownRoots.has(project.path.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()))
+    .slice(0, 5);
 
   const choose = (cwd: string) => {
     setOpen(false);
@@ -108,6 +138,34 @@ export function NewTaskPicker({
             <div style={{ padding: "4px 12px 2px", fontSize: TEXT.xs, color: "var(--text-dim)", fontWeight: 500 }}>
               {t("sidebar.newTaskChooseProject")}
             </div>
+          )}
+          {/* 推荐区放在项目列表之后、分隔线之前；点击走与项目相同的 onNewIn，
+              也就是同一条 /api/cwd/validate 注册 allow-root 的路径。 */}
+          {recentSuggestions.length > 0 && (
+            <>
+              <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
+              <div style={{ padding: "4px 12px 2px", fontSize: TEXT.xs, color: "var(--text-dim)", fontWeight: 500 }}>
+                {t("sidebar.newTaskRecommended")}
+              </div>
+              {recentSuggestions.map((project) => (
+                <button
+                  key={project.path}
+                  type="button"
+                  role="menuitem"
+                  className={itemClass}
+                  title={project.path}
+                  onClick={() => choose(project.path)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+                    <path d="M12 3v18M5 10l7-7 7 7" />
+                  </svg>
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {project.path.split("/").filter(Boolean).at(-1) ?? project.path}
+                  </span>
+                  <span style={{ flexShrink: 0, color: "var(--text-dim)", fontSize: TEXT["2xs"] }}>{SOURCE_LABELS[project.source] ?? project.source}</span>
+                </button>
+              ))}
+            </>
           )}
           {projects.map((project) => (
             <button

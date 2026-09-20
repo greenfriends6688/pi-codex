@@ -15,9 +15,12 @@ const loginSource = await readFile(new URL("../app/login/page.tsx", import.meta.
 
 test("opens one settings panel from the AppShell sidebar footer", () => {
   assert.match(shellSource, /<SettingsPanel/);
-  assert.match(shellSource, /onClick=\{\(\) => setSettingsSection\(section\)\}/);
+  // fork:ui-03b — 底栏收敛成一个齿轮按钮：模型/技能等分区都在面板里，
+  // 原来的三个图标行（models / skills / settings）已删除。
   assert.match(shellSource, /onClick=\{\(\) => setSettingsSection\(getLastSettingsSection\(projectTrustCwd\)\)\}/);
   assert.match(shellSource, /initialSection=\{settingsSection\}/);
+  assert.doesNotMatch(shellSource, /onClick=\{\(\) => setSettingsSection\(section\)\}/);
+  assert.doesNotMatch(shellSource, /<SettingsSectionIcon/);
   assert.doesNotMatch(sidebarSource, /section="settings"/);
   assert.doesNotMatch(sidebarSource, /onOpenSettings/);
   assert.doesNotMatch(sidebarSource, /section="(?:models|skills|plugins)"/);

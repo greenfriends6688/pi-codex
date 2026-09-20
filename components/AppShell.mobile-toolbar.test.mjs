@@ -46,9 +46,11 @@ test("only renders branch toolbar controls for sessions with branches", () => {
   assert.match(source, /panel === "branches" \? null : panel/);
 });
 
-test("keeps covered statistics and file controls out of interaction and focus", () => {
+test("keeps covered file controls out of interaction and focus", () => {
+  // fork:ui-stats-inline — 统计控件已从顶栏移到 composer 下方，只剩文件开关还吃 covered 状态。
+  assert.doesNotMatch(source, /renderSessionStatsButton/);
   assert.match(source, /const covered = mobile && isNarrowMobile && mobileToolbarMoreOpen;/);
-  assert.match(source, /disabled=\{!showChat \|\| covered\}[\s\S]*?tabIndex=\{covered \? -1 : undefined\}/);
+  assert.match(source, /disabled=\{covered\}[\s\S]*?tabIndex=\{covered \? -1 : undefined\}/);
   assert.match(source, /data-mobile-toolbar-file=\{mobile \? "true" : undefined\}[\s\S]*?visibility: covered \? "hidden" : "visible"/);
   assert.match(source, /aria-hidden=\{covered \? true : undefined\}/);
 });
@@ -74,7 +76,8 @@ test("keeps the mobile action layer open after using an expanded action", () => 
   assert.match(source, /toggleTopPanel\("branches", true\)/);
   assert.match(source, /handleSystemInfoToggle\("system", mobile\)/);
   assert.match(source, /handleSystemInfoToggle\("tools", mobile\)/);
-  assert.match(source, /onClick=\{\(\) => toggleTopPanel\("session"\)\}/);
+  // fork:ui-stats-inline — 统计不再占顶栏按钮，因此也没有“点开后保持工具条展开”的需求。
+  assert.doesNotMatch(source, /toggleTopPanel\("session"\)/);
 });
 
 test("keeps theme and language in settings instead of the chat toolbar", () => {
@@ -87,11 +90,18 @@ test("keeps theme and language in settings instead of the chat toolbar", () => {
   assert.match(source, /useTheme\(\);/);
 });
 
-test("prioritizes context and cost when the mobile statistics area narrows", () => {
-  assert.match(source, /\.mobile-session-stats \{[\s\S]*?container-type: inline-size/);
-  assert.match(source, /@container \(max-width: 158px\)[\s\S]*?\.mobile-session-stat-io/);
-  assert.match(source, /@container \(max-width: 88px\)[\s\S]*?\.mobile-session-stat-cost/);
-  assert.match(source, /mobileContextText = percent !== null \? `\$\{percent\.toFixed\(0\)\}%` : null/);
+test("keeps the inline statistics strip compact and expandable", async () => {
+  // fork:ui-stats-inline — 统计改到 composer 下方：窄屏只留上下文百分比，
+  // 展开后才是完整的 Token 明细（见 SessionStatsBar）。
+  const stats = await readFile(new URL("./SessionStatsBar.tsx", import.meta.url), "utf8");
+  assert.match(stats, /export function SessionStatsBar/);
+  assert.match(stats, /export function formatCompactTokens/);
+  assert.match(stats, /const contextText = ctx\?\.contextWindow/);
+  assert.match(stats, /aria-expanded=\{expanded\}/);
+  assert.match(stats, /t\("session\.cacheHitRate"\)/);
+  const chatWindow = await readFile(new URL("./ChatWindow.tsx", import.meta.url), "utf8");
+  assert.match(chatWindow, /<SessionStatsBar[\s\S]*?expanded=\{statsExpanded\}/);
+  assert.match(chatWindow, /<ExtensionStatusBar[\s\S]*?trailing=\{/);
 });
 
 test("places trust warnings below the mobile toolbar and the file toggle in toolbar flow", () => {

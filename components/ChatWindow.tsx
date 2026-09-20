@@ -29,7 +29,7 @@ import { extractTodoState } from "@/lib/todo-state";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
 import { ProcessGroup, summarizeProcessBlocks } from "./ProcessGroup";
-import { useProcessDisplayMode } from "@/hooks/useProcessDisplayMode";
+import { useProcessDisplayMode, type ProcessRendererPreference } from "@/hooks/useProcessDisplayMode";
 import { messageToProcessContentBlocks, type ProcessContentBlock } from "@/lib/process-content";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
@@ -266,7 +266,7 @@ function withAssistantBlocks(
   return next;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = false, reveal = false, summaryText, children, t }: { messageCount: number; toolCallCount: number; defaultExpanded?: boolean; reveal?: boolean; summaryText?: string; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
+function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = false, reveal = false, summaryText, displayMode, onToggleDisplayMode, children, t }: { messageCount: number; toolCallCount: number; defaultExpanded?: boolean; reveal?: boolean; summaryText?: string; displayMode?: ProcessRendererPreference; onToggleDisplayMode?: (mode: ProcessRendererPreference) => void; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   useLayoutEffect(() => {
     if (reveal) setExpanded(true);
@@ -281,6 +281,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
 
   return (
     <div style={{ marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
       <button
         type="button"
         aria-expanded={expanded || reveal}
@@ -308,6 +309,38 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
           {label}
         </span>
       </button>
+      {/* fork:process-mode-toggle — 时间轴 / 标签两种视图以前只能去设置里切，而且切完
+          得自己找差别。把开关放在摘要行上：就地对比，一步到位。 */}
+      {displayMode && displayMode !== "legacy" && onToggleDisplayMode && (
+        <button
+          type="button"
+          onClick={() => {
+            onToggleDisplayMode(displayMode === "timeline" ? "tabs" : "timeline");
+            setExpanded(true);
+          }}
+          title={t(displayMode === "timeline" ? "settings.processDisplayTabs" : "settings.processDisplayTimeline")}
+          aria-label={t(displayMode === "timeline" ? "settings.processDisplayTabs" : "settings.processDisplayTimeline")}
+          className="process-mode-toggle"
+        >
+          {displayMode === "timeline" ? (
+            // 切到标签视图：四块并排的短横
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <rect x="3" y="6" width="7" height="5" rx="1.5" />
+              <rect x="14" y="6" width="7" height="5" rx="1.5" />
+              <rect x="3" y="14" width="7" height="5" rx="1.5" />
+              <rect x="14" y="14" width="7" height="5" rx="1.5" />
+            </svg>
+          ) : (
+            // 切到时间轴：竖线 + 节点
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <line x1="6" y1="4" x2="6" y2="20" />
+              <circle cx="6" cy="7" r="2" /><circle cx="6" cy="16" r="2" />
+              <line x1="11" y1="7" x2="20" y2="7" /><line x1="11" y1="16" x2="20" y2="16" />
+            </svg>
+          )}
+        </button>
+      )}
+      </div>
       {(expanded || reveal) && (
         <div style={{ marginTop: 8 }}>
           {children}
@@ -320,7 +353,7 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
 export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onOpenSessionPane, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, newSessionTargets = null, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, onEmptyChange }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
-  const { displayMode: processDisplayMode } = useProcessDisplayMode();
+  const { displayMode: processDisplayMode, setDisplayMode: setProcessDisplayMode } = useProcessDisplayMode();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
@@ -1502,6 +1535,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                           // starts — the same rule the finalized group uses.
                           defaultExpanded={!streamingProcess || streamingProcess.answerBlocks.length === 0}
                           summaryText={summarizeProcessBlocks(liveBlocks, (key, params) => t(key, params), (key) => t(key))}
+                          displayMode={processDisplayMode}
+                          onToggleDisplayMode={setProcessDisplayMode}
                           t={t}
                         >
                           <ProcessGroup
@@ -1603,6 +1638,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                         defaultExpanded={!finalAnswerMessage}
                         reveal={revealProcess}
                         summaryText={grouped ? groupedSummary : undefined}
+                        displayMode={grouped ? processDisplayMode : undefined}
+                        onToggleDisplayMode={grouped ? setProcessDisplayMode : undefined}
                         t={t}
                       >
                         {grouped ? (
@@ -1699,6 +1736,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                         // starts — the same rule the finalized group uses.
                         defaultExpanded={streamingProcess.answerBlocks.length === 0}
                         summaryText={summarizeProcessBlocks(streamingProcess.blocks, (key, params) => t(key, params), (key) => t(key))}
+                        displayMode={processDisplayMode}
+                        onToggleDisplayMode={setProcessDisplayMode}
                         t={t}
                       >
                         <ProcessGroup
@@ -2116,7 +2155,9 @@ function ExtensionDialog({
         inset: 0,
         zIndex: 90,
         display: "flex",
-        alignItems: collapsed ? "flex-start" : "flex-end",
+        // Collapsed or expanded, the card stays just above the composer: the top of
+        // the message area reads as "detached" from what it is asking about.
+        alignItems: "flex-end",
         justifyContent: "center",
         padding: 20,
         pointerEvents: "none",
@@ -2401,7 +2442,7 @@ function ExtensionCustomPanel({
         inset: 0,
         zIndex: 95,
         display: "flex",
-        alignItems: collapsed ? "flex-start" : "flex-end",
+        alignItems: "flex-end",
         justifyContent: "center",
         padding: 20,
         pointerEvents: "none",

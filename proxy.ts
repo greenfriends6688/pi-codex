@@ -4,6 +4,11 @@ import {
   isApiRequestHostAllowed,
 } from "@/lib/request-security";
 import {
+  getAuthRetryAfterMs,
+  recordAuthFailure,
+  retryAfterSeconds,
+} from "@/lib/auth-throttle";
+import {
   isValidWebSessionToken,
   isValidBasicAuthorization,
   isWebPasswordEnabled,
@@ -42,6 +47,22 @@ export function proxy(request: NextRequest) {
   if (request.nextUrl.pathname === "/api/web-auth") return NextResponse.next();
 
   if (!authenticated) {
+    // fork:auth-throttle — 只对**带凭据**的失败计数：首屏那些没有 Authorization
+    // 的无头请求（浏览器导航、静态资源）不该消耗配额，否则正常用户一进页面就被罚。
+    const hasCredentials = Boolean(request.headers.get("authorization"));
+    if (hasCredentials) {
+      const retryAfterMs = getAuthRetryAfterMs();
+      if (retryAfterMs > 0) {
+        const headers = {
+          "Cache-Control": "no-store",
+          "Retry-After": String(retryAfterSeconds(retryAfterMs)),
+        };
+        return isApiRequest
+          ? NextResponse.json({ error: "Too many authentication attempts" }, { status: 429, headers })
+          : new NextResponse("Too many authentication attempts", { status: 429, headers });
+      }
+      recordAuthFailure();
+    }
     if (!isApiRequest) {
       const loginUrl = new URL("/login", request.url);
       if (request.nextUrl.search) {

@@ -11,7 +11,8 @@ export interface Tab {
   id: string;
   label: string;
   filePath: string;
-  kind?: "terminal" | "browser" | "session";
+  /** fork:git-graph-tab — `git-graph` 是工作区单例视图 tab（无 filePath）。 */
+  kind?: "terminal" | "browser" | "session" | "git-graph";
   closing?: boolean;
   sourceSessionId?: string | null;
   initialDisplayMode?: FileViewerDisplayMode;

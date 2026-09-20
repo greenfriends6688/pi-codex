@@ -6,7 +6,9 @@ const eslintConfig = [
   { ignores: ["test-results/**"] },
   {
     // Reference checkouts and build output are not part of this project's source.
-    ignores: ["release/**", "参考项目/**", "pi参考项目/**", "家里电脑跑的/**"],
+    // 设计风格/ 与 .playwright-mcp/ 是本地素材与浏览器抓取产物（.gitignore 已忽略），
+    // 不属于本项目源码；漏掉它们会让 `npm run lint` 在别人的素材上炸出一堆 TS 规则报错。
+    ignores: ["release/**", "参考项目/**", "pi参考项目/**", "家里电脑跑的/**", "设计风格/**", ".playwright-mcp/**"],
   },
   ...coreWebVitals,
   ...typescript,

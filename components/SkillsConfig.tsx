@@ -32,9 +32,11 @@ import {
   ConfigSidebarList,
   ConfigSidebarText,
   ConfigSplitView,
+  ConfigSectionTitle,
   ConfigStatusDot,
   ConfigSwitch,
 } from "./SettingsUi";
+import { MarkdownBody } from "./MarkdownBody";
 import { TEXT } from "@/lib/typography";
 
 function shortenPath(p: string): string {
@@ -81,6 +83,7 @@ function SkillDetail({
   updateError,
   onCheckUpdate,
   onUpdate,
+  onContentSaved,
 }: {
   skill: Skill;
   cwd: string;
@@ -93,10 +96,81 @@ function SkillDetail({
   updateError: string | null;
   onCheckUpdate: () => void;
   onUpdate: () => void;
+  onContentSaved?: () => void;
 }) {
   const { t } = useI18n();
   const label = sourceLabel(skill);
   const enabled = !skill.disableModelInvocation;
+
+  // fork:skills-content — 正文读取 / 就地编辑。
+  // 以前这里只有 name + description（frontmatter 的两个字段），正文得另外去文件浏览器
+  // 找，而全局技能目录（~/.pi/agent/skills、~/.agents/skills）根本不在 /api/files 的
+  // 允许根里。现在走 /api/skills/content：与 /api/skills PATCH 同一套根校验。
+  const [content, setContent] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [loadingContent, setLoadingContent] = useState(true);
+  const [contentError, setContentError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingContent(true);
+    setContentError(null);
+    setEditing(false);
+    setSavedAt(false);
+    void fetch(`/api/skills/content?filePath=${encodeURIComponent(skill.filePath)}`)
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({})) as { content?: string; error?: string };
+        if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
+        return data.content ?? "";
+      })
+      .then((text) => {
+        if (cancelled) return;
+        setContent(text);
+        setDraft(text);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setContent(null);
+        setContentError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingContent(false);
+      });
+    return () => { cancelled = true; };
+  }, [skill.filePath]);
+
+  const saveContent = async () => {
+    setSaving(true);
+    setContentError(null);
+    try {
+      const response = await fetch("/api/skills/content", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        // baseContent = 打开时读到的原文，服务端据此做乐观并发检查（409）。
+        body: JSON.stringify({ filePath: skill.filePath, content: draft, baseContent: content ?? "" }),
+      });
+      const data = await response.json().catch(() => ({})) as { error?: string; content?: string };
+      if (response.status === 409) {
+        // 文件被别的进程改过：把磁盘上的新内容换成当前草稿的基线，让用户先看再决定。
+        setContent(data.content ?? null);
+        setDraft(data.content ?? draft);
+        throw new Error(t("skills.changedOnDisk"));
+      }
+      if (!response.ok) throw new Error(data.error ?? `HTTP ${response.status}`);
+      setContent(draft);
+      setEditing(false);
+      setSavedAt(true);
+      // frontmatter 里就是 name / description，改完要让左侧列表跟着刷新。
+      onContentSaved?.();
+    } catch (error) {
+      setContentError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   function displayPath(p: string): string {
     if (label === "project" && p.startsWith(cwd)) {
@@ -226,6 +300,67 @@ function SkillDetail({
           {skill.description}
         </span>
       </ConfigField>
+
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <ConfigSectionTitle>{t("skills.content")}</ConfigSectionTitle>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }}>
+            {savedAt && !editing && (
+              <span style={{ fontSize: TEXT.xs, color: "var(--success)" }}>{t("i18n.saved")}</span>
+            )}
+            {content !== null && !editing && (
+              <ConfigButton size="small" onClick={() => { setDraft(content); setEditing(true); setSavedAt(false); }}>
+                {t("skills.edit")}
+              </ConfigButton>
+            )}
+            {editing && (
+              <>
+                <ConfigButton
+                  size="small"
+                  disabled={saving}
+                  onClick={() => { setDraft(content ?? ""); setEditing(false); setContentError(null); }}
+                >
+                  {t("i18n.cancel")}
+                </ConfigButton>
+                <ConfigButton
+                  variant="primary"
+                  size="small"
+                  disabled={saving}
+                  onClick={() => { void saveContent(); }}
+                >
+                  {saving ? t("i18n.saving") : t("i18n.save")}
+                </ConfigButton>
+              </>
+            )}
+          </div>
+        </div>
+
+        {loadingContent ? (
+          <div className="config-sidebar-message">{t("i18n.loading")}</div>
+        ) : editing ? (
+          <>
+            <textarea
+              className="skill-content-editor"
+              value={draft}
+              spellCheck={false}
+              aria-label={`${t("skills.content")} · ${skill.name}`}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+            <p className="settings-chat-range-hint" style={{ marginTop: 6 }}>{t("skills.contentHint")}</p>
+          </>
+        ) : content !== null ? (
+          <div className="skill-content-view">
+            <MarkdownBody>{content}</MarkdownBody>
+          </div>
+        ) : (
+          <div className="config-sidebar-message is-error">
+            {contentError ? `${t("skills.contentLoadFailed")}: ${contentError}` : t("skills.contentLoadFailed")}
+          </div>
+        )}
+        {editing && contentError && (
+          <div className="config-sidebar-message is-error">{t("skills.saveFailed")}: {contentError}</div>
+        )}
+      </div>
     </ConfigDetailStack>
   );
 }
@@ -904,6 +1039,7 @@ export function SkillsConfig({
                 updateError={updateError}
                 onCheckUpdate={() => void checkForUpdates(selectedSkill)}
                 onUpdate={() => void updateInstalledSkill(selectedSkill)}
+                onContentSaved={() => { void loadSkills(); }}
               />
               ) : (
                 <ConfigEmptyState>{t("i18n.selectSkill")}</ConfigEmptyState>

@@ -5,6 +5,12 @@ import { useI18n } from "@/hooks/useI18n";
 import { useWallpaper } from "@/hooks/useWallpaper";
 import { ConfigButton } from "./SettingsUi";
 import {
+  BUILTIN_WALLPAPERS,
+  activeThemePalette,
+  builtinPaintingFor,
+  paintingPath,
+} from "@/lib/wallpaper-builtin";
+import {
   WALLPAPER_SCRIM_MAX,
   WALLPAPER_SCRIM_MIN,
   WALLPAPER_MIME_TYPES,
@@ -28,6 +34,7 @@ export function WallpaperSettings() {
   const {
     enabled,
     url,
+    builtin,
     scrim,
     inputMode,
     panelMode,
@@ -36,6 +43,7 @@ export function WallpaperSettings() {
     choose,
     remove,
     useBuiltin,
+    setBuiltin,
     setEnabled,
     setScrim,
     setInputMode,
@@ -128,6 +136,33 @@ export function WallpaperSettings() {
             aria-label={t("settings.wallpaperEnabled")}
             onChange={(event) => setEnabled(event.target.checked)}
           />
+        </div>
+      </div>
+
+      {/* fork:ui-wallpaper — the built-in picker. The active thumbnail is the one
+          the layer would actually paint, so it honours the palette fallback when
+          the user has never picked (and no thumbnail is active over a custom
+          image, which wins over all of them). */}
+      <div className="settings-wallpaper-builtins">
+        <span className="settings-wallpaper-builtin-label">{t("settings.wallpaperBuiltinPick")}</span>
+        <div className="settings-wallpaper-builtin-grid" role="group" aria-label={t("settings.wallpaperBuiltinPick")}>
+          {BUILTIN_WALLPAPERS.map((item) => {
+            const active = !url && builtinPaintingFor(activeThemePalette(), builtin) === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className="settings-wallpaper-builtin"
+                data-active={active ? "true" : undefined}
+                aria-pressed={active}
+                onClick={() => setBuiltin(item.id)}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element -- static asset, not optimizer-routable */}
+                <img src={paintingPath(item.id)} alt="" draggable={false} />
+                <span>{t(item.labelKey)}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 

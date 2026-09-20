@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useDialogA11y } from "@/hooks/useDialogA11y";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
@@ -40,7 +40,24 @@ import {
   ConfigSplitView,
 } from "./SettingsUi";
 import { ProviderIcon } from "./ProviderIcon";
+import {
+  PROVIDER_ICON_MODES,
+  getProviderEmoji,
+  getProviderIconMode,
+  getProviderIconModesVersion,
+  setProviderEmoji,
+  setProviderIconMode,
+  subscribeProviderIconModes,
+  type ProviderIconMode,
+} from "@/lib/provider-icon";
 import { ProviderUsageSummary } from "./ProviderUsageSummary";
+import {
+  favoriteModelKey,
+  getFavoriteModelsServerSnapshot,
+  getFavoriteModelsSnapshot,
+  subscribeFavoriteModels,
+  toggleFavoriteModelKey,
+} from "@/lib/favorite-models";
 import { TEXT } from "@/lib/typography";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -292,6 +309,97 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <ConfigSectionTitle>{children}</ConfigSectionTitle>;
 }
 
+// ── Provider 图标模式（D2-PR-20）─────────────────────────────────────────────
+
+const ICON_MODE_LABEL_KEYS: Record<ProviderIconMode, string> = {
+  auto: "models.providerIconAuto",
+  api: "models.providerIconApi",
+  letter: "models.providerIconLetter",
+  emoji: "models.providerIconEmoji",
+};
+
+/**
+ * 4 段模式选择（auto / api / letter / emoji）+ 自定义 emoji 输入。
+ * 图标本体仍是本仓库的 sprite，这里只切「模式 + 角标 + emoji」三层决策；
+ * 选择立即写入 localStorage 并广播，列表里的 ProviderIcon 同步重渲染。
+ */
+function ProviderIconModePicker({ providerId, api }: { providerId: string; api?: string }) {
+  const { t } = useI18n();
+  useSyncExternalStore(subscribeProviderIconModes, getProviderIconModesVersion, () => 0);
+  const current = getProviderIconMode(providerId);
+  const [emojiDraft, setEmojiDraft] = useState(() => getProviderEmoji(providerId) ?? "");
+
+  const chooseMode = (next: ProviderIconMode) => {
+    // 选 emoji 时先落一个默认 ✨，避免只切模式、还没填字形时退回首字母。
+    if (next === "emoji" && !getProviderEmoji(providerId)) setProviderEmoji(providerId, "✨");
+    setProviderIconMode(providerId, next);
+    if (next === "emoji") setEmojiDraft(getProviderEmoji(providerId) ?? "✨");
+  };
+
+  const updateEmoji = (value: string) => {
+    setEmojiDraft(value);
+    setProviderEmoji(providerId, value || null);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div
+        role="radiogroup"
+        aria-label={t("models.providerIcon")}
+        style={{ display: "flex", flexWrap: "wrap", gap: 6 }}
+      >
+        {PROVIDER_ICON_MODES.map((modeOption) => {
+          const selected = current === modeOption;
+          return (
+            <button
+              key={modeOption}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              title={t(ICON_MODE_LABEL_KEYS[modeOption])}
+              onClick={() => chooseMode(modeOption)}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 6, height: 30, padding: "0 9px",
+                border: `1px solid ${selected ? "var(--accent)" : "var(--border)"}`,
+                borderRadius: "var(--radius-xs)",
+                background: selected ? "var(--accent-soft)" : "var(--bg-panel)",
+                color: selected ? "var(--accent-text)" : "var(--text-muted)",
+                cursor: "pointer", fontSize: TEXT.xs,
+              }}
+            >
+              <ProviderIcon id={providerId} api={api} size={14} mode={modeOption} />
+              <span>{t(ICON_MODE_LABEL_KEYS[modeOption])}</span>
+            </button>
+          );
+        })}
+      </div>
+      {current === "emoji" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <input
+            value={emojiDraft}
+            onChange={(event) => updateEmoji(event.target.value)}
+            placeholder={t("models.providerIconEmojiPlaceholder")}
+            aria-label={t("models.providerIconEmoji")}
+            maxLength={16}
+            style={{ ...inputStyle, width: 180 }}
+          />
+          <ConfigButton
+            variant="ghost"
+            size="small"
+            disabled={!emojiDraft && !getProviderEmoji(providerId)}
+            onClick={() => updateEmoji("")}
+          >
+            {t("models.providerIconEmojiClear")}
+          </ConfigButton>
+        </div>
+      )}
+      <span style={{ fontSize: TEXT["2xs"], color: "var(--text-dim)" }}>
+        {t("models.providerIconModeDescription")}
+      </span>
+    </div>
+  );
+}
+
 // ── Provider detail ───────────────────────────────────────────────────────────
 
 function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddModels }: {
@@ -406,6 +514,11 @@ function ProviderDetail({ name, provider, onChange, onRename, onDelete, onAddMod
              {t("i18n.rename")}
           </button>
         )}
+      </Field>
+
+      {/* D2-PR-20：provider 图标模式（auto/api/letter/emoji）。 */}
+      <Field label={t("models.providerIcon")}>
+        <ProviderIconModePicker providerId={name} api={provider.api} />
       </Field>
 
       <Field label="Base URL">
@@ -805,6 +918,25 @@ function fillEmptyModelFields(
   return { model: next, appliedCount };
 }
 
+/** 收藏星标图标；填充表示已收藏。 */
+function FavoriteStarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
 function ModelDetail({
   providerName,
   provider,
@@ -820,6 +952,36 @@ function ModelDetail({
 }) {
   const [testState, setTestState] = useState<ModelTestState>({ phase: "idle" });
   const { t } = useI18n();
+  // fork:thinking-level-memory — 该模型上次实际生效（SDK clamp 之后）的思考档位。
+  const [rememberedThinking, setRememberedThinking] = useState<string | null>(null);
+  const thinkingMemoryKey = model.id ? `${providerName}/${model.id}` : null;
+  useEffect(() => {
+    if (!thinkingMemoryKey) {
+      setRememberedThinking(null);
+      return;
+    }
+    let cancelled = false;
+    void fetch("/api/models")
+      .then((res) => res.ok ? res.json() : null)
+      .then((data: { thinkingLevelMemory?: Record<string, string> } | null) => {
+        if (!cancelled) setRememberedThinking(data?.thinkingLevelMemory?.[thinkingMemoryKey] ?? null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [thinkingMemoryKey]);
+  const forgetRememberedThinking = useCallback(async () => {
+    if (!thinkingMemoryKey) return;
+    try {
+      const res = await fetch("/api/thinking-level-memory", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelKey: thinkingMemoryKey }),
+      });
+      if (res.ok) setRememberedThinking(null);
+    } catch {
+      // 取消失败不影响配置编辑，下次打开重试即可。
+    }
+  }, [thinkingMemoryKey]);
   const [catalogState, setCatalogState] = useState<ModelCatalogState>({ phase: "idle" });
   const [costEditing, setCostEditing] = useState(false);
   const [costDraft, setCostDraft] = useState<ModelCostDraft>(() => modelCostToDraft(model.cost));
@@ -1275,6 +1437,18 @@ function ModelDetail({
                     value={model.thinkingLevelMap}
                     onChange={(v) => set("thinkingLevelMap", v)}
                   />
+                  {rememberedThinking && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: TEXT.xs, color: "var(--text-muted)" }}>
+                      <span>{t("models.lastUsedThinking")}: <strong style={{ color: "var(--text)", fontWeight: 600 }}>{rememberedThinking}</strong></span>
+                      <button
+                        type="button"
+                        onClick={() => { void forgetRememberedThinking(); }}
+                        style={{ padding: "2px 5px", background: "none", border: "none", color: "var(--text-dim)", cursor: "pointer", fontSize: TEXT["2xs"], textDecoration: "underline" }}
+                      >
+                        {t("models.forgetThinking")}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1841,10 +2015,14 @@ export function ModelsConfig({ onClose, embedded = false }: { onClose: () => voi
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedOk, setSavedOk] = useState(false);
+  // fork:builtin-models — 上次保存回传的内置模型覆盖警告。
+  const [saveWarnings, setSaveWarnings] = useState<string[]>([]);
   const [selection, setSelection] = useState<Selection | null>(readRememberedSelection);
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
   const [apiKeyProviders, setApiKeyProviders] = useState<ApiKeyProvider[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // fork:pr17-favorites — 与输入框模型选择器共用同一个收藏 store。
+  const favoriteModels = useSyncExternalStore(subscribeFavoriteModels, getFavoriteModelsSnapshot, getFavoriteModelsServerSnapshot);
 
   const refreshAuthProviders = useCallback(() => {
     fetch("/api/auth/providers")
@@ -1975,9 +2153,15 @@ export function ModelsConfig({ onClose, embedded = false }: { onClose: () => voi
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
-      const d = await res.json() as { success?: boolean; error?: string };
+      const d = await res.json() as { success?: boolean; error?: string; warnings?: string[] };
       if (!res.ok || d.error) setSaveError(d.error ?? `HTTP ${res.status}`);
-      else { setSavedOk(true); setTimeout(() => setSavedOk(false), 2000); }
+      else {
+        // fork:builtin-models — 保存后回传“覆盖了内置定义”的模型：provider-composer
+        // 对 models[] 是整条替换，同名条目会丢掉内置的 thinkingLevelMap / compat。
+        setSaveWarnings(d.warnings ?? []);
+        setSavedOk(true);
+        setTimeout(() => setSavedOk(false), 2000);
+      }
     } catch (e) {
       setSaveError(String(e));
     } finally {
@@ -2105,6 +2289,9 @@ export function ModelsConfig({ onClose, embedded = false }: { onClose: () => voi
                     {/* Model rows */}
                     {models.map((m, i) => {
                       const isModelSelected = selection?.type === "model" && selection.providerName === pName && selection.index === i;
+                      // fork:pr17-favorites — 与输入框选择器共用 store；空 id 的新模型不参与收藏。
+                      const favoriteKey = m.id ? favoriteModelKey(pName, m.id) : null;
+                      const isFavorite = favoriteKey !== null && favoriteModels.has(favoriteKey);
                       return (
                         <ConfigSidebarItem
                           key={i}
@@ -2118,6 +2305,35 @@ export function ModelsConfig({ onClose, embedded = false }: { onClose: () => voi
                           {m.reasoning && (
                             <span style={{ fontSize: TEXT["2xs"], padding: "1px 4px", background: "var(--accent-soft)", color: "var(--accent-text)", borderRadius: 3, flexShrink: 0 }}>T</span>
                           )}
+                          <span
+                            role="button"
+                            tabIndex={favoriteKey ? 0 : -1}
+                            aria-pressed={isFavorite}
+                            aria-label={isFavorite ? t("models.unfavoriteModel") : t("models.favoriteModel")}
+                            title={isFavorite ? t("models.unfavoriteModel") : t("models.favoriteModel")}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              if (favoriteKey) toggleFavoriteModelKey(favoriteKey);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter" && event.key !== " ") return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              if (favoriteKey) toggleFavoriteModelKey(favoriteKey);
+                            }}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              flexShrink: 0,
+                              padding: 2,
+                              color: isFavorite ? "var(--accent)" : "var(--text-dim)",
+                              opacity: favoriteKey ? 1 : 0.35,
+                              cursor: favoriteKey ? "pointer" : "not-allowed",
+                            }}
+                          >
+                            <FavoriteStarIcon filled={isFavorite} />
+                          </span>
                         </ConfigSidebarItem>
                       );
                     })}
@@ -2149,7 +2365,11 @@ export function ModelsConfig({ onClose, embedded = false }: { onClose: () => voi
         </ConfigSplitView>
 
         {/* Footer */}
-        <ConfigFooter status={saveError && <span style={{ color: "var(--danger)" }}>{saveError}</span>}>
+        <ConfigFooter status={saveError
+          ? <span style={{ color: "var(--danger)" }}>{saveError}</span>
+          : saveWarnings.length > 0
+            ? <span style={{ color: "var(--warning)" }}>{t("models.builtinOverrideWarning", { models: saveWarnings.join(", ") })}</span>
+            : null}>
           {!embedded && <ConfigButton onClick={onClose}>{t("i18n.cancel")}</ConfigButton>}
           <ConfigButton
             variant="primary"

@@ -35,6 +35,7 @@ import {
 import { cacheSessionPath, getLatestModelChange, invalidateSessionListCache, resolveSessionPath } from "./session-reader";
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
+import { rememberThinkingLevel, thinkingLevelMemoryKey } from "./thinking-level-memory";
 import { notifySessionComplete } from "./web-push";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -1002,7 +1003,20 @@ export class AgentSessionWrapper {
           this.inner.agent.state.thinkingLevel = "xhigh";
         }
         invalidateSessionListCache();
-        return null;
+        // D2-PR-18：记忆 SDK clamp 之后实际生效的等级（key `provider/modelId`），
+        // 并让 /api/models 缓存失效，前端下次拉取就能看到最新记忆。
+        const actualLevel = this.inner.agent.state?.thinkingLevel;
+        const levelModel = this.inner.model;
+        if (actualLevel && levelModel) {
+          try {
+            rememberThinkingLevel(thinkingLevelMemoryKey(levelModel.provider, levelModel.id), actualLevel);
+          } catch (error) {
+            // 记忆是尽力而为：写盘失败不能把一次成功的等级切换变成报错。
+            console.error("[pi-web] failed to remember thinking level:", error instanceof Error ? error.message : error);
+          }
+          invalidateModelsCache();
+        }
+        return { level: actualLevel ?? level };
       }
 
       case "compact": {
@@ -2349,6 +2363,21 @@ export async function startRpcSession(
       },
     );
     if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
+
+    // D2-PR-18：新会话显式指定推理强度时，记录 per-model 记忆（SDK clamp 后的实际生效值）。
+    // 已有会话（打开历史会话）不写记忆——仅浏览不算「使用」。
+    if (!subagentResources && !sessionFile && thinkingLevel && inner.model) {
+      const actualLevel = inner.agent.state?.thinkingLevel;
+      if (actualLevel) {
+        try {
+          rememberThinkingLevel(thinkingLevelMemoryKey(inner.model.provider, inner.model.id), actualLevel);
+        } catch (error) {
+          // 记忆是尽力而为：写盘失败不能阻断新会话创建。
+          console.error("[pi-web] failed to remember thinking level:", error instanceof Error ? error.message : error);
+        }
+        invalidateModelsCache();
+      }
+    }
 
     // If specific tool names were requested (non-empty), set the active tools to the
     // requested builtin coding tools PLUS all extension/package tools, so installed

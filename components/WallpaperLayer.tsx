@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { WALLPAPER_CHANGED_EVENT, readStoredWallpaperUrl } from "@/lib/wallpaper";
+import { WALLPAPER_CHANGED_EVENT, readStoredBuiltinWallpaper, readStoredWallpaperUrl } from "@/lib/wallpaper";
 import { activeThemePalette, resolveWallpaperSrc } from "@/lib/wallpaper-builtin";
 
 /**
@@ -25,19 +25,23 @@ import { activeThemePalette, resolveWallpaperSrc } from "@/lib/wallpaper-builtin
  */
 export function WallpaperLayer() {
   const [url, setUrl] = useState("");
+  const [builtin, setBuiltin] = useState("");
   const [palette, setPalette] = useState("");
   /** fork:ui-perf — gate for the <img>: no wallpaper, no request. */
   const [enabled, setEnabled] = useState(false);
 
   useEffect(() => {
     const syncUrl = () => setUrl(readStoredWallpaperUrl());
+    const syncBuiltin = () => setBuiltin(readStoredBuiltinWallpaper());
     const syncPalette = () => setPalette(activeThemePalette());
     const syncEnabled = () => setEnabled(document.documentElement.getAttribute("data-wallpaper") === "on");
     syncUrl();
+    syncBuiltin();
     syncPalette();
     syncEnabled();
 
     window.addEventListener(WALLPAPER_CHANGED_EVENT, syncUrl);
+    window.addEventListener(WALLPAPER_CHANGED_EVENT, syncBuiltin);
     const observer = new MutationObserver(() => {
       syncPalette();
       syncEnabled();
@@ -48,6 +52,7 @@ export function WallpaperLayer() {
     });
     return () => {
       window.removeEventListener(WALLPAPER_CHANGED_EVENT, syncUrl);
+      window.removeEventListener(WALLPAPER_CHANGED_EVENT, syncBuiltin);
       observer.disconnect();
     };
   }, []);
@@ -55,7 +60,7 @@ export function WallpaperLayer() {
   // fork:ui-perf — the built-in painting is ~860KB. It used to be resolved (and
   // therefore downloaded) even with the wallpaper switched off, so every first
   // paint paid for an image nobody saw. No src, no request.
-  const src = enabled ? resolveWallpaperSrc(url, palette) : null;
+  const src = enabled ? resolveWallpaperSrc(url, palette, builtin) : null;
 
   return (
     <div className="chat-wallpaper" aria-hidden="true">

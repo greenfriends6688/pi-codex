@@ -48,7 +48,8 @@ test("editor-specific behavior remains active when the editor is the main region
   assert.match(source, /const editorVisible = workspaceSwapped \|\| rightPanelOpen;/);
   assert.match(source, /if \(!workspaceSwapped\) setRightPanelOpen\(true\);/);
   assert.match(source, /if \(!workspaceSwapped && !replacement && !remaining\.length && !fileTabs\.length\) setRightPanelOpen\(false\);/);
-  assert.match(source, /watchEnabled=\{editorVisible\}/);
+  // fork:file-tab-keep-alive — 隐藏的 tab 不再看文件变更，只有激活项吃 editorVisible。
+  assert.match(source, /watchEnabled=\{editorVisible && isActive\}/);
   assert.match(source, /active=\{editorVisible && tab\.id === activeFileTabId\}/);
 });
 

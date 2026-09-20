@@ -80,7 +80,7 @@ def renumber(rewrite_version_strings: bool) -> None:
             continue
         sha = tag_commit(old)
         # 新 tag 必须先存在：否则 PATCH release 时 GitHub 会把新 tag 建到默认分支头上
-        git("tag", "-f", "-a", new, sha, "-m", f"Pi Codex {new}")
+        git("tag", "-f", "-a", new, sha, "-m", f"Pinkslab {new}")
         push = git("push", "-q", "origin", f"refs/tags/{new}")
         api("PATCH", f"/releases/{release['id']}", {
             "tag_name": new,
@@ -98,10 +98,10 @@ def renumber(rewrite_version_strings: bool) -> None:
 def publish(zip_path: str, notes_path: str, version: str) -> None:
     tag = version if version.startswith("v") else f"v{version}"
     head = git("rev-parse", "HEAD").stdout.strip()
-    git("tag", "-f", "-a", tag, head, "-m", f"Pi Codex {tag}")
+    git("tag", "-f", "-a", tag, head, "-m", f"Pinkslab {tag}")
     git("push", "-q", "origin", f"refs/tags/{tag}")
     body = open(notes_path, encoding="utf-8").read()
-    release = api("POST", "/releases", {"tag_name": tag, "name": f"Pi Codex {tag}", "body": body})
+    release = api("POST", "/releases", {"tag_name": tag, "name": f"Pinkslab {tag}", "body": body})
     print("release:", release["html_url"])
     blob = open(zip_path, "rb").read()
     name = os.path.basename(zip_path)

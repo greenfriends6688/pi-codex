@@ -1630,7 +1630,7 @@ export function AppShell() {
 
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-  const windowTitle = activeCwdName ? `${activeCwdName} - Pi Codex` : "Pi Codex";
+  const windowTitle = activeCwdName ? `${activeCwdName} - Pinkslab` : "Pinkslab";
   const topBarSessionTitle = selectedSession
     ? (selectedSession.name?.trim()
       || selectedSession.firstMessage?.trim().replace(/\s+/g, " ").slice(0, 80)

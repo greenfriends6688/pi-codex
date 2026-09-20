@@ -12,7 +12,7 @@ export default function GlobalError({ error, retry }: { error: Error & { digest?
   return (
     <html lang="zh-CN">
       <head>
-        <title>Pi Codex</title>
+        <title>Pinkslab</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </head>
       <body

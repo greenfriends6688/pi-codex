@@ -54,9 +54,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Pi Codex",
-  description: "Pi Codex — local coding agent workbench",
-  applicationName: "Pi Codex",
+  title: "Pinkslab",
+  description: "Pinkslab — local coding agent workbench",
+  applicationName: "Pinkslab",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
@@ -77,7 +77,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Pi Codex",
+    title: "Pinkslab",
   },
   formatDetection: {
     telephone: false,

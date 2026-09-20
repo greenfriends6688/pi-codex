@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "Pi Codex",
-    short_name: "Pi Codex",
+    name: "Pinkslab",
+    short_name: "Pinkslab",
     description: "Local web interface for the pi coding agent",
     start_url: "/",
     scope: "/",

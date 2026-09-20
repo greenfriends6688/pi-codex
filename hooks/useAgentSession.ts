@@ -35,7 +35,10 @@ import {
   INITIAL_STREAMING_STATE,
   streamReducer,
   type ClientAssistantMessageEvent,
+  type StreamAction,
+  type StreamingState,
 } from "@/lib/streaming-message";
+import { createStreamUpdateScheduler, type StreamUpdateScheduler } from "@/lib/stream-update-scheduler";
 import type { SelectionContext, SessionReference } from "@/lib/composer-context";
 // fork:gap04-queue — 队列逐条操控的操作类型
 import type { QueueKind } from "@/lib/queue-surgery";
@@ -309,7 +312,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [entryIds, setEntryIds] = useState<string[]>([]);
   const [historyCursor, setHistoryCursor] = useState<string | null>(null);
   const [hasEarlierMessages, setHasEarlierMessages] = useState(false);
-  const [streamState, dispatch] = useReducer(streamReducer, INITIAL_STREAMING_STATE);
+  const [streamState, dispatchStreamState] = useReducer(streamReducer, INITIAL_STREAMING_STATE);
   const [agentRunning, setAgentRunning] = useState(false);
   const [bashRunning, setBashRunning] = useState(false);
   const [pendingBash, setPendingBash] = useState<{ command: string; excludeFromContext: boolean } | null>(null);
@@ -386,6 +389,91 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const modelSwitchPendingRef = useRef(false);
   const draftKeyAliasesRef = useRef(new Map<string, string>());
   const sessionHookMountedRef = useRef(true);
+
+  // fork:stream-update-scheduler — 流式 delta 合批调度。
+  //
+  // 三个必须保留的设计点（详见 lib/stream-update-scheduler.ts）：
+  //   1. 入队的是「完整最新快照」而不是 delta：影子状态仍由 streamReducer
+  //      同步推进，scheduler 只保留最后一个值，tool-call / thinking 的中间
+  //      变更因此不会丢；
+  //   2. 真正 setState 的提交走 queueMicrotask，避免在 rAF / setTimeout 回调里
+  //      直接 dispatch 触发 React "Maximum update depth exceeded"；
+  //   3. 30FPS 上限 + 超限时 setTimeout 补帧，长回答不会把每个 delta 都变成
+  //      一次渲染。
+  const streamUpdateSchedulerRef = useRef<StreamUpdateScheduler<AgentMessage> | null>(null);
+  const streamingStateRef = useRef<StreamingState>(INITIAL_STREAMING_STATE);
+  if (!streamUpdateSchedulerRef.current) {
+    streamUpdateSchedulerRef.current = createStreamUpdateScheduler<AgentMessage>((message) => {
+      // 提交只做一次 snapshot dispatch；内容永远是最新完整消息。
+      dispatchStreamState({ type: "snapshot", message });
+    });
+  }
+
+  /**
+   * reset 路径：丢弃 scheduler 里的挂起快照。
+   *
+   * 用在会话切换 / 新 run 开始 / 组件卸载：旧 run 的挂起快照可能属于已经被
+   * 中止或替换的消息，绝不能让它在新会话里补一帧。
+   */
+  const resetStreamUpdates = useCallback(() => {
+    streamUpdateSchedulerRef.current?.reset();
+    streamingStateRef.current = INITIAL_STREAMING_STATE;
+  }, []);
+
+  /**
+   * 结束路径：先把 scheduler 里最后一个完整快照同步提交出去（flush 尾帧），
+   * 再允许调用方清空流式状态。
+   *
+   * `prompt_done` / `reconcile` 这类没有 `message_end` 的结束路径如果直接丢弃
+   * 挂起快照，用户会看到回答少了最后一段；这里必须先 flush 再 reset。
+   */
+  const flushStreamUpdates = useCallback(() => {
+    streamUpdateSchedulerRef.current?.flush();
+  }, []);
+
+  /**
+   * 所有流式 reducer action 的统一入口。
+   *
+   * - delta / snapshot：先在影子状态上同步推进 reducer，再把完整消息入队，由
+   *   scheduler 按帧合批提交（React 状态最多 30 次/秒更新）。
+   * - start：新 run 开始，丢弃上一个 run 的挂起快照。
+   * - resume：恢复运行中会话，只同步影子状态（挂载时没有待提交内容）。
+   * - end：结束必须 flush 尾帧，再清空流式状态。
+   *
+   * 事件 handler 仍然照旧调用 `dispatch({ type: "delta", ... })`，合批细节被
+   * 收在这一层，run id 单调性 / reconcile 宽限窗口逻辑保持原样。
+   */
+  const dispatch = useCallback((action: StreamAction) => {
+    const scheduler = streamUpdateSchedulerRef.current;
+    switch (action.type) {
+      case "delta":
+      case "snapshot": {
+        const next = streamReducer(streamingStateRef.current, action);
+        streamingStateRef.current = next;
+        if (next.streamingMessage) scheduler?.enqueue(next.streamingMessage);
+        return;
+      }
+      case "start": {
+        // 新 run：旧 run 的挂起快照必须丢弃（可能属于被中止的上一条消息）。
+        resetStreamUpdates();
+        streamingStateRef.current = streamReducer(streamingStateRef.current, action);
+        dispatchStreamState(action);
+        return;
+      }
+      case "resume": {
+        streamingStateRef.current = streamReducer(streamingStateRef.current, action);
+        dispatchStreamState(action);
+        return;
+      }
+      case "end": {
+        // 结束必须 flush 尾帧：没有 message_end 的结束路径不能吞掉最后一段内容。
+        flushStreamUpdates();
+        resetStreamUpdates();
+        dispatchStreamState(action);
+        return;
+      }
+    }
+  }, [flushStreamUpdates, resetStreamUpdates]);
 
   sessionPropIdRef.current = session?.id ?? null;
 
@@ -926,7 +1014,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setActiveToolResults(new Map());
     dispatch({ type: "end" });
     return wasRunning;
-  }, []);
+  }, [dispatch]);
 
   const notifyPromptStage = useCallback((runId: number) => {
     if (notifiedPromptRunIdRef.current === runId) return false;
@@ -1416,7 +1504,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         setExtensionDialog((current) => current?.id === event.id ? null : current);
         break;
     }
-  }, [addNotice, cancelEventStreamGrace, handleExtensionUiRequest, loadSession, notifyPromptStage, onAgentEnd, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
+  }, [addNotice, cancelEventStreamGrace, dispatch, handleExtensionUiRequest, loadSession, notifyPromptStage, onAgentEnd, scheduleEventStreamClose, scrollToBottom, settleUiStage, syncLiveModel]);
   handleAgentEventRef.current = handleAgentEvent;
 
   const handleSend = useCallback(async (
@@ -1554,7 +1642,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       setAgentPhase(null);
       dispatch({ type: "end" });
     }
-  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission]);
+  }, [isNew, newSessionCwd, newSessionModel, session, ensureNewSession, ensureEventsConnected, promoteNewSession, waitForPromptSettlement, addNotice, cancelEventStreamGrace, closeEvents, composerDraftKey, reconcileAgentState, restoreSubmission, dispatch]);
 
   const executeBash = useCallback(async (command: string, excludeFromContext: boolean) => {
     if (agentRunningRef.current || bashRunningRef.current) return;
@@ -2254,6 +2342,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
     return () => {
       sessionHookMountedRef.current = false;
+      // fork:stream-update-scheduler — 卸载后不再向已卸载的 React 树提交快照；
+      // 丢弃挂起帧（内容已在结束路径 flush 过）。
+      resetStreamUpdates();
       const abandonedDraftKey = isNew ? newSessionDraftKey : null;
       if (abandonedDraftKey) {
         queueMicrotask(() => {

@@ -29,6 +29,15 @@ export interface GeneratedSessionTitle {
   };
 }
 
+/**
+ * 显式指定的命名模型（D2-PR-22，Settings → 对话 里的 `provider:modelId`）。
+ * 不传时沿用会话自身的模型，行为与旧版一致。
+ */
+export interface SessionTitleModelSelection {
+  provider: string;
+  modelId: string;
+}
+
 function createShadowTools(tools: AgentTool[]): AgentTool[] {
   return tools.map((tool) => ({
     ...tool,
@@ -208,7 +217,10 @@ export function sanitizeTitleMessages(messages: AgentMessage[]): AgentMessage[] 
   return sanitized;
 }
 
-export async function generateSessionTitle(source: AgentSession): Promise<GeneratedSessionTitle> {
+export async function generateSessionTitle(
+  source: AgentSession,
+  modelSelection?: SessionTitleModelSelection,
+): Promise<GeneratedSessionTitle> {
   const sourceAgent = source.agent;
   await sourceAgent.waitForIdle();
 
@@ -221,6 +233,15 @@ export async function generateSessionTitle(source: AgentSession): Promise<Genera
   }
 
   const options = buildSessionTitleAgentOptions(sourceAgent);
+  if (modelSelection) {
+    // 影子 Agent 的 streamFunction / getApiKey 都是与 provider 无关的运行时
+    // 函数，换掉 model 即可让命名走指定模型，命名逻辑本身不动。
+    const model = source.modelRuntime.getModel(modelSelection.provider, modelSelection.modelId);
+    if (!model) {
+      throw new Error(`Model not found: ${modelSelection.provider}/${modelSelection.modelId}`);
+    }
+    options.initialState!.model = model;
+  }
   options.initialState!.messages = sanitizedMessages;
   const continuesFromTrailingUser = sanitizedMessages.at(-1)?.role === "user";
   if (continuesFromTrailingUser) {

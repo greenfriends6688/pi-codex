@@ -1,233 +1,160 @@
-# Pi Web — Codex 风格版
+# Pinkslab
 
-> 感谢 [Pi Web 作者 @agegr](https://github.com/agegr/pi-web) 的优秀开源项目。本项目是基于 Pi Web 的 Codex 风格分支：保留上游功能，把整套 UI 重排为 Codex 设计语言，并摘取了若干尚未进入上游正式版的 PR。
->
-> Special thanks to [@agegr](https://github.com/agegr/pi-web), the author of Pi Web. This is a Codex-style fork of Pi Web with the upstream feature set intact.
+> **Pinkslab** = **Pi** + **Ink** + **Slab** —— 为 [pi 编程智能体](https://github.com/earendil-works/pi) 做的工作台：一套本地浏览器界面，加一个桌面应用，共用 pi 自己的会话、模型与配置。
 
-[English](./README.md) | [日本語](./README.ja.md) | [Русский](./README.ru.md)
+[English](./README.md) | 简体中文
 
-[pi 编程智能体](https://github.com/earendil-works/pi)的本地浏览器界面。Pi Web 与 pi 共用本机配置和会话文件，可在浏览器中查找和继续对话、运行智能体、配置模型与资源，并查看项目文件。
+![Pinkslab 正在跑一个 pi 会话：可折叠的工具调用、带语法高亮的回答与输入框](./assets/readme-screenshot.png)
 
-![Pi Web 展示包含结构化 Markdown、工具调用和项目导航的 pi 会话](./docs/screenshot2.png)
+在 pi 终端里开始的对话，可以直接在 Pinkslab 里接着聊，再交回终端——因为 Pinkslab 读写的就是 pi 自己的文件：`~/.pi/agent/sessions` 下的会话，以及 `models.json`、`settings.json`、认证、技能和插件包。数据不出本机：服务只绑 `127.0.0.1`，供应商密钥始终留在 pi 的配置里。
 
-## 与上游的差别
+## 特点
 
-| | 上游 Pi Web | 本分支 |
-| --- | --- | --- |
-| 视觉语言 | 上游设计 | Codex 皮肤：分层表面、半透明细线边框、三级前景 alpha、单一单色主操作、13px 聊天字号、等宽字体栈 |
-| 主题 | 6 套色板 | 同 6 套（`light` / `dark` / `mist` / `rose` / `pine` / `auto`），全部按 Codex 调色板重绘 |
-| 文件树 | 左侧边栏 | 右侧面板，侧栏只保留纯会话列表 |
-| 消息操作区 | 悬停才显示 | 常显 |
-| MCP 服务器 | 无 | 插件面板内管理（摘取 [#470](https://github.com/agegr/pi-web/pull/470)） |
-| 工作区编辑器 | 无 | Markdown 编辑器 + 可切换主/副区布局（摘取 [#838](https://github.com/agegr/pi-web/pull/838)） |
-| 供应商用量 | 无 | OpenCode Go 配额展示（摘取 [#844](https://github.com/agegr/pi-web/pull/844)） |
-
-本分支相对上游的每一处有意偏离，以及**合并上游新版本时如何不丢皮肤**的完整流程，都记在 [`docs/codex-skin/delta.md`](./docs/codex-skin/delta.md)。动主题或布局代码之前请先读它。
+- **同一个 pi，换一层界面** —— 会话、上下文占用、花费、压缩状态都直接来自 pi 的文件；可以继续跑对话、从任意消息开新会话、或就地分支。
+- **一个窗口干完一整轮** —— 对话、文件树、Git 图谱、终端和本地浏览器并排在不同标签里。
+- **所有东西都能在界面里配** —— 模型、供应商、技能、插件、MCP 服务器、子代理、定时任务、记忆，不用手改 JSON。
+- **中文与英文同等优先** —— 简体中文 / 繁體中文 / English，排版用 Inter + Noto Sans Mono。
 
 ## 功能
 
-- **会话工作区**：按项目查找、继续、重命名、导出和删除对话，并查看运行状态、上下文占用、花费和压缩信息。
-- **两种分支方式**：**新会话**从较早的消息创建独立会话文件；**从此处编辑**在当前会话内创建分支。
-- **项目文件工具**：浏览和上传文件、查看 Git Diff，并预览源码、Markdown、图片、音频、PDF 和 DOCX；文件变化后自动刷新。
-- **Git worktree**：从侧边栏切换 checkout，同时把同一仓库不同 worktree 的会话归在一起。
-- **MCP 服务器管理**：在插件面板中查看、添加、编辑、启用/停用、跨作用域移动、测试和删除 MCP 服务器，不必手改 JSON。
-- **网页配置**：无需离开 Pi Web，即可管理 Provider 登录和 API Key、模型、模型测试、插件包及技能。
-- **中文（简/繁）与英文界面**：首次打开跟随浏览器语言，也可在设置面板切换。
+### 会话与工作区
 
-## 快速开始
+- 会话按项目和 Git worktree 分组，大列表虚拟滚动，同一会话家族排在一起。
+- 时间分组（置顶 / 今天 / 昨天 / 本周 / 本月 / 更早），展开状态会记住。
+- 置顶、归档、状态标色都是本地状态，不改动会话文件本身。
+- 全部对话的全文搜索，另有独立的文件搜索，直接跳进查看器。
+- 重命名、导出 Markdown、删除，以及可选的模型自动起标题。
+- 独立聊天工作区：不属于任何项目的对话也能开。
+- 最近项目：只读 VS Code / Cursor / Zed / Claude / Codex / OpenCode 的本机历史。
+- 工作区恢复：重新打开时回到上次那个工作区待过的会话。
+- Git worktree 可在侧栏直接创建、切换、删除，同一仓库的会话仍归在一起。
 
-需要 Node.js 22.19.0 或更高版本。先用 `node --version` 检查，然后：
+### 对话与流式
+
+- 流式回答，支持 Markdown、代码高亮、KaTeX、Mermaid、ANSI 输出，文件路径可点。
+- 可折叠的思考块，工具结果里可以直接内联图片。
+- 工具过程三种展示方式：传统内联、实时时间线、分页。
+- 图片与任意文件附件；超限文件自动降级成路径引用，而不是直接失败。
+- `@` 文件模糊提及，拖入文件会变成工作区相对路径的引用。
+- 行内引用：`&` 引用会话、`#` 引用 MCP、`~` 引用待办。
+- 选中文字直接引用进输入框；任意消息一键复制。
+- 消息队列可逐条操控：撤回、删除、拖拽排序、立即发送。
+- 斜杠命令面板，`/compact` 手动压缩并给出可读摘要。
+- 阅读模式下输入框自动收拢；草稿与附件按会话记忆。
+- 每轮已写文件的 chip，长会话配缩略图导航条。
+- 思考强度从 auto 到 max，按模型分别记忆。
+- 权限档位（ask / bypass / plan）、工具白名单预设与计划模式。
+- 待办 chip 与面板、完成音效、桌面与浏览器通知。
+- 扩展界面：状态栏条目、widget、对话框与自定义面板请求。
+- 会话统计条：消息数、token、成本、缓存命中率、上下文占用圆环。
+- 查看生效的系统提示词与每一个工具定义。
+
+### 分支
+
+- **新会话**：从任意消息生成独立会话文件，并在列表里保留父会话关系。
+- **从此处编辑**：在当前会话内开分支，用分支导航器来回切换。
+- **回退到此处**：截断其后对话，并明确提示磁盘文件不会回收。
+- 探索分支：岔出去试一条路，结论带回主线，右栏并排只读查看。
+
+### 文件与预览
+
+- 多根文件树，带作用域徽标与 Git 状态点缀。
+- 上传支持覆盖 / 跳过 / 报错三种冲突策略；可新建、重命名、删除。
+- 预览源码、diff、Markdown（可编辑并写回磁盘）、图片、音频、视频、PDF、DOCX。
+- 图片与文档缩放，文件变化自动刷新，文件索引模糊搜索，定位行高亮，在 Finder/资源管理器中显示。
+
+### Git
+
+- 状态、diff、log 接口同时供给查看器与图谱。
+- Git 图谱标签页：泳道、commit 详情、变更文件直达 diff、引用 chips。
+
+### 终端与浏览器
+
+- 内嵌终端（xterm），支持多标签、重连与退出码。
+- 内嵌浏览器标签，用于本地服务，带历史与设备宽度预设。
+
+### 模型与供应商
+
+- OAuth 登录与 API Key、目录预设、连接测试、成本可编辑。
+- 模型收藏：输入框选择器与设置页共用同一份收藏。
+- 覆盖内置模型定义时会给出警告。
+- 供应商用量与配额展示（供应商提供的前提下）。
+- 默认模型与独立的标题模型，以及请求代理设置。
+
+### 认证与远程访问
+
+- 密码登录页与 Basic Auth，带登录节流。
+- 空闲会话回收、扩展保活租约、请求主机白名单。
+
+### 扩展
+
+- 插件包与独立扩展：安装、启停、删除、更新检查。
+- 技能：浏览、搜索、安装、更新、删除，并自带默认技能。
+- MCP 服务器：增删改查、启停、跨作用域移动、测试连接、从其它 agent 导入。
+- 子代理：每个 profile 有自己的模型、工具与思考强度，另有子会话列表。
+- 项目信任提示：向项目作用域写入前必须先确认。
+
+### 自动化与记忆
+
+- 定时任务：每天 / 每周 / 一次性，带时区，可立即运行。
+- 记忆面板：pi-memory 开关，编辑 `MEMORY.md` 等文件。
+
+### 界面
+
+- 设置面板分节 + 搜索框，中英文关键词都能搜到。
+- light / dark / auto 三档主题，建立在语义化 token 层上，字体 Inter + Noto Sans Mono。
+- 可调密度、边框深浅、聊天宽度与字号。
+- 壁纸：两幅内置画作或自己的图片，支持遮罩、透明度与分区模糊。
+- 思考块默认展开、引用开关、PowerShell、推送注册等杂项开关。
+- 移动端布局与紧凑工具栏，全站键盘快捷键。
+
+### 桌面端、PWA 与推送
+
+- Electron 外壳：关闭到托盘、托盘菜单、原生通知、角标、运行时防休眠、外链走系统浏览器、在文件夹中显示、窗口位置记忆。
+- 往桌面端窗口拖文件会解析出绝对路径。
+- 更新检查与站内提示。
+- PWA manifest、Service Worker、离线页与 Web Push 订阅。
+
+## 环境要求
+
+- Node.js 22.19.0 或更新（`node --version`）。
+- 一个能用的 pi 安装，且至少配好一个供应商。Pinkslab 默认读 `~/.pi/agent`；pi 数据在别处时用 `PI_CODING_AGENT_DIR` 指向它。
+
+## 运行
 
 ```bash
-git clone https://github.com/greenfriends6688/pi-codex.git
-cd pi-codex
+git clone https://github.com/greenfriends6688/pinkslab.git
+cd pinkslab
 npm install
-npm run prod
+npm run prod        # 生产构建并跑在 http://127.0.0.1:30141
 ```
 
-`npm run prod` 会做生产构建并在 [http://127.0.0.1:30141](http://127.0.0.1:30141) 提供服务，默认只监听 `127.0.0.1`。
+Pinkslab 只监听 `127.0.0.1`。改代码时用 `npm run dev:clean`，跑单测用 `npm test`，类型检查用 `npx tsc --noEmit`。
 
-> 上游的 `npx @agegr/pi-web` 装的是**上游包**，不是本分支——它既没有 Codex 皮肤，也没有 MCP 面板。本分支请从源码安装。
-
-若尚未配置模型供应商，打开**模型**面板登录或填写 API Key。
-
-## MCP 服务器
-
-插件面板里有一块 **MCP 服务器**区域，与插件列表并列。它读写的是 pi 的 MCP 工具链所用的同一批文件：
-
-| 作用域 | 文件 |
-| --- | --- |
-| 全局 | `~/.pi/agent/mcp.json` |
-| 项目 | `<项目>/.pi/mcp.json` |
-
-全局作为基线，项目条目按同名覆盖。写入项目作用域要求项目已受信任，与安装插件的规则一致。详情视图只列出环境变量的**键名**——列表接口从不返回值；只有进入编辑态时，高级 JSON 编辑器才会拉取含值的完整定义。
-
-**测试连接**按钮会拉起 stdio 服务器（HTTP 型则 `POST initialize`），并回报服务器名、版本与工具数量；stdio 测试 20 秒超时。
-
-> **重要**：pi 核心**不含内置 MCP**。上游文档明确写着它 "intentionally does not include built-in MCP"——MCP 能力必须由 pi 扩展或包提供。本面板管理的是这类包所消费的配置文件，**本身不会把 MCP 服务器接进 agent**。
-
-## 配置
-
-端口与主机名的优先级：命令行参数 > 环境变量。`--no-open` 或 `PI_WEB_NO_OPEN=1` 可禁用自动打开浏览器。`pi-web --help`（或 `-h`）会打印启动选项后直接退出，不启动服务；未知参数会报错退出。
-
-| 参数或环境变量 | 作用 | 默认值 |
-| --- | --- | --- |
-| `--help`、`-h` | 打印启动选项并退出 | — |
-| `--port <端口>`、`-p <端口>`、`PORT` | 服务端口 | `30141` |
-| `--hostname <主机>`、`-H <主机>`、`PI_WEB_HOSTNAME` | 绑定主机名 | `127.0.0.1` |
-| `--no-open`、`PI_WEB_NO_OPEN=1` | 不自动打开浏览器 | 自动打开 |
-| `PI_WEB_SKIP_VERSION_CHECK=1` | 关闭版本更新检查 | 未设置 |
-| `PI_WEB_ALLOWED_HOSTS` | 额外允许的精确代理/自定义主机名，逗号分隔 | 未设置 |
-| `PI_WEB_PASSWORD` | 开启浏览器密码登录；API 客户端可用用户名 `pi` 走 Basic Auth | 不鉴权 |
-| `PI_WEB_IDLE_TIMEOUT_MS` | 会话空闲超时（毫秒），上限 `2147483647`；`0` 关闭空闲回收；非法或越界值回落默认 | `600000`（10 分钟） |
-
-例如：
+### 桌面应用
 
 ```bash
-pi-web --help
-pi-web -p 8080 -H 0.0.0.0 --no-open
+npm run desktop            # 用 Electron 跑本地构建
+npm run desktop:dist       # 打包当前平台的安装包
+npm run desktop:dist:win   # 交叉打 Windows 安装包
 ```
 
-### 远程访问
+桌面外壳内置同一套 Next.js 服务，所以浏览器版和桌面版是同一个产品。
 
-绑定到非回环地址等于暴露一个能执行高权限操作的智能体。在可信局域网内请设置长随机密码：
+> Pinkslab 只能从源码安装。npm 上的 `@agegr/pi-web` 是上游 Pi Web，另一个项目。
 
-```bash
-PI_WEB_PASSWORD='a-long-random-password' pi-web --hostname 0.0.0.0
-```
+## 数据与隐私
 
-密码认证不加密传输。不要把 Pi Web 以明文 HTTP 暴露到公网；请走可信反向代理的 HTTPS 或可信 VPN。若反向代理转发外部主机名，把该确切域名加入 `PI_WEB_ALLOWED_HOSTS`。该白名单不改变绑定的地址。
+- 会话、模型、认证、技能和插件都在 pi 自己的目录里；Pinkslab 只额外保存草稿、布局和本地标记。
+- 供应商凭据通过 pi 的认证存储读取，任何接口都不会把密钥返回给浏览器。
+- 文件浏览器只覆盖会话记录过的工作目录、它们的项目根目录，以及你显式添加的根目录，不是通用文件管理器。
+- 密码保护不加密传输。不要把 Pinkslab 以明文 HTTP 暴露到公网，请走可信反向代理的 HTTPS 或可信 VPN。
 
-### HTTP 代理
+## 致谢
 
-服务端的模型与 API 请求遵循标准的 `HTTP_PROXY`、`HTTPS_PROXY`、`NO_PROXY`。
+Pinkslab 是 [@agegr](https://github.com/agegr/pi-web) 的 [Pi Web](https://github.com/agegr/pi-web) 的分支。会话浏览、进程内 AgentSession 层、文件与预览栈，以及大部分配置界面都源自那里——感谢原作者的工作，没有它就没有这个分支。
 
-macOS 或 Linux：
-
-```bash
-HTTP_PROXY=http://127.0.0.1:7890 \
-HTTPS_PROXY=http://127.0.0.1:7890 \
-NO_PROXY=localhost,127.0.0.1 \
-npm run prod
-```
-
-Windows PowerShell：
-
-```powershell
-$env:HTTP_PROXY = "http://127.0.0.1:7890"
-$env:HTTPS_PROXY = "http://127.0.0.1:7890"
-$env:NO_PROXY = "localhost,127.0.0.1"
-npm run prod
-```
-
-## 开发
-
-**日常使用——预编译、快：**
-
-```bash
-npm run prod        # 清 dev 缓存 -> next build -> next start，端口 30141
-```
-
-生产模式是预编译的，单请求实测比开发模式快约 10 倍。开发模式下 Turbopack 每条路由首次访问都要现编（实测 10–15 秒），且 `reactStrictMode` 会双调用 effect。日常使用与演示一律走 `npm run prod`。
-
-**改代码：**
-
-```bash
-npm run dev:clean   # 清生产缓存 -> next dev，端口 30141
-npm run mode:status # 查看当前 .next 属于哪种模式
-```
-
-`dev` 与 `prod` 共用 `.next/` 且产物不兼容，手工混用会出现 `Failed to compile` 或 `Module ... factory is not available` 的假故障。`prod` 与 `dev:clean` 会在启动前把不匹配的缓存挪到系统临时目录，所以来回切换请走这两个命令，不要自己 `next build` 后再 `next dev`。
-
-自检：
-
-```bash
-node_modules/.bin/tsc --noEmit
-npm run lint
-npm test
-```
-
-`npm test` 目前有 2 个与功能无关的既有失败：一条 `SessionSidebar` 结构断言被 Codex 皮肤重构推翻，一条 `model-discovery` 测试需要在 `~/.pi/agent/` 下建锁文件。其余全部通过。
-
-改动主题层后还要跑：
-
-```bash
-node docs/codex-skin/audit-tokens.mjs   # 自造 token、6 套色板完整性、CSS 括号配平
-node docs/codex-skin/verify-themes.mjs  # 重复主题选择器 + 实际渲染出的 token 值
-```
-
-静态检查抓不到重复的主题选择器，只有渲染核对能发现。
-
-参考文档：[国际化](./docs/i18n.md)、[发布流程](./docs/release.md)、[皮肤改动台账](./docs/codex-skin/delta.md)。
-
-## 仓库结构
-
-```text
-app/             Next.js 界面与 API 路由
-components/      React UI 组件
-hooks/           客户端状态与交互 hook
-lib/             会话、agent、模型、文件、Git 与安全逻辑
-public/          静态资源与 PWA 文件
-bin/             npm CLI 入口与启动参数解析
-scripts/         构建与模式切换辅助脚本
-docs/            面向用户与贡献者的专题文档
-docs/codex-skin/ 皮肤改动台账、token 审计、主题渲染核对
-```
-
-架构说明与详细文件地图见 [AGENTS.md](./AGENTS.md)。
-
-## 合并上游新版本
-
-本分支的 `upstream` 分支存的是**纯净上游源码包快照**，不是真实上游 git 历史，因此与上游提交**没有共同祖先**。同步流程是：
-
-1. 把新版本解压覆盖到 `upstream` 的工作区（`../pi-web-upstream`），在那里提交为 `upstream vX.Y.Z`。
-2. 回到 `main` 执行 `git merge upstream`。冲突应当只出现在台账列出的文件里。
-3. 逻辑冲突一律取上游，皮肤冲突按台账重打，然后跑上面那套完整自检。
-
-**不要 `git merge` 上游的 PR 分支**（PR 带着数百条上游提交）。正确做法是对 PR 自己的基点取 diff 再打进来，具体命令见台账。
-
-## 说明
-
-- **Agent 数据**：Pi Web 默认读取 `~/.pi/agent`，会话文件位于 `sessions/<编码后的cwd>/<时间戳>_<uuid>.jsonl`。可用 `PI_CODING_AGENT_DIR` 指向别的 pi agent 目录。
-- **文件系统访问**：Pi Web 必须能读 agent 数据目录以及各会话记录的工作目录。共享已有会话时，请在与 pi 相同的文件系统环境中运行。
-- **共享配置**：模型面板使用 pi 的模型、设置与凭据存储，改动对两个界面都可见。
-- **文件访问边界**：文件浏览器只覆盖在 Pi Web 中选过的工作目录，以及它已知的项目/会话根目录，不是通用文件系统浏览器。
-- **Git worktree**：切换器可见性、创建与删除行为见 [Pi Web 中的 worktree](./docs/worktrees.zh-CN.md)。
-
-### 下游集成的会话右键菜单
-
-Electron 外壳等下游集成可以在不改 `SessionSidebar` 的前提下提供会话右键菜单。监听可取消的 `pi-web:session-row-contextmenu` 浏览器事件，并在决定自己处理时**同步**调用 `preventDefault()`：
-
-```js
-window.addEventListener("pi-web:session-row-contextmenu", (event) => {
-  event.preventDefault();
-  const { id, path, cwd, name, clientX, clientY, refresh } = event.detail;
-
-  void openSessionMenu({ id, path, cwd, name, clientX, clientY }).then((changed) => {
-    if (changed) refresh();
-  });
-});
-```
-
-`detail` 含 `id`、`path`、`cwd`、可选的 `name`、指针坐标，以及用于变更会话列表后刷新的 `refresh()`。若没有监听者取消该事件，Pi Web 保留浏览器原生右键菜单。该钩子属于浏览器侧，与 pi agent 扩展无关。
-
-### 扩展的会话存活租约
-
-带游离任务的**服务端** pi 扩展可以通过带版本号的全局注册表阻止会话被空闲回收：
-
-```js
-const liveness = globalThis[Symbol.for("@agegr/pi-web/session-liveness/v1")];
-const release = liveness?.version === 1
-  ? liveness.register({
-      name: "my-extension",
-      sessionId,
-      sessionFile: sessionFile || undefined,
-      isActive: () => detachedJobs.size > 0,
-    })
-  : () => {};
-```
-
-每个活跃扩展会话注册一次，并在会话关闭、被替换或 reload 时调用返回的幂等 `release`。`isActive` 必须同步、开销小，且只针对传入的确切 session id 或文件。Provider 出错时按"保留该会话"兜底。该租约只影响自动空闲回收；显式关闭与 Stop 兜底清理仍然优先。
+智能体运行时、会话文件格式与终端体验来自 [earendil-works](https://github.com/earendil-works) 的 [pi](https://github.com/earendil-works/pi)。
 
 ## 许可
 

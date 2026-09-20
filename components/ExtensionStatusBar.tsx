@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { stripAnsi } from "@/lib/ansi";
 import type { ExtensionStatusItem, ExtensionWidgetItem } from "@/lib/types";
 import { AnsiText } from "./AnsiText";
@@ -24,11 +25,14 @@ export function formatExtensionStatusLine(statuses: ExtensionStatusItem[]): stri
 export function ExtensionStatusBar({
   statuses,
   widgets = [],
+  trailing,
 }: {
   statuses: ExtensionStatusItem[];
   widgets?: ExtensionWidgetItem[];
+  /** fork:ui-stats-inline — 挂在状态条右端的额外内容（会话统计）。 */
+  trailing?: ReactNode;
 }) {
-  if (statuses.length === 0 && widgets.length === 0) return null;
+  if (statuses.length === 0 && widgets.length === 0 && !trailing) return null;
 
   const statusLine = formatExtensionStatusLine(statuses);
   const plainStatusLine = stripAnsi(statusLine);
@@ -49,6 +53,9 @@ export function ExtensionStatusBar({
             <AnsiText text={statusLine} />
           </span>
         </div>
+      )}
+      {trailing && (
+        <div className="extension-status-trailing">{trailing}</div>
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { ToolCallBlock, getMessageImages, getMessageText, imageSource } from "./MessageView";
 import { ImagePreview } from "./ImagePreview";
@@ -224,22 +224,9 @@ function toolStep(blocks: ToolBlock[], t: (key: string) => string): Step {
   const id = blocks.length === 1 ? first.id : `group:${first.id}`;
   const failed = blocks.some((b) => b.status === "error");
 
-  // A failed call keeps its raw tool name: the semantic verb would hide which
-  // tool actually broke, which is the one thing the user needs from that row.
-  if (failed) {
-    const durations = blocks.map((b) => b.duration).filter((d): d is number => d !== undefined);
-    return {
-      id,
-      label: blocks.length === 1 ? first.toolName : `${first.toolName} +${blocks.length - 1}`,
-      icon: "warning",
-      targets: [],
-      duration: durations.length > 0 ? durations.reduce((a, b) => a + b, 0) : undefined,
-      failed: true,
-      count: blocks.length,
-      blocks,
-    };
-  }
-
+  // fork:process-failed-label — 失败行以前退回原始工具名，结果整行读作
+  // 「bash 39s 失败」：既不知道跑的是什么命令，也不知道动的是哪个文件。现在语义动词、
+  // 目标文件和命令细节全都保留，是不是失败交给行尾的「失败」徽标 + warning 图标表达。
   const tone = classifyToolTone(toolIdentity(first));
   const icon = tone ? TONE_ICON[tone] : "toolbox";
   let resolvedIcon = icon;
@@ -259,11 +246,12 @@ function toolStep(blocks: ToolBlock[], t: (key: string) => string): Step {
   return {
     id,
     label: tone ? t(TONE_LABEL_KEY[tone]) : first.toolName,
-    icon: resolvedIcon,
+    icon: failed ? "warning" : resolvedIcon,
     tone,
     targets,
     detail: tone === "command_execution" ? toolDetail(first, tone) : undefined,
     duration: durations.length > 0 ? durations.reduce((a, b) => a + b, 0) : undefined,
+    failed: failed || undefined,
     count: blocks.length,
     blocks,
   };
@@ -670,6 +658,80 @@ export function ProcessGroup({
   const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
   const [activeChip, setActiveChip] = useState<string | null>(null);
 
+  // fork:pr15-follow — 流式跟随最新 step 自己的滚动窗（REF 的 userScrolledUpRef /
+  // ignoreProgrammaticScrollUntilRef）。只给最新一步挂 max-height 窗口，历史步
+  // 保持原来的自由高度，避免动到已有的非流式渲染。
+  const latestStepId = steps.length > 0 ? steps[steps.length - 1].id : null;
+  const latestStepOpen = latestStepId !== null
+    && (reveal || isStreaming || (overrides.get(latestStepId) ?? defaultOpen.has(latestStepId)));
+  const latestStepScrollRef = useRef<HTMLDivElement | null>(null);
+  const userScrolledUpRef = useRef(false);
+  const ignoreProgrammaticScrollUntilRef = useRef(0);
+  // 阴影只在窗口越界时挂载；函数式 bail-out 让 ResizeObserver 的高频回调在数值
+  // 没变时不触发 re-render（流式每个 delta 都会改变容器高度）。
+  const [showTopShadow, setShowTopShadow] = useState(false);
+  const [showBottomShadow, setShowBottomShadow] = useState(false);
+
+  const updateShadows = useCallback(() => {
+    const element = latestStepScrollRef.current;
+    if (!element) return;
+    setShowTopShadow((prev) => {
+      const next = element.scrollTop > 0;
+      return prev === next ? prev : next;
+    });
+    setShowBottomShadow((prev) => {
+      const next = element.scrollHeight - element.scrollTop - element.clientHeight > 1;
+      return prev === next ? prev : next;
+    });
+  }, []);
+
+  // 最新 step 换容器 / 重新打开时：清掉用户上翻标记并把窗口贴底。
+  useEffect(() => {
+    userScrolledUpRef.current = false;
+    const element = latestStepScrollRef.current;
+    if (!element) return;
+    ignoreProgrammaticScrollUntilRef.current = Date.now() + 100;
+    element.scrollTop = element.scrollHeight;
+    updateShadows();
+  }, [latestStepId, latestStepOpen, updateShadows]);
+
+  // 窗口内滚动：离底 >4px 视为用户上翻，回到 4px 内恢复跟随。程序化滚动会回传
+  // scroll 事件，100ms 屏蔽窗把它和真实用户操作分开。
+  useEffect(() => {
+    const element = latestStepScrollRef.current;
+    if (!element) return;
+    const onScroll = () => {
+      if (Date.now() < ignoreProgrammaticScrollUntilRef.current) return;
+      const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+      userScrolledUpRef.current = distanceFromBottom > 4;
+      updateShadows();
+    };
+    element.addEventListener("scroll", onScroll, { passive: true });
+    return () => element.removeEventListener("scroll", onScroll);
+  }, [latestStepId, latestStepOpen, displayMode, updateShadows]);
+
+  // 贴底时内容增长不会触发 scroll 事件（scrollTop 不变），用 ResizeObserver 重算
+  // 阴影，底部的淡出提示才不会滞后。
+  useEffect(() => {
+    const element = latestStepScrollRef.current;
+    if (!element) return;
+    updateShadows();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateShadows);
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => observer.disconnect();
+  }, [latestStepId, latestStepOpen, displayMode, isStreaming, updateShadows]);
+
+  // 流式期间把最新 step 贴底；用户上翻后暂停，滚回底部由上面的 scroll 监听恢复。
+  useEffect(() => {
+    const element = latestStepScrollRef.current;
+    if (!element || !isStreaming || userScrolledUpRef.current) return;
+    ignoreProgrammaticScrollUntilRef.current = Date.now() + 100;
+    element.scrollTop = element.scrollHeight;
+    updateShadows();
+  }, [blocks, isStreaming, latestStepId, latestStepOpen, displayMode, updateShadows]);
+
   if (steps.length === 0) return null;
 
   const tabsMode = displayMode === "tabs";
@@ -693,7 +755,11 @@ export function ProcessGroup({
   // fork:process-live — with no chip selected the strip showed nothing at all, so a
   // running turn looked like a row of labels. Follow the newest step until the user
   // picks one (their choice then wins for the rest of the session).
-  const shownChip = activeChip ?? (tabsMode && isStreaming ? steps[steps.length - 1]?.id ?? null : null);
+  // fork:process-tabs — 空闲时默认选**第一片**：不然「标签视图」就是一墙芯片，
+  // 下面空着，看不出芯片和内容是连着的（参考项目的 activeTab 也从 0 起）。
+  const shownChip = activeChip ?? (tabsMode
+    ? (isStreaming ? steps[steps.length - 1]?.id : steps[0]?.id) ?? null
+    : null);
   const chipStep = tabsMode && shownChip ? steps.find((step) => step.id === shownChip) ?? null : null;
 
   return (
@@ -703,33 +769,64 @@ export function ProcessGroup({
       data-step-count={steps.length}
     >
       {tabsMode ? (
-        <div className="process-chips" role="list">
-          {steps.map((step) => {
-            const active = step.id === shownChip;
-            return (
-              <button
-                key={step.id}
-                type="button"
-                role="listitem"
-                aria-expanded={active}
-                className={[
-                  "process-chip",
-                  active ? " is-active" : "",
-                  step.failed ? " is-failed" : "",
-                  step.thinking ? " is-thinking" : "",
-                ].filter(Boolean).join(" ")}
-                onClick={() => setActiveChip(step.id === activeChip ? null : step.id)}
-              >
-                <StepIcon name={step.icon} />
-                <span className="process-chip-label">{step.label}</span>
-                <FileChips targets={step.targets} onOpenFile={onOpenFile} compact />
-                {step.detail && <span className="process-chip-detail">{step.detail}</span>}
-                {step.failed && <span className="process-chip-failed">{t("process.failed")}</span>}
-                <Duration seconds={step.duration} />
-              </button>
-            );
-          })}
-        </div>
+        <>
+          {/* fork:process-tabs — 芯片条只留「图标 + 动词 + 目标」：以前每片都塞进
+              文件 chip、命令细节和耗时，12 步就摊成五行，既占高度又看不出结构。
+              细节全部下沉到下面那个正文窗口。 */}
+          <div className="process-chips" role="tablist" aria-label={t("process.groupLabel")}>
+            {steps.map((step) => {
+              const active = step.id === shownChip;
+              const selectStep = () => {
+                if (step.id === steps[steps.length - 1]?.id && isStreaming) {
+                  // 点最新一片 = 回到「跟随」，而不是钉住它。
+                  setActiveChip(null);
+                } else {
+                  setActiveChip(step.id === activeChip ? null : step.id);
+                }
+              };
+              return (
+                <button
+                  key={step.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={[
+                    "process-chip",
+                    active ? " is-active" : "",
+                    step.failed ? " is-failed" : "",
+                    step.thinking ? " is-thinking" : "",
+                  ].filter(Boolean).join(" ")}
+                  onClick={selectStep}
+                >
+                  <StepIcon name={step.icon} />
+                  <span className="process-chip-label">{step.label}</span>
+                  {step.count !== undefined && step.count > 1 && (
+                    <span className="process-chip-count">×{step.count}</span>
+                  )}
+                  <FileChips targets={step.targets} onOpenFile={onOpenFile} compact />
+                  {step.failed && <span className="process-chip-failed">{t("process.failed")}</span>}
+                </button>
+              );
+            })}
+          </div>
+          {chipStep && (
+            <div className="process-tab-body">
+              <div ref={latestStepScrollRef} className="process-tab-body-scroll">
+                <StepBody
+                  step={chipStep}
+                  toolResults={toolResults}
+                  onOpenSession={onOpenSession}
+                />
+              </div>
+              {showTopShadow && (
+                <div aria-hidden="true" className="process-tab-body-fade is-top" />
+              )}
+              {showBottomShadow && (
+                <div aria-hidden="true" className="process-tab-body-fade is-bottom" />
+              )}
+            </div>
+          )}
+        </>
       ) : (
         <ol className="process-steps">
           {steps.map((step, index) => {
@@ -765,29 +862,60 @@ export function ProcessGroup({
                     <span className="process-step-count">×{step.count}</span>
                   )}
                   <FileChips targets={step.targets} onOpenFile={onOpenFile} />
-                  {step.detail && <span className="process-step-detail">{step.detail}</span>}
+                  {/* fork:process-dedupe — 推理行展开后正文就是这段文字，行上再挂一份
+                      截断版等于同一句话说两遍（闭合时仍保留，避免只剩一个「推理」）。 */}
+                  {step.detail && !isOpen && <span className="process-step-detail">{step.detail}</span>}
                   <Duration seconds={step.duration} />
                   {step.failed && <span className="process-step-failed">{t("process.failed")}</span>}
                 </button>
                 {isOpen && (
-                  <StepBody
-                    step={step}
-                    toolResults={toolResults}
-                    onOpenSession={onOpenSession}
-                  />
+                  <div style={{ position: "relative" }}>
+                    <div
+                      ref={last ? latestStepScrollRef : undefined}
+                      style={{ maxHeight: 320, overflowY: "auto", overflowX: "hidden" }}
+                    >
+                      <StepBody
+                        step={step}
+                        toolResults={toolResults}
+                        onOpenSession={onOpenSession}
+                      />
+                    </div>
+                    {last && showTopShadow && (
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          height: 24,
+                          zIndex: 10,
+                          pointerEvents: "none",
+                          background: "linear-gradient(to bottom, var(--bg), transparent)",
+                        }}
+                      />
+                    )}
+                    {last && showBottomShadow && (
+                      <div
+                        aria-hidden="true"
+                        style={{
+                          position: "absolute",
+                          bottom: 0,
+                          left: 0,
+                          right: 0,
+                          height: 24,
+                          zIndex: 10,
+                          pointerEvents: "none",
+                          background: "linear-gradient(to top, var(--bg), transparent)",
+                        }}
+                      />
+                    )}
+                  </div>
                 )}
               </li>
             );
           })}
         </ol>
-      )}
-
-      {chipStep && (
-        <StepBody
-          step={chipStep}
-          toolResults={toolResults}
-          onOpenSession={onOpenSession}
-        />
       )}
     </section>
   );

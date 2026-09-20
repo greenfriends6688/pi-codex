@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { ToolEntry } from "@/lib/tool-presets";
+import { getToolParameterFields as getSharedToolParameterFields } from "@/lib/tool-parameters";
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
 
@@ -30,65 +31,31 @@ function formatValue(value: unknown): string {
   }
 }
 
-function formatSchemaType(schema: Record<string, unknown>): string {
-  const variants = Array.isArray(schema.anyOf)
-    ? schema.anyOf
-    : Array.isArray(schema.oneOf)
-      ? schema.oneOf
-      : null;
-  if (variants) {
-    return variants
-      .map((variant) => variant && typeof variant === "object"
-        ? formatSchemaType(variant as Record<string, unknown>)
-        : "unknown")
-      .filter((value, index, values) => values.indexOf(value) === index)
-      .join(" | ");
-  }
-
-  if (schema.const !== undefined) return formatValue(schema.const);
-  if (Array.isArray(schema.enum) && schema.enum.length > 0 && schema.type === undefined) {
-    return [...new Set(schema.enum.map((value) => value === null ? "null" : typeof value))].join(" | ");
-  }
-
-  const rawType = schema.type;
-  const type = Array.isArray(rawType)
-    ? rawType.filter((value): value is string => typeof value === "string").join(" | ")
-    : typeof rawType === "string"
-      ? rawType
-      : typeof schema.$ref === "string"
-        ? schema.$ref.split("/").pop() ?? "object"
-        : "unknown";
-
-  if (type === "array") {
-    const items = schema.items;
-    const itemType = items && typeof items === "object"
-      ? formatSchemaType(items as Record<string, unknown>)
-      : "unknown";
-    return `${itemType}[]`;
-  }
-  return type;
-}
-
+/**
+ * 面板展示层：把 lib/tool-parameters 的解析结果映射成现有的字符串字段。
+ *
+ * 递归 anyOf/oneOf、单 null 折叠成 `type?`、`enum<N>`、`const`、`Array<...>`、
+ * `$ref`→any、`nullable` 等规则全部收敛在纯函数里；这里只负责根 schema 的
+ * properties/required 形状归一化，以及 enum/default 面向 UI 的格式化。
+ */
 export function getToolParameterFields(parameters?: Record<string, unknown>): ParameterField[] {
   if (!parameters || !parameters.properties || typeof parameters.properties !== "object") return [];
-  const properties = parameters.properties as Record<string, unknown>;
-  const required = new Set(
-    Array.isArray(parameters.required)
+  const normalized: Record<string, unknown> = {
+    ...parameters,
+    properties: parameters.properties as Record<string, unknown>,
+    required: Array.isArray(parameters.required)
       ? parameters.required.filter((value): value is string => typeof value === "string")
       : [],
-  );
+  };
 
-  return Object.entries(properties).map(([name, value]) => {
-    const schema = value && typeof value === "object" ? value as Record<string, unknown> : {};
-    return {
-      name,
-      type: formatSchemaType(schema),
-      description: typeof schema.description === "string" ? schema.description : undefined,
-      required: required.has(name),
-      allowedValues: Array.isArray(schema.enum) ? schema.enum.map(formatValue).join(", ") : undefined,
-      defaultValue: schema.default === undefined ? undefined : formatValue(schema.default),
-    };
-  });
+  return getSharedToolParameterFields(normalized).map((field) => ({
+    name: field.name,
+    type: field.type,
+    description: field.description,
+    required: field.required,
+    allowedValues: field.enumValues ? field.enumValues.map(formatValue).join(", ") : undefined,
+    defaultValue: field.defaultValue === undefined ? undefined : formatValue(field.defaultValue),
+  }));
 }
 
 function EmptyState({ children }: { children: string }) {

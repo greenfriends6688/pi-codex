@@ -1437,6 +1437,66 @@
   accent-color: var(--accent);
 }
 
+/* Built-in wallpaper picker: thumbnail + name per bundled image. The active one is
+   the image the layer would actually paint, which is why a custom upload clears
+   every thumbnail's active state (see components/WallpaperSettings.tsx). */
+.settings-wallpaper-builtins {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-wallpaper-builtin-label {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.settings-wallpaper-builtin-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-wallpaper-builtin {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 108px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+
+.settings-wallpaper-builtin img {
+  display: block;
+  width: 100%;
+  height: 56px;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+.settings-wallpaper-builtin:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--text);
+}
+
+.settings-wallpaper-builtin[data-active="true"] {
+  border-color: var(--accent);
+  color: var(--text);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.settings-wallpaper-builtin:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .settings-wallpaper-error {
   margin: 0;
   padding: 7px 9px;
@@ -1542,4 +1602,41 @@
 .settings-field-input:focus-visible {
   outline: 2px solid var(--focus-ring, var(--accent));
   outline-offset: -1px;
+}
+
+/* fork:skills-content — 技能正文：只读用 MarkdownBody 渲染，编辑用等宽 textarea。
+   两者共用同一块边框与最大高度，切换时不会跳高度。 */
+.skill-content-view,
+.skill-content-editor {
+  max-height: 420px;
+  min-height: 160px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+
+.skill-content-editor {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  tab-size: 2;
+}
+
+.skill-content-editor:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--accent));
+  outline-offset: -1px;
+}
+
+.skill-content-view > :first-child {
+  margin-top: 0;
+}
+
+.skill-content-view > :last-child {
+  margin-bottom: 0;
 }

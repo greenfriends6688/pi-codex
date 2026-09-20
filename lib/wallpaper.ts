@@ -48,6 +48,8 @@ export const WALLPAPER_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as
 export type WallpaperAreaMode = "none" | "trans" | "blur";
 
 export const WALLPAPER_URL_KEY = "pi-wallpaper";
+/** Which built-in wallpaper id is selected (`lib/wallpaper-builtin.ts`). */
+export const WALLPAPER_BUILTIN_KEY = "pi-wallpaper-builtin";
 export const WALLPAPER_ENABLED_KEY = "pi-wallpaper-enabled";
 export const WALLPAPER_SCRIM_KEY = "pi-wallpaper-scrim";
 export const WALLPAPER_INPUT_MODE_KEY = "pi-wallpaper-input";
@@ -75,6 +77,21 @@ export function readStoredWallpaperUrl(): string {
   if (typeof window === "undefined") return "";
   try {
     return window.localStorage.getItem(WALLPAPER_URL_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Read the persisted built-in selection. Server-safe (returns "").
+ *
+ * Returns the raw string rather than a validated id on purpose: the guard lives in
+ * `lib/wallpaper-builtin.ts` so this module stays free of the wallpaper catalog.
+ */
+export function readStoredBuiltinWallpaper(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(WALLPAPER_BUILTIN_KEY) ?? "";
   } catch {
     return "";
   }

@@ -9,6 +9,12 @@ import {
   PI_WEB_SESSION_COOKIE,
   PI_WEB_SESSION_MAX_AGE,
 } from "@/lib/web-auth";
+import {
+  getAuthRetryAfterMs,
+  recordAuthFailure,
+  recordAuthSuccess,
+  retryAfterSeconds,
+} from "@/lib/auth-throttle";
 
 export const dynamic = "force-dynamic";
 
@@ -60,9 +66,20 @@ export async function POST(request: NextRequest) {
 
   const body = await request.json().catch(() => null) as { password?: unknown } | null;
   if (!body || typeof body.password !== "string" || !isValidWebPassword(body.password, password)) {
+    // fork:auth-throttle — 登录表单是比 Basic 弹窗更容易被脚本打的一条路径，
+    // 失败同样计入全局退避（封禁期间直接 429，不再给「密码对不对」的区分信号）。
+    const retryAfterMs = getAuthRetryAfterMs();
+    if (retryAfterMs > 0) {
+      return NextResponse.json(
+        { error: "Too many authentication attempts" },
+        { status: 429, headers: { "Cache-Control": "no-store", "Retry-After": String(retryAfterSeconds(retryAfterMs)) } },
+      );
+    }
+    recordAuthFailure();
     return NextResponse.json({ error: "Invalid password" }, { status: 401 });
   }
 
+  recordAuthSuccess();
   const response = NextResponse.json({ ok: true });
   response.cookies.set({
     name: PI_WEB_SESSION_COOKIE,

@@ -29,9 +29,10 @@ const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
 
-const APP_NAME = "Pi Codex";
-/** Previous product name, used for the one-time userData migration below. */
-const LEGACY_APP_NAME = "pi-web";
+const APP_NAME = "Pinkslab";
+/** Previous product names, newest first; the migration below picks the first that exists. */
+const LEGACY_APP_NAMES = ["Pi Codex", "pi-web"];
+const { legacyUserDataSource } = require("./legacy-user-data");
 let mainWindow = null;
 let tray = null;
 let serverProc = null;
@@ -120,7 +121,7 @@ async function startServer(appRoot) {
   });
 
   serverPort = port;
-  console.log(`[pi-codex] Next.js 服务启动: http://127.0.0.1:${port} (dev=${useDevServer})`);
+  console.log(`[pinkslab] Next.js 服务启动: http://127.0.0.1:${port} (dev=${useDevServer})`);
   return { port, useDevServer };
 }
 
@@ -203,14 +204,22 @@ function createWindow() {
   for (const event of ["resize", "move"]) {
     mainWindow.on(event, () => saveWindowState(mainWindow));
   }
-  mainWindow.on("close", () => {
+  mainWindow.on("close", (event) => {
     saveWindowState(mainWindow);
+    // fork:close-to-tray — 关窗 = 收进托盘，而不是结束进程：后台任务（长回答、
+    // 定时任务）不该因为用户顺手点一下关闭就断。托盘双击/单击恢复窗口，
+    // 只有托盘「退出」、Cmd+Q 或 quitting 标记才真正退出。
+    if (!quitting) {
+      event.preventDefault();
+      mainWindow.hide();
+      return;
+    }
     mainWindow = null;
   });
 
   // Crash visibility: a silent white window is the worst possible failure mode.
   mainWindow.webContents.on("render-process-gone", (_event, details) => {
-    console.error("[pi-codex] renderer gone:", details.reason);
+    console.error("[pinkslab] renderer gone:", details.reason);
     dialog.showMessageBox({
       type: "error",
       title: APP_NAME,
@@ -232,10 +241,10 @@ function createWindow() {
   // 排查只能靠猜。现在每次拦截都打一行日志，冒烟脚本会去收集它。
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^(https?|mailto):/.test(url)) {
-      console.log(`[pi-codex] blocked window.open → 交给系统浏览器: ${url}`);
+      console.log(`[pinkslab] blocked window.open → 交给系统浏览器: ${url}`);
       shell.openExternal(url);
     } else {
-      console.log(`[pi-codex] blocked window.open（非 http(s)/mailto，已丢弃）: ${url}`);
+      console.log(`[pinkslab] blocked window.open（非 http(s)/mailto，已丢弃）: ${url}`);
     }
     return { action: "deny" };
   });
@@ -244,10 +253,10 @@ function createWindow() {
     if (target.port && Number(target.port) === serverPort) return;
     event.preventDefault();
     if (/^(https?|mailto):/.test(url)) {
-      console.log(`[pi-codex] blocked will-navigate → 交给系统浏览器: ${url}（应用内表现为"按钮无反应"）`);
+      console.log(`[pinkslab] blocked will-navigate → 交给系统浏览器: ${url}（应用内表现为"按钮无反应"）`);
       shell.openExternal(url);
     } else {
-      console.log(`[pi-codex] blocked will-navigate（非 http(s)/mailto，已丢弃）: ${url}`);
+      console.log(`[pinkslab] blocked will-navigate（非 http(s)/mailto，已丢弃）: ${url}`);
     }
   });
 
@@ -356,19 +365,20 @@ function setupTray() {
 
 // ── 改名后的一次性迁移 ──────────────────────────────────────────────────────
 // The product name decides `app.getPath("userData")`, and the renderer keeps its
-// window geometry, drafts and layout state there (localStorage). After renaming
-// pi-web → Pi Codex the old directory would simply be ignored, so copy it once.
+// window geometry, drafts and layout state there (localStorage), so a renamed
+// product would silently start with an empty directory. Copy the newest legacy
+// one once (a user can arrive from any older name, pi-web or Pi Codex).
 function migrateLegacyUserData() {
   if (process.platform !== "darwin") return;
   try {
     const support = path.join(app.getPath("appData"));
+    const legacy = legacyUserDataSource(support, APP_NAME, LEGACY_APP_NAMES);
+    if (!legacy) return;
     const next = path.join(support, APP_NAME);
-    const legacy = path.join(support, LEGACY_APP_NAME);
-    if (fs.existsSync(next) || !fs.existsSync(legacy)) return;
     fs.cpSync(legacy, next, { recursive: true });
-    console.log(`[pi-codex] migrated user data: ${legacy} → ${next}`);
+    console.log(`[pinkslab] migrated user data: ${legacy} → ${next}`);
   } catch (error) {
-    console.error("[pi-codex] user data migration failed:", error);
+    console.error("[pinkslab] user data migration failed:", error);
   }
 }
 
@@ -408,7 +418,7 @@ function saveWindowState(win) {
       maximized: win.isMaximized(),
     }, null, 2));
   } catch (error) {
-    console.error("[pi-codex] failed to persist window state:", error);
+    console.error("[pinkslab] failed to persist window state:", error);
   }
 }
 
@@ -449,7 +459,7 @@ if (!gotLock) {
       applicationName: APP_NAME,
       applicationVersion: app.getVersion(),
       version: `Electron ${process.versions.electron} · Node ${process.versions.node}`,
-      copyright: "Pi Codex — local coding agent workbench",
+      copyright: "Pinkslab — local coding agent workbench",
     });
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
@@ -478,7 +488,7 @@ if (!gotLock) {
           submenu: [
             {
               label: "GitHub 仓库",
-              click: () => void shell.openExternal("https://github.com/greenfriends6688/pi-codex"),
+              click: () => void shell.openExternal("https://github.com/greenfriends6688/pinkslab"),
             },
             {
               label: "打开数据目录",

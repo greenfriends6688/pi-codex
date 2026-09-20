@@ -18,7 +18,9 @@ const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
 const GIT_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
 
-async function git(cwd: string, args: string[], maxBuffer = GIT_STATUS_MAX_BUFFER): Promise<string> {
+// fork:git-graph — 导出给 lib/git-graph.ts 复用：整个仓库只保留这一套
+// execFile 封装（超时 / maxBuffer / LC_ALL 的配置只有一处）。
+export async function git(cwd: string, args: string[], maxBuffer = GIT_STATUS_MAX_BUFFER): Promise<string> {
   const { stdout } = await execFileAsync("git", ["-C", cwd, ...args], {
     timeout: GIT_TIMEOUT_MS,
     maxBuffer,
@@ -27,7 +29,7 @@ async function git(cwd: string, args: string[], maxBuffer = GIT_STATUS_MAX_BUFFE
   return stdout;
 }
 
-async function findRepositoryRoot(cwd: string): Promise<string | null> {
+export async function findRepositoryRoot(cwd: string): Promise<string | null> {
   try {
     return (await git(cwd, ["rev-parse", "--show-toplevel"])).trim() || null;
   } catch {
@@ -58,10 +60,50 @@ async function readStatusEntries(repositoryRoot: string): Promise<GitPorcelainEn
   return parseGitPorcelainV1(output);
 }
 
-async function readTrackedLineStats(
+interface NumstatRecord {
+  additions: number | null;
+  deletions: number | null;
+  path: string;
+}
+
+/**
+ * fork:pr09 — 解析 `git diff --numstat -z --find-renames HEAD` 的逐文件行数。
+ *
+ * `-z` 下普通记录是 `<added>\t<deleted>\t<path>`；rename/copy 会被拆成
+ * 「一个空路径的计数记录 + 原路径记录 + 新路径记录」三连，统计挂在**新路径**
+ * （界面显示的就是新路径）。二进制文件的计数是 `-`，统一返回 null 让 UI 省略。
+ */
+export function parseNumstat(output: string): Map<string, NumstatRecord> {
+  const records = output.split("\0");
+  const entries = new Map<string, NumstatRecord>();
+  const toCount = (value: string) => (/^\d+$/.test(value) ? Number(value) : null);
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) continue;
+    const parts = record.split("\t");
+    if (parts.length < 3) continue;
+    const filePath = parts.slice(2).join("\t");
+    if (filePath === "") {
+      // rename/copy 组：紧随其后的两条记录是原路径与新路径。
+      const originalPath = records[index + 1];
+      const newPath = records[index + 2];
+      if (originalPath && newPath) {
+        entries.set(newPath, { additions: toCount(parts[0]), deletions: toCount(parts[1]), path: newPath });
+        index += 2;
+      }
+      continue;
+    }
+    entries.set(filePath, { additions: toCount(parts[0]), deletions: toCount(parts[1]), path: filePath });
+  }
+
+  return entries;
+}
+
+async function readNumstatByPath(
   repositoryRoot: string,
   cwd: string,
-): Promise<{ additions: number; deletions: number }> {
+): Promise<Map<string, NumstatRecord>> {
   const relativeCwd = toGitPath(path.relative(repositoryRoot, cwd));
   const pathspec = relativeCwd || ".";
   try {
@@ -70,34 +112,37 @@ async function readTrackedLineStats(
       "--no-color",
       "--no-ext-diff",
       "--numstat",
+      "-z",
+      "--find-renames",
       "HEAD",
       "--",
       pathspec,
     ]);
-    let additions = 0;
-    let deletions = 0;
-    for (const line of output.split(/\r?\n/)) {
-      if (!line) continue;
-      const [added, deleted] = line.split("\t", 2);
-      const addedCount = Number(added);
-      const deletedCount = Number(deleted);
-      if (Number.isInteger(addedCount)) additions += addedCount;
-      if (Number.isInteger(deletedCount)) deletions += deletedCount;
-    }
-    return { additions, deletions };
+    return parseNumstat(output);
   } catch {
-    return { additions: 0, deletions: 0 };
+    return new Map();
   }
 }
 
 const UNTRACKED_LINE_COUNT_BUDGET_BYTES = 2_000_000;
 
-function countUntrackedTextLines(filePath: string, budget = Number.POSITIVE_INFINITY): { lines: number; bytes: number } {
+interface UntrackedLineCount {
+  lines: number;
+  bytes: number;
+  /** fork:pr09 — 文件超过本次剩余预算，未统计；调用方保持该文件统计为 null。 */
+  budgetExceeded?: boolean;
+}
+
+function countUntrackedTextLines(filePath: string, budget = Number.POSITIVE_INFINITY): UntrackedLineCount {
   try {
     const stat = fs.lstatSync(filePath);
     // Untracked directories (the `--untracked-files=normal` case) are not files.
-    if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES || stat.size > budget) {
+    if (!stat.isFile() || stat.size > TEXT_PREVIEW_MAX_BYTES) {
       return { lines: 0, bytes: 0 };
+    }
+    // 预算不够就跳过整次读取（而不是读一半），并把预算耗尽的事实告诉调用方。
+    if (stat.size > budget) {
+      return { lines: 0, bytes: 0, budgetExceeded: true };
     }
     const content = fs.readFileSync(filePath);
     if (hasNullByte(content) || content.length === 0) return { lines: 0, bytes: content.length };
@@ -149,37 +194,52 @@ async function computeGitStatus(cwd: string): Promise<GitStatusResponse> {
     };
   }
 
-  const [entries, trackedLineStats] = await Promise.all([
+  const [entries, numstatByPath] = await Promise.all([
     readStatusEntries(repositoryRoot),
-    readTrackedLineStats(repositoryRoot, cwd),
+    readNumstatByPath(repositoryRoot, cwd),
   ]);
   const files = entries.flatMap((entry): GitFileStatus[] => {
     const filePath = path.resolve(repositoryRoot, entry.path);
     if (!isWithinPath(cwd, filePath)) return [];
     const classified = classifyGitStatus(entry);
+    const lineStat = numstatByPath.get(entry.path);
     return [{
       filePath,
       ...classified,
       indexStatus: entry.indexStatus,
       worktreeStatus: entry.worktreeStatus,
+      // untracked 没有可对比的 HEAD 侧，行数在下面的预算循环里补。
+      additions: classified.status === "untracked" ? null : (lineStat?.additions ?? null),
+      deletions: lineStat?.deletions ?? null,
     }];
   });
   // Reading every untracked file to count its lines is what actually cost 3.4s
   // on a scratch-heavy tree. The number is only a summary, so it gets a budget.
+  // fork:pr09 — 预算内同时把行数写回逐文件统计；预算耗尽后统计保持 null，
+  // 界面省略而不是显示误导性的 +0。
   let remainingUntrackedBudget = UNTRACKED_LINE_COUNT_BUDGET_BYTES;
-  const untrackedAdditions = files.reduce((total, file) => {
-    if (file.status !== "untracked" || remainingUntrackedBudget <= 0) return total;
+  for (const file of files) {
+    if (file.status !== "untracked" || remainingUntrackedBudget <= 0) continue;
     const counted = countUntrackedTextLines(file.filePath, remainingUntrackedBudget);
     remainingUntrackedBudget -= counted.bytes;
-    return total + counted.lines;
-  }, 0);
+    if (counted.budgetExceeded) continue;
+    file.additions = counted.lines;
+    file.deletions = null;
+  }
+  // 头部总数由逐文件统计求和得出，保证与列表行里的 ± 永远一致。
+  let totalAdditions = 0;
+  let totalDeletions = 0;
+  for (const file of files) {
+    totalAdditions += file.additions ?? 0;
+    totalDeletions += file.deletions ?? 0;
+  }
 
   return {
     isGitRepository: true,
     repositoryRoot,
     files,
-    additions: trackedLineStats.additions + untrackedAdditions,
-    deletions: trackedLineStats.deletions,
+    additions: totalAdditions,
+    deletions: totalDeletions,
   };
 }
 

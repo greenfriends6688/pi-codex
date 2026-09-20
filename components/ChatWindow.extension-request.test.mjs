@@ -41,11 +41,13 @@ test("resets collapse state when a new extension request arrives", () => {
   assert.match(customSource, /if \(!collapsed\) inputRef.current\?\.focus\(\);\s*}, \[collapsed\]\)/);
 });
 
-test("docks extension overlays to the bottom so the chat stays scrollable", () => {
-  assert.match(dialogSource, /alignItems: collapsed \? "flex-start" : "flex-end"/);
-  assert.match(customSource, /alignItems: collapsed \? "flex-start" : "flex-end"/);
-  assert.doesNotMatch(dialogSource, /alignItems: collapsed \? "flex-start" : "center"/);
-  assert.doesNotMatch(customSource, /alignItems: collapsed \? "flex-start" : "center"/);
+test("docks extension overlays to the bottom, right above the composer", () => {
+  // Collapsing must not send the card back to the top of the message area: the
+  // collapsed bar stays where the user is looking, just above the composer.
+  for (const overlay of [dialogSource, customSource]) {
+    assert.match(overlay, /alignItems: "flex-end"/);
+    assert.doesNotMatch(overlay, /alignItems: collapsed \?/);
+  }
 });
 
 test("debounces the completion sound across chained dialogs", () => {

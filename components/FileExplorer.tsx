@@ -629,6 +629,8 @@ function ChangeRow({
   const [hovered, setHovered] = useState(false);
   const name = getFileName(status.filePath);
   const rel = getRelativeFilePath(status.filePath, cwd);
+  // fork:pr09 — 逐文件 ± 统计；null/undefined 表示 diff 不可用（二进制、预算耗尽），整组省略。
+  const hasDiffStat = status.additions != null || status.deletions != null;
   // Split the path so the directory part ellipsizes while the file name stays fully visible
   const lastSlash = rel.lastIndexOf("/");
   const dirPart = lastSlash >= 0 ? rel.slice(0, lastSlash + 1) : "";
@@ -694,6 +696,31 @@ function ChangeRow({
           {baseName}
         </span>
       </span>
+      {hasDiffStat && (
+        <span
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            marginLeft: 4,
+            fontFamily: "var(--font-mono)",
+            fontSize: TEXT["2xs"],
+            lineHeight: 1,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {status.additions != null && status.additions > 0 && (
+            <span style={{ color: GIT_STATUS_COLORS.added, opacity: 0.9 }}>+{status.additions}</span>
+          )}
+          {status.deletions != null && status.deletions > 0 && (
+            <span style={{ color: GIT_STATUS_COLORS.deleted, opacity: 0.9 }}>-{status.deletions}</span>
+          )}
+          {status.additions === 0 && status.deletions === 0 && (
+            <span style={{ color: "var(--text-dim)", opacity: 0.6 }}>±0</span>
+          )}
+        </span>
+      )}
       {onAtMention && hovered && (
         <button
           onClick={(e) => {

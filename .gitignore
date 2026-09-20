@@ -66,12 +66,14 @@ e2e_*.mjs
 # fork: 规划/对比类文档只留本地，不进仓库（对齐用户的"docs 里的规划文档不用传"）
 /docs/proma-*
 /docs/boardui-*
+/docs/shadcn-*
 /docs/musepi-*
 /docs/desktop-ui-*
 /docs/omp-web-*
 /docs/ref-projects-*
 /docs/ui-layout-*
 /docs/design-audit-*
+/docs/pi-web-desktop-*
 /docs/fork-comparison-*
 /docs/ref-comparison-*
 /docs/zeno-*

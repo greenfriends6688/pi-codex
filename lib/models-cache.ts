@@ -6,6 +6,8 @@ export interface ModelsData {
   thinkingLevelMaps: Record<string, Record<string, string | null>>;
   /** `provider/modelId` → thinking level pinned by an `enabledModels` `:level` suffix. */
   thinkingLevelPins: Record<string, string>;
+  /** `provider/modelId`（斜杠）→ 上次使用该模型时实际生效的推理强度（见 lib/thinking-level-memory.ts）。 */
+  thinkingLevelMemory?: Record<string, string>;
   modelError?: string;
   /** Warnings from resolving the `enabledModels` scope (e.g. a pattern matched nothing). */
   modelScopeWarnings?: string[];

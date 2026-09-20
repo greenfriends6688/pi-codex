@@ -11,6 +11,7 @@ import {
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { projectTrustReloadOptions } from "@/lib/project-trust";
+import { getThinkingLevelMemory } from "@/lib/thinking-level-memory";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +84,9 @@ async function loadModels(cwd: string): Promise<ModelsData> {
       thinkingLevels,
       thinkingLevelMaps,
       thinkingLevelPins,
+      // D2-PR-18：per-model 推理强度记忆（key `provider/modelId`），前端模型详情可用它
+      // 显示「上次使用」；清除走 DELETE /api/thinking-level-memory。
+      thinkingLevelMemory: getThinkingLevelMemory(),
       ...(warnings.length > 0 ? { modelScopeWarnings: warnings } : {}),
     },
     modelError,

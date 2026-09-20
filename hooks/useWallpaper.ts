@@ -2,6 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import {
+  WALLPAPER_BUILTIN_KEY,
   WALLPAPER_CHANGED_EVENT,
   WALLPAPER_ENABLED_KEY,
   WALLPAPER_INPUT_MODE_KEY,
@@ -13,6 +14,7 @@ import {
   clampScrim,
   fileToWallpaperDataUrl,
   parseAreaMode,
+  readStoredBuiltinWallpaper,
   readStoredWallpaperUrl,
   type WallpaperAreaMode,
 } from "@/lib/wallpaper";
@@ -35,6 +37,8 @@ import {
 export interface WallpaperState {
   enabled: boolean;
   url: string;
+  /** Chosen built-in id, or "" to fall back to the palette's painting. */
+  builtin: string;
   scrim: number;
   inputMode: WallpaperAreaMode;
   panelMode: WallpaperAreaMode;
@@ -44,6 +48,7 @@ export interface WallpaperState {
 const DEFAULTS: WallpaperState = {
   enabled: false,
   url: "",
+  builtin: "",
   scrim: WALLPAPER_SCRIM_DEFAULT,
   inputMode: "blur",
   panelMode: "trans",
@@ -63,6 +68,7 @@ function read(): WallpaperState {
     return {
       enabled: window.localStorage.getItem(WALLPAPER_ENABLED_KEY) === "1",
       url: readStoredWallpaperUrl(),
+      builtin: readStoredBuiltinWallpaper(),
       scrim: clampScrim(window.localStorage.getItem(WALLPAPER_SCRIM_KEY) ?? WALLPAPER_SCRIM_DEFAULT),
       inputMode: parseAreaMode(window.localStorage.getItem(WALLPAPER_INPUT_MODE_KEY)),
       panelMode: parseAreaMode(window.localStorage.getItem(WALLPAPER_PANEL_MODE_KEY)),
@@ -114,6 +120,8 @@ function write(partial: Partial<WallpaperState>): void {
     storage.setItem(WALLPAPER_MESSAGE_MODE_KEY, next.messageMode);
     if (next.url) storage.setItem(WALLPAPER_URL_KEY, next.url);
     else storage.removeItem(WALLPAPER_URL_KEY);
+    if (next.builtin) storage.setItem(WALLPAPER_BUILTIN_KEY, next.builtin);
+    else storage.removeItem(WALLPAPER_BUILTIN_KEY);
   } catch {
     // Quota or privacy mode: the state still applies for this session.
   }
@@ -148,9 +156,19 @@ export function useWallpaper() {
   }, []);
 
   /** Drop the custom image but keep the wallpaper on — it falls back to the
-   *  built-in artwork instead of turning the feature off. */
+   *  built-in the user picked, or the palette's painting. */
   const useBuiltin = useCallback(() => {
     write({ url: "", enabled: true });
+  }, []);
+
+  /**
+   * Pick a bundled wallpaper.
+   *
+   * Clears a custom image on purpose: leaving it set would keep winning in
+   * `resolveWallpaperSrc`, so the click would look broken.
+   */
+  const setBuiltin = useCallback((builtin: string) => {
+    write({ builtin, url: "", enabled: true });
   }, []);
 
   return {
@@ -158,6 +176,7 @@ export function useWallpaper() {
     choose,
     remove,
     useBuiltin,
+    setBuiltin,
     setEnabled: useCallback((enabled: boolean) => write({ enabled }), []),
     setScrim: useCallback((scrim: number) => write({ scrim: clampScrim(scrim) }), []),
     setInputMode: useCallback((inputMode: WallpaperAreaMode) => write({ inputMode }), []),

@@ -110,7 +110,7 @@ console.log("  2. 发一句话能收到回复（否则看 /api/agent/* 与 SSE�
 console.log("  3. 文件树能列目录、能打开一个文件（403 时对照上面的“文件列目录”一条）。");
 console.log("  4. 终端 Tab 能起一个 shell 并执行 echo（失败多为 node-pty 的 ABI/执行位）。");
 console.log("  5. 设置里的模型/Skills/MCP 面板能打开（失败多为 /api/* 404）。");
-console.log("  6. 点几个按钮后回看主进程 stdout：出现 [pi-codex] blocked 开头的行，");
+console.log("  6. 点几个按钮后回看主进程 stdout：出现 [pinkslab] blocked 开头的行，");
 console.log("     说明那次点击被导航拦截吞掉了（这是“按钮无反应”的典型成因）。");
 
 if (failed.length > 0) {
