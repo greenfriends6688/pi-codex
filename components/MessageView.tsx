@@ -442,9 +442,12 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             // (solid, one step above canvas) with NO border, radius 12. The old
             // `--bg-subtle` + `--border-faint` pair drew a boxed card; Zeno's
             // reads as a filled bubble.
+            // fork:boardui — BoardUI 的入口气泡是 rounded-2xl(16px) +
+            // shadow-card（agent-chat-message.tsx：rounded-2xl
+            // bg-background-primary-default px-3 py-[11px] shadow-card）。
             background: "var(--user-bg)",
             border: "1px solid transparent",
-            borderRadius: "var(--radius-xl)",
+            borderRadius: 16,
             padding: "12px 16px",
             fontSize: "calc(14px + var(--chat-font-size-offset, 0px))",
             lineHeight: 1.65,
@@ -452,7 +455,7 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
             wordBreak: "break-word",
             maxHeight: USER_BUBBLE_MAX_HEIGHT,
             overflowY: "auto",
-            boxShadow: "none",
+            boxShadow: "var(--shadow-card)",
           }}
         >
           {commandText ? (

@@ -515,17 +515,13 @@ html.keyboard-open .extension-status-shelf {
  * ------------------------------------------------------------------------- */
 .fork-protrusion-bar {
   min-height: var(--zn-row);
-  margin-bottom: 0;
+  /* fork:boardui — 不再与卡片焊接：BoardUI 的 composer 是独立的大圆角卡片，
+     上方这条改成自家的圆角胶囊，条与卡片之间留 6px。 */
+  margin-bottom: 6px;
   padding: 6px 10px;
   border: 1px solid var(--composer-border, var(--border));
-  border-bottom: none;
-  border-radius: var(--radius-composer) var(--radius-composer) 0 0;
+  border-radius: var(--radius-md);
   background: var(--composer-protrusion, var(--bg-panel));
-}
-/* The card's top corners flatten only while the strip is mounted. */
-.chat-content:has(.fork-protrusion-bar) div[style*="--radius-composer"] {
-  border-top-left-radius: var(--radius-md) !important;
-  border-top-right-radius: var(--radius-md) !important;
 }
 
 /* ---------------------------------------------------------------------------

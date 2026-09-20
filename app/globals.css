@@ -144,7 +144,7 @@
   --readable-content-max-width: 900px;
   --composer-max-width: calc(var(--chat-content-max-width) + 32px);
   /* 12px: Zeno's panel radius, which is what its composer card uses. */
-  --radius-composer: var(--radius-lg);
+  --radius-composer: var(--radius-2xl);
   --height-toolbar: 46px;
   --height-toolbar-pane: 40px;
   --spacing-token-button-composer: 28px;
