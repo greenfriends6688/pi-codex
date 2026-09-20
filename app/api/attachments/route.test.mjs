@@ -16,7 +16,8 @@ const jiti = createJiti(import.meta.url, {
   interopDefault: true,
   moduleCache: false,
 });
-const { GET, attachmentsDirectory } = await jiti.import("./route.ts");
+const { GET } = await jiti.import("./route.ts");
+const { attachmentsDirectory } = await jiti.import("@/lib/attachments");
 
 function request(headers = {}) {
   return new NextRequest("http://localhost/api/attachments", {

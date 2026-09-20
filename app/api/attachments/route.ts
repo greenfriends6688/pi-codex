@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "node:fs";
-import { join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { allowFileRoot } from "@/lib/file-access";
+import { attachmentsDirectory } from "@/lib/attachments";
 import { isApiRequestAllowed } from "@/lib/request-security";
 
 /**
@@ -24,15 +23,6 @@ import { isApiRequestAllowed } from "@/lib/request-security";
  * GET /api/attachments → { dir }
  */
 export const dynamic = "force-dynamic";
-
-export function attachmentsDirectory(now: Date = new Date()): string {
-  const day = [
-    now.getFullYear(),
-    String(now.getMonth() + 1).padStart(2, "0"),
-    String(now.getDate()).padStart(2, "0"),
-  ].join("-");
-  return join(getAgentDir(), "attachments", day);
-}
 
 export async function GET(request: NextRequest) {
   if (!isApiRequestAllowed(request)) {
