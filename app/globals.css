@@ -753,7 +753,7 @@ body {
   inset: 0;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 180ms ease-out;
+  transition: opacity var(--motion-base) ease-out;
 }
 
 .extension-widget-update-pulse::before {
@@ -779,7 +779,7 @@ body {
 
 button.extension-widget-trigger {
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
+  transition: background var(--motion-fast), color var(--motion-fast);
 }
 
 button.extension-widget-trigger:hover,
@@ -1285,7 +1285,7 @@ pre, code {
   box-shadow: var(--shadow-md);
   cursor: pointer;
   touch-action: manipulation;
-  transition: background-color 0.12s, color 0.12s;
+  transition: background-color var(--motion-fast), color var(--motion-fast);
 }
 
 .image-preview-close:hover {
@@ -1425,7 +1425,7 @@ pre, code {
   /* DSN-05 评估结论：保留 width 过渡。缩放宽度由 JS 按档位写内联 width，
      改 transform: scale() 需要 JS 侧同步换算（只改 CSS 做不到等效），
      且它是用户点按缩放时的离散小步进、不在主布局关键路径上。 */
-  transition: width 0.15s ease;
+  transition: width var(--motion-base) ease;
 }
 .mermaid-zoom-canvas svg {
   display: block;
@@ -1586,7 +1586,7 @@ pre, code {
   .chat-scroll-to-bottom,
   .chat-scroll-to-bottom.is-visible {
     transform: none;
-    transition: background 0.12s, color 0.12s;
+    transition: background var(--motion-fast), color var(--motion-fast);
   }
 }
 
@@ -1765,7 +1765,7 @@ pre, code {
     inset 0 1px 0 color-mix(in srgb, var(--accent) 34%, transparent),
     inset 0 -1px 0 color-mix(in srgb, var(--accent) 34%, transparent),
     0 5px 14px color-mix(in srgb, var(--accent) 12%, transparent);
-  transition: background 0.16s ease, outline-color 0.16s ease, box-shadow 0.16s ease;
+  transition: background var(--motion-base) ease, outline-color var(--motion-base) ease, box-shadow var(--motion-base) ease;
 }
 
 .file-location-text-highlight {
@@ -1985,7 +1985,7 @@ textarea,
   width: 2px;
   pointer-events: none;
   background: transparent;
-  transition: background 0.12s ease;
+  transition: background var(--motion-fast) ease;
 }
 .panel-resize-handle:hover::after,
 .panel-resize-handle:focus-visible::after,
@@ -2100,7 +2100,7 @@ textarea,
     display: grid;
     grid-template-columns: minmax(0, 1fr) 0 minmax(0, 0px);
     grid-template-areas: "main separator secondary";
-    transition: grid-template-columns 0.2s ease;
+    transition: grid-template-columns var(--motion-slow) ease;
   }
   .main-panels.workspace-panel-open {
     /* The resize target has negative inline margins, so its 12px hit area
@@ -2971,7 +2971,7 @@ button.process-file-chip:hover {
   background: var(--bg-panel);
   box-shadow: var(--shadow-lg);
   transform-origin: top left;
-  transition: opacity 90ms ease, transform 90ms ease;
+  transition: opacity var(--motion-instant) ease, transform var(--motion-instant) ease;
   user-select: none;
 }
 

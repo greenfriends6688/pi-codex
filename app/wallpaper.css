@@ -27,7 +27,7 @@
   opacity: 0;
   /* left/right follow the panels' own width animation so the wallpaper edge
      glides with the sidebar as it folds. */
-  transition: opacity 0.4s, left 0.2s ease, right 0.2s ease;
+  transition: opacity 0.4s, left var(--motion-slow) ease, right var(--motion-slow) ease;
 }
 
 html[data-wallpaper-ready="1"] .chat-wallpaper {
