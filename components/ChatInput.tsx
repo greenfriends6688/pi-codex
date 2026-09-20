@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, KeyboardEvent } from "react";
+import React, { useRef, useState, useCallback, useEffect, useLayoutEffect, useImperativeHandle, forwardRef, KeyboardEvent, useSyncExternalStore } from "react";
 import type { BuiltinSlashCommandResult, CompactResultInfo, QueuedMessages, SlashCommandInfo } from "@/hooks/useAgentSession";
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
@@ -22,9 +22,13 @@ import {
   buildEntriesFromFiles, buildAtInsertText, extractAtQuery, filterFileEntries,
   type AtQueryMatch, type FileIndexEntry,
 } from "@/lib/file-fuzzy";
+// D2-PR-12 — mention 高亮：输入框 overlay 与消息正文共用同一套切词/校验。
+import { tokenizeMentions } from "@/lib/mention-tokens";
+import { useFileIndex, useSkillNames } from "@/hooks/useProjectContext";
 import { FolderIcon, getFileIcon } from "./FileIcons";
 import { ImagePreview } from "./ImagePreview";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { useResizableHeight } from "@/hooks/useResizableHeight";
 import { useI18n } from "@/hooks/useI18n";
 import { useChatAppearance } from "@/hooks/useChatAppearance";
 import { ThinkingIcon } from "./ThinkingIcon";
@@ -32,6 +36,13 @@ import type { ToolPreset } from "@/lib/tool-presets";
 // fork:proma-02-mode — 会话权限模式
 import { nextPermissionMode, PERMISSION_MODE_HINT_KEYS, PERMISSION_MODE_LABEL_KEYS, type PermissionMode } from "@/lib/permission-mode";
 import { ModelSelector, type ModelSelectorOption } from "./ModelSelector";
+import {
+  favoriteModelKey,
+  getFavoriteModelsServerSnapshot,
+  getFavoriteModelsSnapshot,
+  subscribeFavoriteModels,
+  toggleFavoriteModelKey,
+} from "@/lib/favorite-models";
 import { ComposerContextStrip } from "./ComposerContextStrip";
 import { TodoChip } from "./fork/TodoChip";
 import type { TodoSummary } from "@/lib/todo-state";
@@ -74,6 +85,15 @@ import {
 } from "@/lib/composer-attachments";
 import { encodeFilePathForApi, joinFilePath } from "@/lib/file-paths";
 import { desktopFilePathFor } from "@/lib/desktop-shell";
+// fork:pr13-composer — 拖入文件 cwd 相对化 + Markdown 列表续行
+import { toCwdRelativeMentions } from "@/lib/file-mentions";
+import { continueMarkdownList } from "@/lib/markdown-list";
+// fork:pr14-compact — 阅读态输入框塌陷（振荡坑见 lib/input-compact.ts 的注释）
+import {
+  nextInputCompactState,
+  scrollRemaining,
+  type InputCompactScrollDirection,
+} from "@/lib/input-compact";
 import { TEXT } from "@/lib/typography";
 
 export { filterModelOptions } from "./ModelSelector";
@@ -188,6 +208,21 @@ const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const TEXT_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 const ANCHORED_MENU_GAP = 8;
 
+// fork:pr23-resize — composer 手动高度（竖向缩放）。
+// 自动增高的 200px 上限是内容驱动的轴；手动高度是用户接管的另一条轴，因此下限/
+// 上限单独定义。最小高度保底让工具栏在一行文本时仍然能完整放下。
+const MIN_MANUAL_HEIGHT_DESKTOP = 104;
+const MIN_MANUAL_HEIGHT_MOBILE = 80;
+const MANUAL_MAX_HEIGHT_CAP = 480;
+const MANUAL_MAX_HEIGHT_FRACTION = 0.55;
+const INPUT_HEIGHT_STORAGE_KEY = "pi-chat-input-height";
+
+// fork:pr14-compact — 真实用户滚动的「意图窗口」：wheel / touch / pointer / 滚动
+// 按键之后这段时间内的 scroll 事件才被当作用户意图，程序化定位一概不算。
+const COMPACT_INTENT_MS = 1200;
+// 消息区能引发滚动的按键（焦点不在输入框 / 可编辑区域时才算阅读滚动）。
+const COMPACT_SCROLL_KEYS = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Space", "Spacebar"]);
+
 export function getUpwardMenuMaxHeight(menuBottom: number, visibleTop: number, gap = ANCHORED_MENU_GAP): number {
   return Math.max(0, Math.floor(menuBottom - visibleTop - gap));
 }
@@ -275,6 +310,48 @@ function subscribeUpwardMenuMaxHeight(
     window.removeEventListener("scroll", scheduleUpdate, true);
     if (frameId !== null) cancelAnimationFrame(frameId);
   };
+}
+
+/** 在 root 里找面积最大的「在文档流里的」纵向滚动元素；绝对定位（弹层 / 面板）
+ *  一律排除，避免把 stats 浮层、菜单当消息区。composer 自身及其内部同样排除。 */
+function largestFlowScrollable(root: HTMLElement, composerRoot: HTMLElement, classHint: boolean): HTMLElement | null {
+  const selector = classHint
+    ? "[class*='overflow-y-auto'], [class*='overflow-auto']"
+    : "*";
+  let best: HTMLElement | null = null;
+  let bestArea = 0;
+  for (const element of Array.from(root.querySelectorAll<HTMLElement>(selector))) {
+    if (composerRoot.contains(element) || element.contains(composerRoot)) continue;
+    const style = window.getComputedStyle(element);
+    if (style.overflowY !== "auto" && style.overflowY !== "scroll") continue;
+    if (style.position === "absolute" || style.position === "fixed") continue;
+    if (style.display === "none" || style.visibility === "hidden") continue;
+    const area = element.clientHeight * element.clientWidth;
+    if (element.clientHeight > 0 && element.clientWidth > 0 && area > bestArea) {
+      best = element;
+      bestArea = area;
+    }
+  }
+  return best;
+}
+
+/**
+ * fork:pr14-compact — 从 composer 出发定位 ChatWindow 的消息滚动容器。
+ *
+ * 本仓库不允许改 ChatWindow（拿不到 scroll ref），所以按 DOM 结构找：从 composer
+ * 向上逐层找最近的、含有「在流中的纵向滚动元素」的祖先，并在其中取面积最大者
+ *  —— 消息列是主区里面积最大的滚动区；先用 Tailwind 的 overflow-y-auto 类名
+ * 缩小扫描范围，类名不匹配时再回退到全量扫描。
+ */
+function findMessagesScrollContainer(composerRoot: HTMLElement): HTMLElement | null {
+  if (typeof window === "undefined") return null;
+  let node: HTMLElement | null = composerRoot.parentElement;
+  while (node && node !== document.body && node !== document.documentElement) {
+    const best = largestFlowScrollable(node, composerRoot, true) ?? largestFlowScrollable(node, composerRoot, false);
+    if (best) return best;
+    node = node.parentElement;
+  }
+  return null;
 }
 
 const THINKING_LEVELS = ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -707,6 +784,186 @@ export function ModelScopeWarningBanner({ warnings }: { warnings?: string[] }) {
   );
 }
 
+/** 星标图标；填充表示已收藏。 */
+function FavoriteStarIcon({ filled }: { filled: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
+/**
+ * fork:pr17-favorites — 输入框侧的收藏模型菜单。
+ *
+ * 与设置页 ModelsConfig 共用 lib/favorite-models 单一 store：任一入口的星标写入
+ * 都会主动 notify，本组件通过 useSyncExternalStore 立即刷新；跨标签页则由
+ * window storage 事件同步。模型下线的收藏项仍保留（置灰且不可点选），避免收藏被
+ * 静默清掉。
+ */
+function FavoriteModelMenu({
+  model,
+  options,
+  favorites,
+  onSelect,
+}: {
+  model: { provider: string; modelId: string } | null | undefined;
+  options: ModelSelectorOption[];
+  favorites: Set<string>;
+  onSelect: (provider: string, modelId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { t } = useI18n();
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open]);
+
+  const optionByKey = new Map(options.map((option) => [favoriteModelKey(option.provider, option.modelId), option]));
+  // 可用模型排在前面；下线条目保持收藏顺序并置灰保留。
+  const entries = [...favorites]
+    .map((key) => ({ key, option: optionByKey.get(key) }))
+    .sort((a, b) => (a.option ? 0 : 1) - (b.option ? 0 : 1));
+  const currentKey = model ? favoriteModelKey(model.provider, model.modelId) : null;
+  const currentFavorited = currentKey !== null && favorites.has(currentKey);
+
+  return (
+    <div ref={rootRef} style={{ position: "relative", flexShrink: 0 }}>
+      <button
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={t("models.favorites")}
+        title={t("models.favorites")}
+        onClick={() => setOpen((current) => !current)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: "var(--spacing-token-button-composer, 28px)",
+          height: "var(--spacing-token-button-composer, 28px)",
+          padding: 0,
+          background: open ? "var(--bg-hover)" : "none",
+          border: "none",
+          borderRadius: "var(--radius-md)",
+          color: currentFavorited ? "var(--accent)" : "var(--text-muted)",
+          cursor: "pointer",
+          transition: "background 0.12s, color 0.12s",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-hover)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = open ? "var(--bg-hover)" : "none"; }}
+      >
+        <FavoriteStarIcon filled={currentFavorited} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          aria-label={t("models.favorites")}
+          className="anim-popover"
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 6px)",
+            left: 0,
+            zIndex: 300,
+            width: 240,
+            maxHeight: 320,
+            overflowY: "auto",
+            padding: "4px 0",
+            background: "var(--bg-elev)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-lg)",
+            boxShadow: "var(--shadow-md)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "4px 10px 6px", color: "var(--text-dim)", fontSize: TEXT["2xs"], fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em" }}>
+            <span>{t("models.favorites")}</span>
+            {currentKey && (
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                aria-checked={currentFavorited}
+                aria-label={currentFavorited ? t("models.unfavoriteModel") : t("models.favoriteCurrent")}
+                title={currentFavorited ? t("models.unfavoriteModel") : t("models.favoriteCurrent")}
+                onClick={() => toggleFavoriteModelKey(currentKey)}
+                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, background: "none", border: "none", color: currentFavorited ? "var(--accent)" : "var(--text-dim)", cursor: "pointer" }}
+              >
+                <FavoriteStarIcon filled={currentFavorited} />
+              </button>
+            )}
+          </div>
+          {entries.length === 0 ? (
+            <div style={{ padding: "6px 10px 8px", color: "var(--text-dim)", fontSize: TEXT.xs }}>
+              {t("models.noFavorites")}
+            </div>
+          ) : entries.map(({ key, option }) => (
+            <div key={key} style={{ display: "flex", alignItems: "center", gap: 2, margin: "0 4px", opacity: option ? 1 : 0.5 }}>
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!option}
+                onClick={() => {
+                  if (!option) return;
+                  setOpen(false);
+                  onSelect(option.provider, option.modelId);
+                }}
+                title={option ? `${option.name} · ${option.provider}` : `${key} · ${t("models.unavailableModel")}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  flex: 1,
+                  minWidth: 0,
+                  padding: "5px 8px",
+                  borderRadius: "var(--radius-sm)",
+                  background: "none",
+                  border: "none",
+                  color: option ? "var(--text)" : "var(--text-dim)",
+                  cursor: option ? "pointer" : "not-allowed",
+                  fontSize: TEXT.sm,
+                  textAlign: "left",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                }}
+                onMouseEnter={(e) => { if (option) e.currentTarget.style.background = "var(--bg-hover)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}
+              >
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {option?.name || option?.modelId || key.slice(key.indexOf(":") + 1)}
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label={t("models.unfavoriteModel")}
+                title={t("models.unfavoriteModel")}
+                onClick={() => toggleFavoriteModelKey(key)}
+                style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, padding: 4, background: "none", border: "none", color: "var(--accent)", cursor: "pointer" }}
+              >
+                <FavoriteStarIcon filled />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   onSend, onAbort, onSteer, onFollowUp, isStreaming, model, isAutoModelSelection, modelNames, modelList, modelError, modelScopeWarnings, onModelChange, modelSwitching,
   onCompact, onAbortCompaction, isCompacting, compactError, compactResult, toolPreset, onToolPresetChange,
@@ -729,6 +986,48 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const { t } = useI18n();
   const { fontSize } = useChatAppearance();
   const isMobile = useIsMobile();
+  // fork:pr23-resize — 顶部手柄竖向缩放。`height === null` 保持内容驱动的自动
+  // 高度；数字表示用户已接管。manualMode 时卡片挂内联固定高度，textarea 交给
+  // `.is-manual-height` 的 CSS（`height: 100% !important`）填充并内部滚动，
+  // 从而与自动增高互斥；引用回答形态（compact prop）与移动端不接管，避免旧的
+  // 持久化高度破坏小布局。
+  const inputShellRef = useRef<HTMLDivElement>(null);
+  const manualModeRef = useRef(false);
+  const minManualHeight = isMobile ? MIN_MANUAL_HEIGHT_MOBILE : MIN_MANUAL_HEIGHT_DESKTOP;
+  const getMaxManualHeight = useCallback(() => {
+    if (typeof window === "undefined") return MANUAL_MAX_HEIGHT_CAP;
+    return Math.max(
+      minManualHeight,
+      Math.min(MANUAL_MAX_HEIGHT_CAP, Math.floor(window.innerHeight * MANUAL_MAX_HEIGHT_FRACTION)),
+    );
+  }, [minManualHeight]);
+  const inputHeightResizer = useResizableHeight({
+    ariaLabel: t("layout.resizeHint"),
+    minHeight: minManualHeight,
+    getMaxHeight: getMaxManualHeight,
+    storageKey: INPUT_HEIGHT_STORAGE_KEY,
+    targetRef: inputShellRef,
+  });
+  const manualHeight = inputHeightResizer.height;
+  const manualMode = !compact && !isMobile && manualHeight !== null;
+  manualModeRef.current = manualMode;
+
+  // fork:pr14-compact — 阅读态塌陷。状态机在 lib/input-compact.ts：只有
+  // 「真实用户意图 + 向上滚 + 离底 > 120px」才收起；到底只认同向下的滚动；
+  // ResizeObserver 复算一律传 "none"；focus 一定展开。这样收缩引起的
+  // “浏览器把视口夹回底部”就不会把状态来回翻转。
+  const [readingCompact, setReadingCompact] = useState(false);
+  /** wheel / touch / pointer / 滚动按键触发的意图窗口（Date.now 上限）。 */
+  const compactIntentUntilRef = useRef(0);
+  /** 上一次 scroll 事件的 scrollTop，用来求方向。 */
+  const lastScrollTopRef = useRef(0);
+  /** 定位到的消息滚动容器（DOM 发现，见 findMessagesScrollContainer）。 */
+  const messagesScrollRef = useRef<HTMLElement | null>(null);
+  /** 输入区是否聚焦；聚焦期间不收起，且 focus 一定展开。 */
+  const inputFocusedRef = useRef(false);
+  // fork:pr17-favorites — 与设置页 ModelsConfig 共用同一个收藏 store；
+  // 同文档写入由 store 主动 notify，跨标签页由 window storage 事件同步。
+  const favoriteModels = useSyncExternalStore(subscribeFavoriteModels, getFavoriteModelsSnapshot, getFavoriteModelsServerSnapshot);
   const initialDraft = draftKey ? getDraft(draftKey) : null;
   const [value, setValue] = useState(() => initialDraft?.value ?? "");
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
@@ -808,6 +1107,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   const [fileIndex, setFileIndex] = useState<{ cwd: string; entries: FileIndexEntry[]; truncated: boolean } | null>(null);
   const [fileIndexLoading, setFileIndexLoading] = useState(false);
   const [atServerResult, setAtServerResult] = useState<{ cwd: string; query: string; matches: FileIndexEntry[] } | null>(null);
+  // D2-PR-12 — 高亮用的共享索引/技能缓存（模块级 + 30s TTL + 并发去重）。
+  // 上方 @ 菜单继续用它自己的 10s TTL 状态：两条取数路径互不影响，避免动到补全行为。
+  const fileIndexSnapshot = useFileIndex(cwd);
+  const skillNames = useSkillNames(cwd);
   const [skillDormancyState, setSkillDormancyState] = useState<{
     cwd: string;
     values: Record<string, boolean>;
@@ -817,6 +1120,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     : {};
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // D2-PR-12 — 高亮层：viewport 精确盖住 textarea 的内容盒，layer 随滚动位移。
+  const highlightViewportRef = useRef<HTMLDivElement>(null);
+  const highlightLayerRef = useRef<HTMLDivElement>(null);
   const toolDropdownRef = useRef<HTMLDivElement>(null);
   const thinkingDropdownRef = useRef<HTMLDivElement>(null);
   const controlsMenuRef = useRef<HTMLDivElement>(null);
@@ -1290,7 +1596,32 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (inlineImages.length > 0) await processImageFiles(inlineImages);
     if (rest.length === 0) return;
 
-    const entries = rest.map((file) => ({ file, facts: { name: file.name, size: file.size, type: file.type } }));
+    // fork:pr13-composer — 先做 cwd 相对化：桌面外壳能拿到磁盘绝对路径时，
+    // cwd 内的文件直接插 `@相对路径`（零拷贝，不经过附件目录）；cwd 外（含
+    // `..` 逃逸、前缀相似的兄弟目录）才回退到原有上传 / 就地引用管线。
+    const cwdMentionPaths: string[] = [];
+    const uploadCandidates: File[] = [];
+    for (const file of rest) {
+      const absolutePath = desktopFilePathFor(file);
+      const mentions = absolutePath && cwd ? toCwdRelativeMentions([absolutePath], cwd).mentions : [];
+      if (mentions.length > 0) {
+        cwdMentionPaths.push(...mentions);
+      } else {
+        uploadCandidates.push(file);
+      }
+    }
+
+    if (uploadCandidates.length === 0) {
+      appendAttachmentReferences(cwdMentionPaths);
+      setAttachmentNotice({
+        added: cwdMentionPaths.map((path) => path.split("/").pop() ?? path),
+        skipped: [],
+        failed: [],
+      });
+      return;
+    }
+
+    const entries = uploadCandidates.map((file) => ({ file, facts: { name: file.name, size: file.size, type: file.type } }));
     const plan = planAttachments(entries.map((entry) => entry.facts), {
       pathOf: (facts) => {
         const match = entries.find((entry) => entry.facts === facts);
@@ -1298,8 +1629,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       },
     });
 
-    const added = plan.referenceInPlace.map((entry) => entry.file.name);
-    const paths = plan.referenceInPlace.map((entry) => entry.path);
+    const added = [
+      ...cwdMentionPaths.map((path) => path.split("/").pop() ?? path),
+      ...plan.referenceInPlace.map((entry) => entry.file.name),
+    ];
+    const paths = [...cwdMentionPaths, ...plan.referenceInPlace.map((entry) => entry.path)];
     const skipped = plan.skipped.map((entry) => ({ name: entry.file.name, reason: entry.reason }));
     const failed: string[] = [];
 
@@ -1322,7 +1656,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     if (added.length > 0 || skipped.length > 0 || failed.length > 0) {
       setAttachmentNotice({ added, skipped, failed });
     }
-  }, [appendAttachmentReferences, compact, processImageFiles, uploadAttachmentFiles]);
+  }, [appendAttachmentReferences, compact, cwd, processImageFiles, uploadAttachmentFiles]);
 
   const removeImage = useCallback((index: number) => {
     setAttachedImages((prev) => {
@@ -1526,6 +1860,54 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     // 但会话/待办引用不需要 cwd，所以它不受这个门控。
     setReferenceQuery(fileToken ? null : extractReferenceQuery(before));
   }, [cwd]);
+
+  // D2-PR-12 — 输入框高亮 token。三条硬规则：
+  // 1. **valid 才高亮**：索引/技能未加载时 validator 返回 undefined，tokenizeMentions
+  //    按 invalid 处理（高亮绝不猜）；
+  // 2. **光标所在 token 保持纯文本**：`activeTokenStart` 取正在编辑的 @ token 起点，
+  //    否则半截 token 会在打字时闪高亮；
+  // 3. **代码块内不改**：这条针对消息体（remark 插件只改 text 节点）；输入框本身
+  //    就是纯文本，不存在 code 节点。
+  const highlightSegments = React.useMemo(() => tokenizeMentions(value, {
+    fileExists: (path) => {
+      if (!fileIndexSnapshot) return undefined;
+      const key = path.toLowerCase();
+      return fileIndexSnapshot.paths.has(key) || fileIndexSnapshot.dirs.has(key);
+    },
+    isSkill: (name) => (skillNames ? skillNames.has(name) : undefined),
+  }, atQuery?.start ?? null), [value, fileIndexSnapshot, skillNames, atQuery]);
+
+  // D2-PR-12 — 高亮层对齐（AGENTS.md 记的坑：文本域与高亮层必须共享字号，否则错位）。
+  //
+  // 文本域自己的文字是透明的（caret 保持可见），高亮层必须和它逐像素对齐：
+  // - 字号/行高/字体在 CSS 里与 textarea 内联样式共用 --chat-content-font-size；
+  // - viewport 的宽高镜像 textarea 的 clientWidth/clientHeight（滚动条出现时内容盒
+  //   变窄，不同步就会每行漂移半个字）；
+  // - 内层 layer 用 transform 平移 textarea 的滚动偏移，viewport 负责裁剪。
+  const syncHighlightScroll = useCallback(() => {
+    const ta = textareaRef.current;
+    const viewport = highlightViewportRef.current;
+    const layer = highlightLayerRef.current;
+    if (!ta || !viewport || !layer) return;
+    const width = ta.clientWidth;
+    const height = ta.clientHeight;
+    if (width > 0 && viewport.style.width !== `${width}px`) viewport.style.width = `${width}px`;
+    if (height > 0 && viewport.style.height !== `${height}px`) viewport.style.height = `${height}px`;
+    const x = ta.scrollLeft > 0 ? -ta.scrollLeft : 0;
+    const y = ta.scrollTop > 0 ? -ta.scrollTop : 0;
+    layer.style.transform = x || y ? `translate(${x}px, ${y}px)` : "";
+  }, []);
+  // 每次渲染后同步：打字、模式切换、自动增高都会走渲染。
+  useEffect(() => { syncHighlightScroll(); });
+  // textarea 的尺寸也可能在没有 React 渲染时变化（滚动条出现、容器 resize、
+  // rAF 里的自动增高），ResizeObserver 负责补同步。
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    const observer = new ResizeObserver(() => syncHighlightScroll());
+    observer.observe(ta);
+    return () => observer.disconnect();
+  }, [syncHighlightScroll]);
 
   // fork:gap06-references — 程序化改文本的路径（发送后清空、插入引用、草稿恢复…）
   // 都会 `setValue(...)` 但不走 updateAtQuery，上游那里逐个 `setAtQuery(null)` 是 11 处。
@@ -1921,6 +2303,122 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       : Math.max(0, slashActiveIndex - 1);
   }, [displayedSlashCommands.length, slashActiveIndex]);
 
+  // ── fork:pr14-compact — 阅读态塌陷接线 ────────────────────────────────
+  // 方向由 scrollTop delta 求；ResizeObserver / 首次评估都传 "none"。
+  const updateCompactFromScroll = useCallback((direction: InputCompactScrollDirection = "none") => {
+    if (isMobile || compact) return;
+    const container = messagesScrollRef.current;
+    if (!container || inputFocusedRef.current) return;
+    setReadingCompact((prev) => nextInputCompactState(prev, {
+      kind: "scroll",
+      remaining: scrollRemaining(container),
+      direction,
+      userIntent: Date.now() < compactIntentUntilRef.current,
+    }));
+  }, [compact, isMobile]);
+
+  useEffect(() => {
+    if (isMobile || compact) return;
+    const composerRoot = inputShellRef.current?.closest("fieldset") ?? inputShellRef.current;
+    if (!composerRoot) return;
+
+    let container: HTMLElement | null = messagesScrollRef.current;
+    let resizeObserver: ResizeObserver | null = null;
+    let mutationObserver: MutationObserver | null = null;
+    let disposed = false;
+
+    const markScrollIntent = () => {
+      compactIntentUntilRef.current = Date.now() + COMPACT_INTENT_MS;
+    };
+
+    const handleScroll = () => {
+      if (!container) return;
+      const delta = container.scrollTop - lastScrollTopRef.current;
+      lastScrollTopRef.current = container.scrollTop;
+      updateCompactFromScroll(delta > 0 ? "down" : delta < 0 ? "up" : "none");
+    };
+
+    const onGlobalKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (!COMPACT_SCROLL_KEYS.has(event.key)) return;
+      // 输入框 / 可编辑区域里的方向键属于编辑行为（翻历史、移光标），不算阅读滚动。
+      if (event.target instanceof Element && event.target.closest("input, textarea, [contenteditable='true']")) return;
+      markScrollIntent();
+    };
+
+    const attach = (element: HTMLElement) => {
+      container = element;
+      messagesScrollRef.current = element;
+      lastScrollTopRef.current = element.scrollTop;
+      element.addEventListener("scroll", handleScroll, { passive: true });
+      element.addEventListener("wheel", markScrollIntent, { passive: true });
+      element.addEventListener("touchstart", markScrollIntent, { passive: true });
+      element.addEventListener("pointerdown", markScrollIntent, { passive: true });
+      if (typeof ResizeObserver !== "undefined") {
+        // 容器高度会随 composer 塌陷/展开放生变化，必须复算底部位置；但这里
+        // 拿不到方向，一律用 "none"，绝不能让它自己把状态翻回去（振荡坑）。
+        resizeObserver = new ResizeObserver(() => updateCompactFromScroll("none"));
+        resizeObserver.observe(element);
+      }
+      // 首次评估不塌陷：会话打开时可能本来就不在底部（锚点定位），那不算
+      // 用户意图，等真实的向上滚动再收。
+      updateCompactFromScroll("none");
+    };
+
+    const detach = () => {
+      if (!container) return;
+      container.removeEventListener("scroll", handleScroll);
+      container.removeEventListener("wheel", markScrollIntent);
+      container.removeEventListener("touchstart", markScrollIntent);
+      container.removeEventListener("pointerdown", markScrollIntent);
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+      container = null;
+      messagesScrollRef.current = null;
+    };
+
+    const discovered = findMessagesScrollContainer(composerRoot);
+    if (discovered) {
+      attach(discovered);
+    } else if (typeof MutationObserver !== "undefined") {
+      // 新会话的消息列要等首条消息才挂载；消息列与 composer 同属上一层主区，
+      // 所以观察 composer 所在列的父级（包含两者的共同祖先），发现后立刻断开。
+      const watchRoot = composerRoot.parentElement?.parentElement ?? composerRoot.parentElement ?? composerRoot;
+      mutationObserver = new MutationObserver(() => {
+        if (disposed || messagesScrollRef.current) return;
+        const found = findMessagesScrollContainer(composerRoot);
+        if (found) {
+          mutationObserver?.disconnect();
+          mutationObserver = null;
+          attach(found);
+        }
+      });
+      mutationObserver.observe(watchRoot, { childList: true, subtree: true });
+    }
+
+    window.addEventListener("keydown", onGlobalKeyDown);
+    return () => {
+      disposed = true;
+      window.removeEventListener("keydown", onGlobalKeyDown);
+      mutationObserver?.disconnect();
+      mutationObserver = null;
+      detach();
+    };
+  }, [compact, isMobile, updateCompactFromScroll]);
+
+  // 展开后把塌陷期间被 CSS 压成一行高度的 textarea 恢复为内容高度（手动高度模式
+  // 由 .is-manual-height 接管，跳过）。
+  const wasReadingCompactRef = useRef(false);
+  useEffect(() => {
+    if (wasReadingCompactRef.current && !readingCompact) {
+      const ta = textareaRef.current;
+      if (ta && !manualModeRef.current) {
+        ta.style.height = "auto";
+        ta.style.height = `${Math.min(ta.scrollHeight, 200)}px`;
+      }
+    }
+    wasReadingCompactRef.current = readingCompact;
+  }, [readingCompact]);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
       const nativeEvent = e.nativeEvent;
@@ -2071,6 +2569,35 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         return;
       }
 
+      // fork:pr13-composer — Shift+Enter 的 Markdown 列表续行：无序列表、有序
+      // 列表（序号 +1）、task 复选框（重置 `[ ]`）、引用 / 缩进组合；空项则删除整
+      // 段前缀（VS Code 行为）。没有结构前缀时返回 null，回退到原生换行。
+      //
+      // `typeof` 守卫的原因：既有测试直接抽取这个回调在 VM 里执行，不会注入
+      // continueMarkdownList；守卫让那些 Shift+Enter 用例仍走原生行为。
+      if (e.key === "Enter" && e.shiftKey && !isComposing && !recentlyComposed
+        && typeof continueMarkdownList === "function") {
+        const ta = textareaRef.current;
+        const start = ta?.selectionStart ?? value.length;
+        const end = ta?.selectionEnd ?? start;
+        const continuation = continueMarkdownList(value, start, end);
+        if (continuation) {
+          e.preventDefault();
+          valueRef.current = continuation.value;
+          setValue(continuation.value);
+          setAtQuery(null);
+          requestAnimationFrame(() => {
+            const el = textareaRef.current;
+            if (!el) return;
+            el.focus();
+            el.setSelectionRange(continuation.caret, continuation.caret);
+            el.style.height = "auto";
+            el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+          });
+          return;
+        }
+      }
+
       if (sendShortcut) {
         e.preventDefault();
         if (isStreaming && (onSteer || onFollowUp)) {
@@ -2084,6 +2611,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
   );
 
   const handleInput = useCallback(() => {
+    // fork:pr23-resize — 手动高度生效时禁用自动增高：高度归手柄所有，textarea
+    // 由 CSS 填满卡片；继续写 style.height 不仅无效（CSS !important 覆盖），
+    // 还会让后续 reset 时残留旧值。
+    if (manualModeRef.current) return;
     const ta = textareaRef.current;
     if (!ta) return;
     ta.style.height = "auto";
@@ -3073,7 +3604,17 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               card, after every banner. */}
           {protrusion}
           <div
-            className="chat-input-shell"
+            ref={inputShellRef}
+            className={`chat-input-shell${manualMode ? " is-manual-height" : ""}${readingCompact ? " is-compact" : ""}`}
+            // fork:pr14-compact — focus 一定展开（状态机 kind: "focus"），
+            // 焦点在 composer 内时也不允许塌陷。
+            onFocus={() => {
+              inputFocusedRef.current = true;
+              setReadingCompact((prev) => nextInputCompactState(prev, { kind: "focus" }));
+            }}
+            onBlur={() => {
+              inputFocusedRef.current = false;
+            }}
             style={{
               minWidth: 0,
               display: "flex",
@@ -3085,10 +3626,22 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               borderRadius: compact ? 0 : "var(--radius-composer, 18px)",
               padding: compact ? 0 : "10px 8px 6px 12px",
               boxShadow: compact ? "none" : "var(--shadow-sm)",
+              // fork:pr23-resize — 手动高度直接挂在这里；自动模式不写 height，
+              // 保持卡片随内容收缩。
+              height: manualMode ? `${manualHeight}px` : undefined,
               transition: "border-color 0.15s, background 0.15s, box-shadow 0.15s",
             } as React.CSSProperties}
           >
+          {/* fork:pr23-resize — 手柄骑在卡片上边缘（向上拖变大）。移动端与引用回答
+              形态不渲染；阅读态塌陷（.is-compact）时由 CSS 隐藏。 */}
+          {!compact && !isMobile && (
+            <div
+              {...inputHeightResizer.separatorProps}
+              className={`chat-input-resize-handle${inputHeightResizer.isResizing ? " is-resizing" : ""}`}
+            />
+          )}
           <div
+            className="chat-input-editor-row"
             style={{
               minWidth: 0,
               display: "flex",
@@ -3097,57 +3650,96 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
               alignItems: compact ? "stretch" : "center",
             }}
           >
-          <textarea
-            ref={textareaRef}
-            className="chat-input-textarea"
-            aria-label={compact ? t("chat.quoteQuestion") : undefined}
-            value={value}
-            onChange={(e) => {
-              valueRef.current = e.target.value;
-              setValue(e.target.value);
-              setHistoryMenuOpen(false);
-              updateAtQuery(e.target.value, e.target.selectionStart);
-            }}
-            onSelect={(e) => {
-              const el = e.currentTarget;
-              updateAtQuery(el.value, el.selectionStart);
-            }}
-            onKeyDown={handleKeyDown}
-            onCompositionStart={() => {
-              isComposingRef.current = true;
-            }}
-            onCompositionEnd={(e) => {
-              isComposingRef.current = false;
-              lastCompositionEndAtRef.current = Date.now();
-              const el = e.currentTarget;
-              updateAtQuery(el.value, el.selectionStart);
-            }}
-            onInput={handleInput}
-            onPaste={handlePaste}
-            placeholder={
-              isStreaming && (onSteer || onFollowUp)
-                ? t("chat.steerPlaceholder")
-                : isStreaming ? t("chat.agentPlaceholder")
-                : t("chat.messagePlaceholder")
-            }
-            rows={1}
+          <div
+            className="chat-input-highlight-wrap"
             style={{
+              position: "relative",
               flex: compact ? "none" : 1,
               minWidth: 0,
               width: "100%",
-              background: "none",
-              border: "none",
-              outline: "none",
-              resize: "none",
-              color: "var(--text)",
-              fontSize: "var(--chat-content-font-size, 13px)",
-              lineHeight: 1.6,
-              fontFamily: "inherit",
-              minHeight: compact ? 96 : 24,
-              maxHeight: 200,
-              overflow: "auto",
+              display: "flex",
             }}
-          />
+          >
+            {/* D2-PR-12 — 高亮 overlay（透明 textarea + 高亮层）。
+                viewport 盖住 textarea 的内容盒并负责裁剪，layer 随滚动平移；
+                textarea 自己的文字透明（caret 单独设色），所以可见字形全部来自
+                高亮层。只有 valid 的 token 才渲染 .mention-token；正在输入（光标
+                所在）的 token 由 activeTokenStart 判定为纯文本，避免半截 token 闪高亮。 */}
+            <div
+              ref={highlightViewportRef}
+              className="chat-input-highlight-viewport"
+              aria-hidden="true"
+            >
+              <div ref={highlightLayerRef} className="chat-input-highlight">
+                {highlightSegments.map((segment, i) =>
+                  segment.type === "text" || !segment.token.valid ? (
+                    segment.text
+                  ) : (
+                    <span key={i} className={`mention-token mention-token-${segment.token.kind}`}>{segment.text}</span>
+                  )
+                )}
+              </div>
+            </div>
+            <textarea
+              ref={textareaRef}
+              className="chat-input-textarea"
+              aria-label={compact ? t("chat.quoteQuestion") : undefined}
+              value={value}
+              onChange={(e) => {
+                valueRef.current = e.target.value;
+                setValue(e.target.value);
+                setHistoryMenuOpen(false);
+                updateAtQuery(e.target.value, e.target.selectionStart);
+              }}
+              onSelect={(e) => {
+                const el = e.currentTarget;
+                updateAtQuery(el.value, el.selectionStart);
+              }}
+              onScroll={syncHighlightScroll}
+              onKeyDown={handleKeyDown}
+              onCompositionStart={() => {
+                isComposingRef.current = true;
+              }}
+              onCompositionEnd={(e) => {
+                isComposingRef.current = false;
+                lastCompositionEndAtRef.current = Date.now();
+                const el = e.currentTarget;
+                updateAtQuery(el.value, el.selectionStart);
+              }}
+              onInput={handleInput}
+              onPaste={handlePaste}
+              placeholder={
+                isStreaming && (onSteer || onFollowUp)
+                  ? t("chat.steerPlaceholder")
+                  : isStreaming ? t("chat.agentPlaceholder")
+                  : t("chat.messagePlaceholder")
+              }
+              rows={1}
+              style={{
+                flex: compact ? "none" : 1,
+                minWidth: 0,
+                width: "100%",
+                background: "none",
+                border: "none",
+                outline: "none",
+                resize: "none",
+                // D2-PR-12 — 透明文字 + 可见 caret：字形由下方高亮层提供。
+                color: "transparent",
+                caretColor: "var(--text)",
+                // 盖在高亮层之上（两者都是定位元素，DOM 顺序靠后者获胜），
+                // 这样选区与 caret 不会被高亮层遮住。
+                position: "relative",
+                // 与高亮层共用同一个内容盒：UA 默认 padding 会让两层错位。
+                padding: 0,
+                fontSize: "var(--chat-content-font-size, 13px)",
+                lineHeight: 1.6,
+                fontFamily: "inherit",
+                minHeight: compact ? 96 : 24,
+                maxHeight: 200,
+                overflow: "auto",
+              }}
+            />
+          </div>
 
           {(compact || isMobile) && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, alignSelf: "flex-end" }}>
@@ -3164,7 +3756,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
         )}
 
         {/* Bottom bar: left | center (context) | right */}
-        {!compact && <div style={{
+        {!compact && <div className="chat-input-toolbar" style={{
           marginTop: 6,
           display: isMobile ? "grid" : "flex",
           gridTemplateColumns: isMobile ? "minmax(0, 1fr) auto" : undefined,
@@ -3211,6 +3803,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 isAutoSelection={isAutoModelSelection}
               />
             )}
+            {/* fork:ui — 输入框侧的独立收藏菜单已移除（用户要求）：收藏现在就在
+                模型下拉里每行右侧的星标上（ModelSelector），不需要第二个入口。 */}
           </div>
 
           {/* spacer */}

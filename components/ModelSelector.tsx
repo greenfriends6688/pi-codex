@@ -87,7 +87,15 @@ export function ModelSelector({
   const showFilter = sortedOptions.length > MODEL_FILTER_THRESHOLD;
   const modelsByProvider: { provider: string; options: ModelSelectorOption[] }[] = [];
 
-  for (const option of filteredOptions) {
+  // fork:ui — 收藏的模型单独成组置顶（见下方渲染），分组时先排除它们。
+  const favoriteOptions = filteredOptions.filter((option) =>
+    favorites.has(favoriteModelKey(option.provider, option.modelId)),
+  );
+  const unfavoritedOptions = filteredOptions.filter(
+    (option) => !favorites.has(favoriteModelKey(option.provider, option.modelId)),
+  );
+
+  for (const option of unfavoritedOptions) {
     const group = modelsByProvider.find((item) => item.provider === option.provider);
     if (group) group.options.push(option);
     else modelsByProvider.push({ provider: option.provider, options: [option] });
@@ -300,7 +308,28 @@ export function ModelSelector({
                   onClear();
                 }} />
               )}
-              {modelsByProvider.length === 0 ? (
+              {/* fork:ui — 收藏的模型置顶成组（用户要求「收藏的排序往前排」）。 */}
+              {favoriteOptions.length > 0 && (
+                <div>
+                  <div style={{ padding: "6px 12px 4px", borderTop: onClear ? "1px solid var(--border)" : "none", color: "var(--text-dim)", fontSize: TEXT["2xs"], fontWeight: 600, letterSpacing: 0, textTransform: "uppercase" }}>
+                    {t("models.favorites")}
+                  </div>
+                  {favoriteOptions.map((option) => (
+                    <ModelOptionButton
+                      key={`fav:${option.provider}:${option.modelId}`}
+                      active={option.modelId === value?.modelId && option.provider === value?.provider}
+                      label={option.name}
+                      provider={option.provider}
+                      modelId={option.modelId}
+                      isFavorite
+                      onToggleFavorite={() => toggleFavoriteModel(option.provider, option.modelId)}
+                      onClick={() => choose(option)}
+                    />
+                  ))}
+                </div>
+              )}
+              {/* 注意：收藏的已从 modelsByProvider 里排除，所以「无结果」要两边都看。 */}
+              {modelsByProvider.length === 0 && favoriteOptions.length === 0 ? (
                 <div style={{ padding: "8px 12px", color: "var(--text-dim)", fontSize: TEXT.sm, whiteSpace: "nowrap" }}>
                   {filter.trim() ? t("chat.noMatchingModels") : "No available models"}
                 </div>
