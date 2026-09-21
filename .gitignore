@@ -64,7 +64,6 @@ e2e_*.mjs
 !/build/
 !/build/*.png
 # fork: 规划/对比类文档只留本地，不进仓库（对齐用户的"docs 里的规划文档不用传"）
-/docs/beautifului-*
 /docs/proma-*
 /docs/boardui-*
 /docs/shadcn-*
