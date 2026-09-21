@@ -8,7 +8,6 @@ import type { MentionValidators } from "@/lib/mention-tokens";
 import { CopyStateIcon } from "./fork/CopyStateIcon";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
-import { BeautifulThinking } from "./fork/BeautifulThinking";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
@@ -1147,24 +1146,6 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
       cancelled = true;
     };
   }, [expanded, block.deferred, content, sessionId, entryId, blockIndex]);
-
-  // fork:beautifului-trial — 试装开关。
-  // true：这个思考块交给 BeautifulUI 原版组件渲染（`components/primitives/ThinkingState.tsx`
-  //       + `components/fork/BeautifulThinking.tsx` 适配层），下面那套 pi-web 自己的
-  //       版本完全不走（连折叠动画、惰性加载一起停用）。
-  // 回滚：把这一行改回 false（或删掉这一整个分支）。
-  const USE_BEAUTIFUL_THINKING = true;
-  if (USE_BEAUTIFUL_THINKING) {
-    return (
-      <div style={{ padding: "2px 0", fontFamily: "var(--font-mono)", fontSize: "calc(12px + var(--chat-font-size-offset, 0px))" }}>
-        <BeautifulThinking
-          text={block.deferred ? content ?? block.thinking : block.thinking}
-          working={working}
-          seconds={duration}
-        />
-      </div>
-    );
-  }
 
   // fork:beautifului-01 — 头部布局与折叠动画移植自 beautifului.dev/#thinking-state，
   // 但保留 pi-web 自己的两件事：折叠态就在头部显示推理首行（比只显示一句
