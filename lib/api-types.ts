@@ -19,6 +19,13 @@ export interface SkillSearchResult {
   package: string;
   installs: string;
   url: string;
+  /** 结果来自哪个市场；缺省视为 skills.sh（兼容旧响应）。 */
+  source?: "skills.sh" | "skillhub";
+  /** 以下仅 SkillHub 提供（skills.sh 的接口没有这些字段）。 */
+  description?: string;
+  publisher?: string;
+  version?: string;
+  stars?: number;
 }
 
 export type SkillInstallScope = "global" | "project";

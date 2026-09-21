@@ -871,6 +871,8 @@ export const enLocale: LocalePlugin = {
     "i18n.dormant": "Dormant",
     "i18n.hiddenButInvocable": "Hidden from model, still manually invocable",
     "i18n.skillSearchPlaceholder": "e.g. react, testing, deploy",
+    "skills.skillhubHint": "Ranked by score — leave the box empty to browse",
+    "skills.skillhubTotal": "SkillHub · {total} skills",
     "i18n.searching": "Searching…",
     "i18n.noSkills": "No skills found",
     "i18n.checkUpdates": "Check updates",

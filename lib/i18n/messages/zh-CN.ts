@@ -870,6 +870,8 @@ export const zhCNLocale: LocalePlugin = {
     "i18n.dormant": "休眠",
     "i18n.hiddenButInvocable": "对模型隐藏，仍可手动调用",
     "i18n.skillSearchPlaceholder": "例如 react、testing、deploy",
+    "skills.skillhubHint": "按评分排序，留空即浏览",
+    "skills.skillhubTotal": "SkillHub · 共 {total} 个技能",
     "i18n.searching": "搜索中…",
     "i18n.noSkills": "未找到技能",
     "i18n.checkUpdates": "检查更新",

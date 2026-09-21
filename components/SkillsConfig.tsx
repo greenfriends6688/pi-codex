@@ -387,25 +387,39 @@ function AddSkillPanel({
     new Set(),
   );
   const [scope, setScope] = useState<"global" | "project">("global");
+  // fork:skillhub — 两个市场：skills.sh（原来的，npx 安装）与 SkillHub
+  // （skillhub.cn，直接下 ZIP，不经 CLI）。切到 SkillHub 时会先按评分列一页，
+  // 因为那边「按评分浏览」本身就是主要用法。
+  const [source, setSource] = useState<"skills.sh" | "skillhub">("skills.sh");
+  const [skillhubTotal, setSkillhubTotal] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
-  const search = useCallback(async (q: string) => {
-    if (!q.trim()) return;
+  const search = useCallback(async (q: string, from: "skills.sh" | "skillhub" = source) => {
+    // skills.sh 必须有关键词；SkillHub 留空 = 按评分浏览（它的默认视图）。
+    if (!q.trim() && from !== "skillhub") return;
     setSearching(true);
     setSearchError(null);
     setResults([]);
+    setSkillhubTotal(0);
     try {
-      const res = await fetch("/api/skills/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: q.trim() }),
-      });
+      const res = from === "skillhub"
+        ? await fetch("/api/skills/skillhub", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: q.trim(), pageSize: 30 }),
+          })
+        : await fetch("/api/skills/search", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query: q.trim() }),
+          });
       const d = (await res.json()) as {
         results?: SkillSearchResult[];
+        total?: number;
         error?: string;
       };
       if (d.error) {
@@ -413,24 +427,41 @@ function AddSkillPanel({
         return;
       }
       setResults(d.results ?? []);
+      if (from === "skillhub" && typeof d.total === "number") setSkillhubTotal(d.total);
       if ((d.results ?? []).length === 0) setSearchError("No skills found");
     } catch (e) {
       setSearchError(String(e));
     } finally {
       setSearching(false);
     }
-  }, []);
+  }, [source]);
+
+  // 切到 SkillHub 就先按评分列一屏，省得对着空列表不知道能搜什么。
+  const switchSource = useCallback((next: "skills.sh" | "skillhub") => {
+    setSource(next);
+    setResults([]);
+    setSearchError(null);
+    setSkillhubTotal(0);
+    if (next === "skillhub") void search(query, "skillhub");
+  }, [query, search]);
 
   const install = useCallback(
-    async (pkg: string) => {
+    async (pkg: string, from: "skills.sh" | "skillhub" = "skills.sh") => {
       setInstalling(pkg);
       setInstallError(null);
       try {
-        const res = await fetch("/api/skills/install", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ package: pkg, scope, cwd }),
-        });
+        // SkillHub 走直接下载 ZIP 的那条；skills.sh 仍然交给 skills CLI。
+        const res = from === "skillhub"
+          ? await fetch("/api/skills/install-skillhub", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ slug: pkg, scope, cwd }),
+            })
+          : await fetch("/api/skills/install", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ package: pkg, scope, cwd }),
+            });
         const d = (await res.json()) as { success?: boolean; error?: string };
         if (!res.ok || d.error) {
           setInstallError(d.error ?? `HTTP ${res.status}`);
@@ -467,6 +498,43 @@ function AddSkillPanel({
       >
         <ConfigDetailTitle>{t("i18n.addSkill")}</ConfigDetailTitle>
 
+        {/* fork:skillhub — 市场切换：skills.sh（CLI 安装）↔ SkillHub（直接下载） */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            style={{
+              display: "flex",
+              borderRadius: "var(--radius-xs)",
+              border: "1px solid var(--border)",
+              overflow: "hidden",
+              fontSize: TEXT.sm,
+              flexShrink: 0,
+            }}
+          >
+            {(["skills.sh", "skillhub"] as const).map((id) => (
+              <button
+                key={id}
+                onClick={() => switchSource(id)}
+                style={{
+                  padding: "3px 10px",
+                  border: "none",
+                  cursor: "pointer",
+                  background: source === id ? "var(--bg-selected)" : "none",
+                  color: source === id ? "var(--text)" : "var(--text-dim)",
+                  fontWeight: source === id ? 600 : 400,
+                  borderRight: id === "skills.sh" ? "1px solid var(--border)" : "none",
+                }}
+              >
+                {id === "skills.sh" ? "skills.sh" : "SkillHub"}
+              </button>
+            ))}
+          </div>
+          {source === "skillhub" && (
+            <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)" }}>
+              {skillhubTotal > 0 ? t("skills.skillhubTotal", { total: skillhubTotal }) : t("skills.skillhubHint")}
+            </span>
+          )}
+        </div>
+
         {/* Search row */}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -491,7 +559,7 @@ function AddSkillPanel({
           <ConfigButton
             variant="primary"
             onClick={() => search(query)}
-            disabled={searching || !query.trim()}
+            disabled={searching || (!query.trim() && source !== "skillhub")}
           >
              {searching ? t("i18n.searching") : t("i18n.search")}
           </ConfigButton>
@@ -568,6 +636,7 @@ function AddSkillPanel({
               installedPackages[scope].has(r.package) ||
               newlyInstalledPkgs.has(`${scope}:${r.package}`);
             const isInstalling = installing === r.package;
+            const rowSource = r.source ?? "skills.sh";
             // split "owner/repo@skill" for cleaner display
             const atIdx = r.package.indexOf("@");
             const repopart = atIdx > -1 ? r.package.slice(0, atIdx) : r.package;
@@ -595,6 +664,22 @@ function AddSkillPanel({
                   >
                     {skillpart ?? repopart}
                   </div>
+                  {/* fork:skillhub — SkillHub 的条目带摘要，装之前能看清是什么 */}
+                  {r.description && (
+                    <div
+                      style={{
+                        fontSize: TEXT.xs,
+                        color: "var(--text-muted)",
+                        marginBottom: 4,
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {r.description}
+                    </div>
+                  )}
                   {/* repo + installs + link row */}
                   <div
                     style={{
@@ -633,7 +718,7 @@ function AddSkillPanel({
                           textDecoration: "none",
                         }}
                       >
-                        skills.sh ↗
+                        {rowSource === "skillhub" ? "skillhub.cn ↗" : "skills.sh ↗"}
                       </a>
                     )}
                   </div>
@@ -641,7 +726,7 @@ function AddSkillPanel({
                 <ConfigButton
                   size="small"
                   onClick={() =>
-                    !isInstalled && !isInstalling && install(r.package)
+                    !isInstalled && !isInstalling && install(r.package, rowSource)
                   }
                   disabled={isInstalled || isInstalling || installing !== null}
                   style={{
