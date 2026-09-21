@@ -174,6 +174,13 @@ const USER_BUBBLE_MAX_HEIGHT = 300;
  */
 const THINKING_AUTO_COLLAPSE_MS = 1_000;
 
+/**
+ * fork:beautifului-01 — 收起时，内容要等 CSS 那条 400ms 的 grid 高度动画走完再卸载。
+ * 跟着 `expanded` 一起卸载会直接掐断动画（内容一没，0fr 的高度立刻到位）。
+ * 改这里的值必须同步改 fork-ui.css 的 `.fork-thinking-body` 过渡时长。
+ */
+const THINKING_BODY_UNMOUNT_MS = 400;
+
 function loadThinkingContent(sessionId: string, entryId: string, blockIndex: number): Promise<string> {
   const key = `${sessionId}:${entryId}:${blockIndex}`;
   const cached = thinkingContentCache.get(key);
@@ -1038,6 +1045,20 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
   const tRef = useRef(t);
   tRef.current = t;
   const preview = getThinkingPreview(block.thinking);
+  const working = Boolean(isStreaming);
+
+  // fork:beautifului-01 — 展开收起走 grid-template-rows 动画，内容不能跟着一起卸载，
+  // 否则收起的动画在卸载的那一刻就结束了。`expanded` 为真时直接渲染（展开没有延迟），
+  // 为假时再保留一小段等待收起动画播完。
+  const [bodyMounted, setBodyMounted] = useState(expanded);
+  useEffect(() => {
+    if (expanded) {
+      setBodyMounted(true);
+      return;
+    }
+    const timer = setTimeout(() => setBodyMounted(false), THINKING_BODY_UNMOUNT_MS);
+    return () => clearTimeout(timer);
+  }, [expanded]);
 
   // fork:fix-thinking-affordance — 两个只在本次运行内有意义的标记。
   // `autoOpenedRef`：展开是"流式期间被自动打开的"，结束后才允许自动收回；
@@ -1126,73 +1147,75 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
     };
   }, [expanded, block.deferred, content, sessionId, entryId, blockIndex]);
 
+  // fork:beautifului-01 — 头部布局与折叠动画移植自 beautifului.dev/#thinking-state，
+  // 但保留 pi-web 自己的两件事：折叠态就在头部显示推理首行（比只显示一句
+  // "Thought for Ns" 有用得多），以及原样的展开偏好/自动收起/预取行为。
   return (
-    <div style={{
-      display: "flex", alignItems: "flex-start", gap: 6, minWidth: 0,
-      border: "none",
-      borderRadius: 0,
-      padding: "2px 0",
-      background: "transparent",
-      fontFamily: "var(--font-mono)",
-      fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
-      lineHeight: 1.45,
-    }}>
+    <div
+      className="fork-thinking"
+      data-expanded={expanded ? "true" : "false"}
+      style={{
+        padding: "2px 0",
+        fontFamily: "var(--font-mono)",
+        fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
+        lineHeight: 1.45,
+      }}
+    >
       <button
         type="button"
         aria-expanded={expanded}
         aria-label={`${t("i18n.thinking")}${preview ? `: ${preview}` : ""}`}
         title={t("i18n.thinking")}
+        className="fork-thinking-header"
         onClick={() => {
           manualOverrideRef.current = true;
           setExpanded((v) => !v);
         }}
         onPointerEnter={prefetch}
         onFocus={prefetch}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          width: expanded ? 14 : "100%",
-          flexShrink: expanded ? 0 : 1,
-          minWidth: 0,
-          minHeight: "1.5em",
-          padding: 0,
-          background: "transparent",
-          border: "none",
-          color: "var(--text-muted)",
-          cursor: "pointer",
-          font: "inherit",
-          textAlign: "left",
-        }}
       >
-        <ThinkingIcon active={expanded} />
+        <ThinkingIcon active={working} />
+        <span className="fork-thinking-label" data-live={working ? "true" : undefined}>
+          {t("i18n.thinking")}
+        </span>
+        {duration !== undefined && !working && (
+          <span className="fork-thinking-duration">{duration}s</span>
+        )}
         {!expanded && (
-          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span className="fork-thinking-preview">
             {preview ? <ReactMarkdown allowedElements={[]} unwrapDisallowed skipHtml>{preview}</ReactMarkdown> : "..."}
           </span>
         )}
-      </button>
-      {expanded && (
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            color: error ? "var(--danger)" : "var(--text-muted)",
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-          }}
+        <svg
+          className="fork-thinking-chevron"
+          width={14}
+          height={14}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2.2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
         >
-          {loading ? (
-            <span style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0" }} aria-hidden="true">
-              <span className="skeleton-line" style={{ height: 10, width: "92%" }} />
-              <span className="skeleton-line" style={{ height: 10, width: "78%" }} />
-            </span>
-          ) : error ?? (block.deferred ? content : block.thinking)}
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      <div className="fork-thinking-body">
+        <div>
+          <div className="fork-thinking-trace">
+            <span aria-hidden="true" className="fork-thinking-line" />
+            <div className="fork-thinking-content" data-error={error ? "true" : undefined}>
+              {(expanded || bodyMounted) && (loading ? (
+                <span style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0" }} aria-hidden="true">
+                  <span className="skeleton-line" style={{ height: 10, width: "92%" }} />
+                  <span className="skeleton-line" style={{ height: 10, width: "78%" }} />
+                </span>
+              ) : error ?? (block.deferred ? content : block.thinking))}
+            </div>
+          </div>
         </div>
-      )}
-      {duration !== undefined && (
-        <span style={{ flexShrink: 0, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
-      )}
+      </div>
     </div>
   );
 }

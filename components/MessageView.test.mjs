@@ -72,6 +72,35 @@ test("previews the first thinking line and reveals the full text with the saved 
   }
 });
 
+test("stops the thinking shimmer and shows the duration once the run settles", () => {
+  const block = { type: "thinking", thinking: "Weighing two equally good options" };
+  const render = (props) => renderToStaticMarkup(
+    React.createElement(I18nProvider, null, React.createElement(ThinkingBlock, { block, blockIndex: 0, ...props })),
+  );
+
+  // 流式期间：标题带流光标记，不报耗时（耗时还不知道）。
+  const live = render({ isStreaming: true, duration: 3 });
+  assert.match(live, /data-live="true">Thinking<\/span>/);
+  assert.doesNotMatch(live, /class="fork-thinking-duration"/);
+
+  // 落定：不再有流光标记，耗时带上；首行预览仍在头部可见。
+  const settled = render({ duration: 3 });
+  assert.match(settled, /class="fork-thinking-duration">3s<\/span>/);
+  assert.doesNotMatch(settled, /data-live/);
+  assert.match(settled, /fork-thinking-preview/);
+  assert.match(settled, /data-expanded="false"/);
+});
+
+test("keeps the collapsed thinking body out of the markup", () => {
+  const html = renderMessage({
+    role: "assistant",
+    content: [{ type: "thinking", thinking: "First line\n\nSecond line" }],
+  });
+  assert.match(html, /data-expanded="false"/);
+  assert.match(html, /fork-thinking-body/);
+  assert.doesNotMatch(html, /Second line/);
+});
+
 test("shows deferred thinking previews without loading the full content", () => {
   const html = renderMessage({
     role: "assistant",
