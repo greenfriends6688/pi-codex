@@ -16,6 +16,22 @@ export function shouldOpenLocalFileInApp(event: LocalFileClickEvent): boolean {
     && !event.altKey;
 }
 
+/**
+ * fork:open-link-in-app — 外链该不该在应用内的浏览器面板打开。
+ *
+ * 只有不带修饰键的左键单击算“就在这里看”；带任何修饰键（Cmd/Ctrl/Shift/Alt）或中键
+ * 一律不拦，保持“在新标签页打开” = 系统浏览器的旧行为 —— 这也是编辑器预览
+ * 类界面的通行约定。
+ */
+export function shouldOpenLinkInApp(event: LocalFileClickEvent): boolean {
+  return !event.defaultPrevented
+    && event.button === 0
+    && !event.metaKey
+    && !event.ctrlKey
+    && !event.shiftKey
+    && !event.altKey;
+}
+
 function safeDecode(value: string): string {
   try {
     return decodeURIComponent(value);

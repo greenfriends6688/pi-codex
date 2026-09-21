@@ -25,10 +25,8 @@ const liveTail = source.slice(
 
 test("the running turn is rendered as one timeline instead of the flat list", () => {
   assert.ok(liveTail.length > 0, "the live-tail branch moved; update this test with it");
-  // legacy keeps the flat renderer …
-  assert.match(liveTail, /if \(!grouped\) \{/);
-  // … and the grouped path builds a single group out of the turn's committed
-  // steps plus the in-flight blocks.
+  // 时间线是唯一渲染器（2026-09-21 删掉平铺列表与标签视图后不再有 `!grouped` 分支），
+  // 所以运行中的一轮只会构建一个组：本轮的已提交步骤 + 在飞块。
   assert.match(liveTail, /const liveBlocks: ProcessContentBlock\[\] = \[\]/);
   assert.match(liveTail, /liveBlocks\.push\(\.\.\.streamingProcess\.blocks\)/);
   assert.match(liveTail, /<ProcessGroup/);
@@ -37,7 +35,8 @@ test("the running turn is rendered as one timeline instead of the flat list", ()
 
 test("the in-flight message is converted once and shared by both call sites", () => {
   assert.match(source, /const streamingProcess = useMemo\(\(\) => \{/);
-  assert.match(source, /if \(processDisplayMode === "legacy"\) return null;/);
+  // 不再有「legacy 时不算」的早退；grouped 恒真。
+  assert.doesNotMatch(source, /processDisplayMode === "legacy"/);
 });
 
 test("the streaming block contributes only the answer once the timeline exists", () => {

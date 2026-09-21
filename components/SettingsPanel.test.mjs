@@ -85,11 +85,12 @@ test("groups chat display controls together without row backgrounds", () => {
 
   assert.doesNotMatch(appearanceSection, /settings-chat-content/);
   assert.match(chatSection, /className="settings-chat-options"/);
-  // 7 since fork:ui-22 added the interface-density select next to the other
-  // display controls (it belongs to the same group).
-  assert.equal((chatSection.match(/className="settings-chat-option(?: |")/g) ?? []).length, 7);
-  assert.equal((chatSection.match(/<ConfigSwitch/g) ?? []).length, 2);
-  for (const key of ["thinkingExpandedDefault", "chatContentWidth", "chatContentFontSize", "extensionWidgetFontSize", "quoteSelection", "processDisplay"]) {
+  // 9 = 原 7 条（含 fork:ui-22 的界面密度下拉）去掉「过程显示」下拉、加上
+  // fork:step-expansion 的三条类别开关（推理 / 命令 / 工具调用）。
+  assert.equal((chatSection.match(/className="settings-chat-option(?: |")/g) ?? []).length, 9);
+  // 2 → 5：三个类别开关也走 ConfigSwitch。
+  assert.equal((chatSection.match(/<ConfigSwitch/g) ?? []).length, 5);
+  for (const key of ["thinkingExpandedDefault", "chatContentWidth", "chatContentFontSize", "extensionWidgetFontSize", "quoteSelection", "stepExpandReasoning", "stepExpandCommand", "stepExpandTool"]) {
     assert.match(chatSection, new RegExp(`t\\("settings\\.${key}"\\)`));
   }
   assert.doesNotMatch(panelSource, /ThinkingIcon|settings-thinking-/);

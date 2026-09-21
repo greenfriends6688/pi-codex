@@ -29,7 +29,6 @@ import { extractTodoState } from "@/lib/todo-state";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
 import { ProcessGroup, summarizeProcessBlocks } from "./ProcessGroup";
-import { useProcessDisplayMode, type ProcessRendererPreference } from "@/hooks/useProcessDisplayMode";
 import { messageToProcessContentBlocks, type ProcessContentBlock } from "@/lib/process-content";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
 import { useDragDrop } from "@/hooks/useDragDrop";
@@ -266,7 +265,7 @@ function withAssistantBlocks(
   return next;
 }
 
-function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = false, reveal = false, summaryText, displayMode, onToggleDisplayMode, children, t }: { messageCount: number; toolCallCount: number; defaultExpanded?: boolean; reveal?: boolean; summaryText?: string; displayMode?: ProcessRendererPreference; onToggleDisplayMode?: (mode: ProcessRendererPreference) => void; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
+function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = false, reveal = false, summaryText, children, t }: { messageCount: number; toolCallCount: number; defaultExpanded?: boolean; reveal?: boolean; summaryText?: string; children: ReactNode; t: (key: string, params?: Record<string, string | number>) => string }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   useLayoutEffect(() => {
     if (reveal) setExpanded(true);
@@ -309,37 +308,6 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
           {label}
         </span>
       </button>
-      {/* fork:process-mode-toggle — 时间轴 / 标签两种视图以前只能去设置里切，而且切完
-          得自己找差别。把开关放在摘要行上：就地对比，一步到位。 */}
-      {displayMode && displayMode !== "legacy" && onToggleDisplayMode && (
-        <button
-          type="button"
-          onClick={() => {
-            onToggleDisplayMode(displayMode === "timeline" ? "tabs" : "timeline");
-            setExpanded(true);
-          }}
-          title={t(displayMode === "timeline" ? "settings.processDisplayTabs" : "settings.processDisplayTimeline")}
-          aria-label={t(displayMode === "timeline" ? "settings.processDisplayTabs" : "settings.processDisplayTimeline")}
-          className="process-mode-toggle"
-        >
-          {displayMode === "timeline" ? (
-            // 切到标签视图：四块并排的短横
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-              <rect x="3" y="6" width="7" height="5" rx="1.5" />
-              <rect x="14" y="6" width="7" height="5" rx="1.5" />
-              <rect x="3" y="14" width="7" height="5" rx="1.5" />
-              <rect x="14" y="14" width="7" height="5" rx="1.5" />
-            </svg>
-          ) : (
-            // 切到时间轴：竖线 + 节点
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-              <line x1="6" y1="4" x2="6" y2="20" />
-              <circle cx="6" cy="7" r="2" /><circle cx="6" cy="16" r="2" />
-              <line x1="11" y1="7" x2="20" y2="7" /><line x1="11" y1="16" x2="20" y2="16" />
-            </svg>
-          )}
-        </button>
-      )}
       </div>
       {(expanded || reveal) && (
         <div style={{ marginTop: 8 }}>
@@ -353,7 +321,6 @@ function ProcessDetailsGroup({ messageCount, toolCallCount, defaultExpanded = fa
 export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initialScrollPosition, onScrollPositionChange, sessionRunning, newSessionCwd, newSessionDraftKey, onAgentEnd, onAttentionNeeded, onSessionCreated, onSessionForked, onOpenSessionPane, modelsRefreshKey, chatInputRef, onBranchDataChange, onSystemPromptChange, onSystemToolsChange, onSystemInfoLoaderChange, onSessionStatsChange, onSessionStatsPanelOpen, onContextUsageChange, onOpenFile, onOpenSession, onAskInNewChat, quoteSelectionEnabled = false, initialPrompt, onInitialPromptConsumed, newSessionTargets = null, soundEnabled = true, onSoundToggle, playDoneSound = () => {}, unlockAudio, onEmptyChange }: Props) {
   const { t } = useI18n();
   const isMobile = useIsMobile();
-  const { displayMode: processDisplayMode, setDisplayMode: setProcessDisplayMode } = useProcessDisplayMode();
   const completionNotificationsEnabled = session?.relation?.kind !== "subagent";
 
   // Wrap onAgentEnd to play the completion sound. This is more reliable than
@@ -1022,7 +989,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   // messages of the turn and this partial one), so both call sites read the same
   // memo instead of converting the streaming message twice.
   const streamingProcess = useMemo(() => {
-    if (processDisplayMode === "legacy") return null;
     const live = streamState.streamingMessage as AgentMessage | undefined;
     if (!streamState.isStreaming || !live || live.role !== "assistant") return null;
     const split = splitFinalAssistantBlocks(live);
@@ -1033,7 +999,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         { messageIndex: messages.length, phase: "process", toolResults: toolResultsMap, isStreaming: true },
       ),
     };
-  }, [processDisplayMode, streamState.isStreaming, streamState.streamingMessage, messages.length, toolResultsMap]);
+  }, [streamState.isStreaming, streamState.streamingMessage, messages.length, toolResultsMap]);
   // Set by the render pass below when the grouped renderer already emitted the
   // running turn's timeline; the streaming block at the bottom of the list then
   // contributes only the answer half instead of opening a second group.
@@ -1477,8 +1443,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   continue;
                 }
 
-                const grouped = processDisplayMode !== "legacy";
-
                 // fork:process-live-2 — a running turn used to render flat here, and
                 // only the in-flight message reached the grouped renderer. The timeline
                 // therefore vanished the moment the turn's first tool call was committed
@@ -1487,14 +1451,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 // timeline: its committed steps and the in-flight blocks share a group.
                 const isLiveTail = (sessionBusy || streamState.isStreaming) && endIdx === messages.length && userIdx === lastAnchorIdx;
                 if (isLiveTail) {
-                  if (!grouped) {
-                    for (let renderIdx = userIdx; renderIdx < endIdx; renderIdx++) {
-                      rendered.push(renderMessage(renderIdx));
-                    }
-                    idx = endIdx;
-                    continue;
-                  }
-
                   rendered.push(renderMessage(userIdx));
 
                   const liveBlocks: ProcessContentBlock[] = [];
@@ -1535,8 +1491,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                           // starts — the same rule the finalized group uses.
                           defaultExpanded={!streamingProcess || streamingProcess.answerBlocks.length === 0}
                           summaryText={summarizeProcessBlocks(liveBlocks, (key, params) => t(key, params), (key) => t(key))}
-                          displayMode={processDisplayMode}
-                          onToggleDisplayMode={setProcessDisplayMode}
                           t={t}
                         >
                           <ProcessGroup
@@ -1578,17 +1532,13 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   if (processMessage.role === "custom") {
                     const customReveal = Boolean(pendingSearchScroll && pendingSearchScroll.entryId === entryIds[processIdx]);
                     revealProcess ||= customReveal;
-                    if (grouped) {
-                      processRefIdx ??= visibleRefIndexByMessage.get(processIdx);
-                      groupedProcessBlocks.push(...messageToProcessContentBlocks(processMessage, {
-                        messageIndex: processIdx,
-                        entryId: entryIds[processIdx],
-                        phase: "process",
-                        toolResults: toolResultsMap,
-                      }));
-                      continue;
-                    }
-                    processViews.push(renderMessage(processIdx, { attachRef: false, keyPrefix: "process" }));
+                    processRefIdx ??= visibleRefIndexByMessage.get(processIdx);
+                    groupedProcessBlocks.push(...messageToProcessContentBlocks(processMessage, {
+                      messageIndex: processIdx,
+                      entryId: entryIds[processIdx],
+                      phase: "process",
+                      toolResults: toolResultsMap,
+                    }));
                     continue;
                   }
                   if (processMessage.role !== "assistant") continue;
@@ -1600,58 +1550,41 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                   processRefIdx ??= visibleRefIndexByMessage.get(processIdx);
                   processToolCount += countToolCallBlocks(blocks);
                   revealProcess ||= Boolean(pendingSearchScroll && entryIds[processIdx] === pendingSearchScroll.entryId && (!searchBlock || blocks.includes(searchBlock)));
-                  if (grouped) {
-                    // The grouped renderer consumes semantic blocks instead of the
-                    // per-message flat views, so nothing is pushed into processViews
-                    // in this branch.
-                    groupedProcessBlocks.push(...messageToProcessContentBlocks(message, {
-                      messageIndex: processIdx,
-                      entryId: entryIds[processIdx],
-                      phase: "process",
-                      toolResults: toolResultsMap,
-                    }));
-                    continue;
-                  }
-                  processViews.push(renderMessage(processIdx, {
-                    attachRef: false,
-                    keyPrefix: "process",
-                    messageOverride: message,
-                    showTimestamp: false,
+                  groupedProcessBlocks.push(...messageToProcessContentBlocks(message, {
+                    messageIndex: processIdx,
+                    entryId: entryIds[processIdx],
+                    phase: "process",
+                    toolResults: toolResultsMap,
                   }));
+                  continue;
                 }
 
-                if (processViews.length > 0 || groupedProcessBlocks.length > 0) {
+                if (groupedProcessBlocks.length > 0) {
                   // The group header is the only place a summary is rendered, so
                   // the grouped renderer computes its digest here and hands it
                   // down instead of printing a second count line inside itself.
-                  const groupedSummary = grouped
-                    ? summarizeProcessBlocks(groupedProcessBlocks, (key, params) => t(key, params), (key) => t(key))
-                    : "";
+                  const groupedSummary = summarizeProcessBlocks(groupedProcessBlocks, (key, params) => t(key, params), (key) => t(key));
                   rendered.push(
                     <div
                       key={`process-group-${entryIds[userIdx] ?? userIdx}`}
                       ref={processRefIdx === undefined ? undefined : (el) => { messageRefs.current[processRefIdx] = el; }}
                     >
                       <ProcessDetailsGroup
-                        messageCount={grouped ? Math.max(1, processToolCount) : processViews.length}
+                        messageCount={Math.max(1, processToolCount)}
                         toolCallCount={processToolCount}
                         defaultExpanded={!finalAnswerMessage}
                         reveal={revealProcess}
-                        summaryText={grouped ? groupedSummary : undefined}
-                        displayMode={grouped ? processDisplayMode : undefined}
-                        onToggleDisplayMode={grouped ? setProcessDisplayMode : undefined}
+                        summaryText={groupedSummary}
                         t={t}
                       >
-                        {grouped ? (
-                          <ProcessGroup
-                            blocks={groupedProcessBlocks}
-                            isStreaming={streamState.isStreaming && finalAssistantIdx === messages.length - 1}
-                            toolResults={toolResultsMap}
-                            onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
-                            onOpenSession={onOpenSession}
-                            reveal={revealProcess}
-                          />
-                        ) : processViews}
+                        <ProcessGroup
+                          blocks={groupedProcessBlocks}
+                          isStreaming={streamState.isStreaming && finalAssistantIdx === messages.length - 1}
+                          toolResults={toolResultsMap}
+                          onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
+                          onOpenSession={onOpenSession}
+                          reveal={revealProcess}
+                        />
                       </ProcessDetailsGroup>
                     </div>,
                   );
@@ -1736,8 +1669,6 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                         // starts — the same rule the finalized group uses.
                         defaultExpanded={streamingProcess.answerBlocks.length === 0}
                         summaryText={summarizeProcessBlocks(streamingProcess.blocks, (key, params) => t(key, params), (key) => t(key))}
-                        displayMode={processDisplayMode}
-                        onToggleDisplayMode={setProcessDisplayMode}
                         t={t}
                       >
                         <ProcessGroup

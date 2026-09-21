@@ -31,7 +31,8 @@ test("chip 的键盘可达性没丢（Enter / 空格同样打开文件）", () =
   assert.match(code, /event\.stopPropagation\(\);\s*\n?\s*onOpenFile\(target\)/, "点击要阻止冒泡（否则会连带折叠步骤行）");
 });
 
-test("这个文件里只有两个 <button>（两层外层行），别的地方不许再冒出来", () => {
+test("这个文件里只有一个 <button>（时间线步骤行），别的地方不许再冒出来", () => {
+  // 标签视图删除前是 2 个（步骤行 + 芯片条），现在只剩步骤行。
   const buttons = code.match(/<button/g) ?? [];
-  assert.equal(buttons.length, 2, `ProcessGroup.tsx 期望只有 2 个 <button>，实际 ${buttons.length} 个`);
+  assert.equal(buttons.length, 1, `ProcessGroup.tsx 期望只有 1 个 <button>，实际 ${buttons.length} 个`);
 });

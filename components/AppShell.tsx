@@ -83,6 +83,7 @@ import {
 } from "@/lib/composer-context";
 import type { SessionRowContextMenuDetail } from "@/lib/session-row-context-menu";
 import { ContextMenuProvider } from "./ContextMenu";
+import { LinkOpenProvider } from "./LinkOpenContext";
 import type { NewSessionProject, NewSessionTargets } from "./fork/ProjectChip";
 // fork:proma-05-explore — 右栏并排看探索分支（只读）
 import { ExplorationPane } from "./fork/ExplorationPane";
@@ -539,6 +540,10 @@ export function AppShell() {
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [terminalsRestored, setTerminalsRestored] = useState(false);
   const [browserTabs, setBrowserTabs] = useState<BrowserTab[]>([]);
+  // handleOpenBrowser 需要看当前已开的标签（复用同 URL 的），但不能把 browserTabs
+  // 写进它的依赖数组——那会让它每个标签变动都重建，连带把 provider value 也换掉。
+  const browserTabsRef = useRef<BrowserTab[]>([]);
+  browserTabsRef.current = browserTabs;
   // fork:file-tab-keep-alive — 已激活过的文件 tab（首次激活才挂载，关闭后剪枝）。
   const [mountedFileTabs, setMountedFileTabs] = useState<ReadonlySet<string>>(() => new Set());
   // fork:git-graph-tab — 每个工作区一个单例 Git 图谱 tab（不持久化：它是“看一眼”的视图）。
@@ -1325,6 +1330,14 @@ export function AppShell() {
   }, [terminalTabs, isMobile, workspaceSwapped]);
 
   const handleOpenBrowser = useCallback((url = "") => {
+    // fork:open-link-in-app — 同一个 URL 已经开着就切过去。正文里反复引同一个
+    // 链接、或者来回点同一处时，不该每点一次就多一个标签页。
+    const existing = url ? browserTabsRef.current.find((open: BrowserTab) => open.url === url) : undefined;
+    if (existing) {
+      setActiveFileTabId(existing.id);
+      setRightPanelOpen(true);
+      return;
+    }
     const tab = newBrowserTab(url);
     setBrowserTabs((tabs) => [...tabs, tab]);
     setActiveFileTabId(tab.id);
@@ -2267,6 +2280,9 @@ export function AppShell() {
 
   return (
     <ContextMenuProvider>
+    {/* fork:open-link-in-app — 全应用的外链都先走内置浏览器面板；
+        带修饰键/中键点仍然交给系统浏览器（见 MarkdownBody 的 ExternalLink）。 */}
+    <LinkOpenProvider onOpenLink={handleOpenBrowser}>
     <>
     <style>{`
       @media (max-width: 640px) {
@@ -2996,6 +3012,7 @@ export function AppShell() {
       />
     )}
     </>
+    </LinkOpenProvider>
     </ContextMenuProvider>
   );
 }

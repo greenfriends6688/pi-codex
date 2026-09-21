@@ -63,7 +63,18 @@ function getNextBin(appRoot) {
   return null;
 }
 
-// ── 端口分配：监听 port 0 拿一个空闲端口，避免与 30141(dev) 冲突 ────────────
+// ── 端口分配 ────────────────────────────────────────────────────────────────
+//
+// fork:desktop-stable-port —— 端口必须**稳定**，这里以前是每次启动 listen(0)
+// 拿一个随机空闲端口，于是窗口的 origin（http://127.0.0.1:<port>）每次都变。
+// Chromium 的 localStorage 是按 origin 分库的，origin 一变就等于换了个空库：
+// 用户在设置里改的主题、语言、聊天宽度、过程显示……全部“保存不下来”。
+// （窗口大小却能记住 —— 它存在 userData/window-state.json，与 origin 无关。）
+//
+// 现在按固定端口依次尝试；全被占用才退回随机端口，而且那时设置会丢，
+// 所以打一行警告。应用有 requestSingleInstanceLock，自己不会跟自己撞端口。
+const DESKTOP_PORTS = [30142, 30143, 30144, 30145];
+
 function getFreePort() {
   return new Promise((resolve, reject) => {
     const srv = createServer();
@@ -75,11 +86,33 @@ function getFreePort() {
   });
 }
 
+/** 这个端口现在能占用吗（占一下再放掉）。 */
+function canBind(port) {
+  return new Promise((resolve) => {
+    const srv = createServer();
+    srv.once("error", () => resolve(false));
+    srv.listen(port, "127.0.0.1", () => srv.close(() => resolve(true)));
+  });
+}
+
+async function pickPort(requested) {
+  if (requested > 0 && requested < 65536) return requested;
+  for (const port of DESKTOP_PORTS) {
+    if (await canBind(port)) return port;
+  }
+  const fallback = await getFreePort();
+  console.warn(
+    `[pinkslab] 固定端口 ${DESKTOP_PORTS.join("/")} 全被占用，退回随机端口 ${fallback}；` +
+    "本次启动的界面设置不会保留（origin 变了）。",
+  );
+  return fallback;
+}
+
 // ── 启动 Next.js 服务 ───────────────────────────────────────────────────────
 async function startServer(appRoot) {
-  // 优先使用外部指定的端口（冒烟测试/运维固定端口），否则取空闲端口
+  // 优先使用外部指定的端口（冒烟测试/运维固定端口），否则用固定端口列表
   const requested = Number(process.env.PI_WEB_PORT || process.env.PORT || 0);
-  const port = requested > 0 && requested < 65536 ? requested : await getFreePort();
+  const port = await pickPort(requested);
   const nextBin = getNextBin(appRoot);
   if (!nextBin) {
     dialog.showErrorBox(

@@ -2,16 +2,40 @@
 
 import { createContext, memo, useContext, useMemo, useRef, type ComponentProps, type MouseEvent } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
-import { resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
+import { resolveLocalFileHref, shouldOpenLinkInApp, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { markdownRehypePluginsFor, markdownRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { mentionRehypePlugin, mentionRemarkPlugin, type MentionValidators } from "@/lib/mention-tokens";
 import { splitStableParts } from "@/lib/markdown-incremental";
 import { useThrottledText } from "@/hooks/useThrottledText";
 import { ImagePreview } from "./ImagePreview";
+import { useOpenLink } from "./LinkOpenContext";
 import { MermaidBlock, CodeBlock } from "./MermaidBlock";
 
 const MarkdownLinkContext = createContext(false);
+
+/**
+ * fork:open-link-in-app — 外链渲染。
+ *
+ * 默认单左键单击交给应用内的浏览器面板（`LinkOpenContext`，由 AppShell 提供）；
+ * 带修饰键 / 中键仍然走 `target="_blank"`，也就是真正的系统浏览器。
+ * 没有 provider（例如单独渲染的测试、或本就不该内嵌的场景）时保持原行为。
+ */
+function ExternalLink({ href, children, ...props }: ComponentProps<"a"> & ExtraProps) {
+  const openLink = useOpenLink();
+  const handleClick = openLink
+    ? (event: MouseEvent<HTMLAnchorElement>) => {
+        if (!shouldOpenLinkInApp(event) || !href) return;
+        event.preventDefault();
+        openLink(href);
+      }
+    : undefined;
+  return (
+    <a href={href} {...props} target="_blank" rel="noopener noreferrer" onClick={handleClick}>
+      {children}
+    </a>
+  );
+}
 
 interface MarkdownBodyProps {
   children: string;
@@ -99,9 +123,9 @@ function buildMarkdownComponents(
       if (!filePath || !openFile) {
         return (
           <MarkdownLinkContext.Provider value={true}>
-            <a href={href} {...props} target="_blank" rel="noopener noreferrer">
+            <ExternalLink href={href} {...props}>
               {children}
-            </a>
+            </ExternalLink>
           </MarkdownLinkContext.Provider>
         );
       }

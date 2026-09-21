@@ -49,10 +49,10 @@ import { useBorderDepth } from "@/hooks/useBorderDepth";
 import { useUiDensity } from "@/hooks/useUiDensity";
 import type { UiDensity } from "@/lib/ui-density";
 import {
-  PROCESS_RENDERER_STORAGE_KEY,
-  useProcessDisplayMode,
-  type ProcessRendererPreference,
-} from "@/hooks/useProcessDisplayMode";
+  loadStepExpansion,
+  setStepCategoryExpanded,
+  type StepExpansion,
+} from "@/lib/process-step-expansion";
 import { BORDER_DEPTH_MAX, BORDER_DEPTH_MIN } from "@/lib/border-depth";
 
 interface Props {
@@ -199,7 +199,7 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
   const { preference, setThemePreference } = useTheme();
   const { borderDepth, setBorderDepth } = useBorderDepth();
   const { uiDensity, setUiDensity } = useUiDensity();
-  const { displayMode: processDisplayMode, setDisplayMode: setProcessDisplayMode } = useProcessDisplayMode();
+  const [stepExpansion, setStepExpansion] = useState<StepExpansion>(loadStepExpansion);
   const { width: chatContentWidth, setWidth: setChatContentWidth, fontSize, setFontSize, extensionWidgetFontSize, setExtensionWidgetFontSize } = useChatAppearance();
   const [shellSettings, setShellSettings] = useState<ShellToolSettingsResponse | null>(null);
   const [shellSaving, setShellSaving] = useState(false);
@@ -383,7 +383,6 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
               }}
             />
           </div>
-          <div className="settings-chat-option">
           <div className="settings-chat-option settings-chat-range-option">
             <span className="settings-chat-option-label">{t("settings.density")}</span>
             <select
@@ -398,19 +397,34 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
             </select>
             <p className="settings-chat-range-hint">{t("settings.densityHint")}</p>
           </div>
-            <span className="settings-chat-option-label">{t("settings.processDisplay")}</span>
-            <select
-              className="settings-select"
-              value={processDisplayMode}
-              aria-label={t("settings.processDisplay")}
-              onChange={(event) => setProcessDisplayMode(event.target.value as ProcessRendererPreference)}
-            >
-              <option value={PROCESS_RENDERER_STORAGE_KEY.legacy}>{t("settings.processDisplayLegacy")}</option>
-              <option value={PROCESS_RENDERER_STORAGE_KEY.timeline}>{t("settings.processDisplayTimeline")}</option>
-              <option value={PROCESS_RENDERER_STORAGE_KEY.tabs}>{t("settings.processDisplayTabs")}</option>
-            </select>
-            <p className="settings-chat-range-hint">{t("settings.processDisplayDescription")}</p>
+          {/* fork:step-expansion — 时间线里哪几类步骤默认摊开。原来这里是
+              「过程显示：传统 / 时间线 / 标签」三选一，现在只剩时间线一种视图，
+              这个下拉框换成了三个按类别控制的开关。 */}
+          <div className="settings-chat-option settings-chat-switch-option">
+            <span>{t("settings.stepExpandReasoning")}</span>
+            <ConfigSwitch
+              checked={stepExpansion.reasoning}
+              label={t("settings.stepExpandReasoning")}
+              onChange={(enabled) => setStepExpansion(setStepCategoryExpanded("reasoning", enabled))}
+            />
           </div>
+          <div className="settings-chat-option settings-chat-switch-option">
+            <span>{t("settings.stepExpandCommand")}</span>
+            <ConfigSwitch
+              checked={stepExpansion.command}
+              label={t("settings.stepExpandCommand")}
+              onChange={(enabled) => setStepExpansion(setStepCategoryExpanded("command", enabled))}
+            />
+          </div>
+          <div className="settings-chat-option settings-chat-switch-option">
+            <span>{t("settings.stepExpandTool")}</span>
+            <ConfigSwitch
+              checked={stepExpansion.tool}
+              label={t("settings.stepExpandTool")}
+              onChange={(enabled) => setStepExpansion(setStepCategoryExpanded("tool", enabled))}
+            />
+          </div>
+          <p className="settings-chat-range-hint">{t("settings.stepExpandHint")}</p>
           <div className="settings-chat-option settings-chat-range-option">
             <div className="settings-chat-range-header">
               <label htmlFor="settings-chat-content-width">{t("settings.chatContentWidth")}</label>

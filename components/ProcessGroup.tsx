@@ -6,7 +6,6 @@ import { ToolCallBlock, getMessageImages, getMessageText, imageSource } from "./
 import { ImagePreview } from "./ImagePreview";
 import { getFileIcon } from "./FileIcons";
 import { useI18n } from "@/hooks/useI18n";
-import { useProcessDisplayMode } from "@/hooks/useProcessDisplayMode";
 import type { ProcessContentBlock } from "@/lib/process-content";
 import type { ToolResultMessage } from "@/lib/types";
 import {
@@ -21,6 +20,12 @@ import {
   isSearchToolName,
   type StepTone,
 } from "@/lib/step-categorizer";
+import {
+  loadStepExpansion,
+  stepCategoryOf,
+  STEP_EXPANSION_EVENT,
+  type StepExpansion,
+} from "@/lib/process-step-expansion";
 import { isApplyPatchToolName, isEditToolName, isWriteToolName } from "@/lib/tool-names";
 import { extractApplyPatchPaths, getApplyPatchInputText } from "@/lib/apply-patch";
 
@@ -40,14 +45,9 @@ import { extractApplyPatchPaths, getApplyPatchInputText } from "@/lib/apply-patc
  *   ├ > Run  node js/snake.js
  *   └ ⚠ bash  5s  failed
  *
- * Two display modes:
- *  - `timeline` — the rows above, the default reading view;
- *  - `tabs`     — the same steps as a wrapped chip strip: a compact digest of
- *                 the turn where a chip opens its detail in place.
- *
  * Classification is pure (`lib/step-categorizer.ts`); this file only composes
- * rows. The renderer is opt-in — `useProcessDisplayMode()` defaults to
- * `legacy`, so the grouped path is a deliberate choice in Settings.
+ * rows. This is the only process renderer now — the flat list and the tab strip
+ * were removed on 2026-09-21 — so a turn always reads as one timeline.
  */
 
 type ToolBlock = Extract<ProcessContentBlock, { type: "toolCall" }>;
@@ -641,22 +641,30 @@ export function ProcessGroup({
   className,
 }: ProcessGroupProps) {
   const { t } = useI18n();
-  const { displayMode } = useProcessDisplayMode();
   const steps = useMemo(() => buildProcessSteps(blocks, t), [blocks, t]);
 
-  // Reasoning and note rows start open: their content is the point of the
-  // timeline, and hiding it behind a click turns the view into a table of
-  // contents. They render clamped to a few lines; `expandedIds` removes the
-  // clamp. Keeping "is it open" and "is the clamp lifted" in two separate sets
-  // means the row chevron keeps one consistent meaning (open / closed) instead
-  // of cycling through three states.
+  // fork:step-expansion — 哪几类步骤默认展开由设置决定（推理 / 命令 / 工具调用），
+  // 改设置时广播事件，已经挂载的时间线立刻跟着变。
+  const [expansion, setExpansion] = useState<StepExpansion>(loadStepExpansion);
+  useEffect(() => {
+    const onChange = () => setExpansion(loadStepExpansion());
+    window.addEventListener(STEP_EXPANSION_EVENT, onChange);
+    return () => window.removeEventListener(STEP_EXPANSION_EVENT, onChange);
+  }, []);
+
+  // Reasoning and note rows start open by default (and any other category the
+  // reader opted into): their content is the point of the timeline, and hiding
+  // it behind a click turns the view into a table of contents. They render
+  // clamped to a few lines; `expandedIds` removes the clamp. Keeping "is it
+  // open" and "is the clamp lifted" in two separate sets means the row chevron
+  // keeps one consistent meaning (open / closed) instead of cycling through
+  // three states.
   const defaultOpen = useMemo(
-    () => new Set(steps.filter((step) => step.reasoning).map((step) => step.id)),
-    [steps],
+    () => new Set(steps.filter((step) => expansion[stepCategoryOf(step)]).map((step) => step.id)),
+    [steps, expansion],
   );
   /** Explicit user overrides; absent = follow `defaultOpen`. */
   const [overrides, setOverrides] = useState<Map<string, boolean>>(() => new Map());
-  const [activeChip, setActiveChip] = useState<string | null>(null);
 
   // fork:pr15-follow — 流式跟随最新 step 自己的滚动窗（REF 的 userScrolledUpRef /
   // ignoreProgrammaticScrollUntilRef）。只给最新一步挂 max-height 窗口，历史步
@@ -708,7 +716,7 @@ export function ProcessGroup({
     };
     element.addEventListener("scroll", onScroll, { passive: true });
     return () => element.removeEventListener("scroll", onScroll);
-  }, [latestStepId, latestStepOpen, displayMode, updateShadows]);
+  }, [latestStepId, latestStepOpen, updateShadows]);
 
   // 贴底时内容增长不会触发 scroll 事件（scrollTop 不变），用 ResizeObserver 重算
   // 阴影，底部的淡出提示才不会滞后。
@@ -721,7 +729,7 @@ export function ProcessGroup({
     observer.observe(element);
     if (element.firstElementChild) observer.observe(element.firstElementChild);
     return () => observer.disconnect();
-  }, [latestStepId, latestStepOpen, displayMode, isStreaming, updateShadows]);
+  }, [latestStepId, latestStepOpen, isStreaming, updateShadows]);
 
   // 流式期间把最新 step 贴底；用户上翻后暂停，滚回底部由上面的 scroll 监听恢复。
   useEffect(() => {
@@ -730,11 +738,9 @@ export function ProcessGroup({
     ignoreProgrammaticScrollUntilRef.current = Date.now() + 100;
     element.scrollTop = element.scrollHeight;
     updateShadows();
-  }, [blocks, isStreaming, latestStepId, latestStepOpen, displayMode, updateShadows]);
+  }, [blocks, isStreaming, latestStepId, latestStepOpen, updateShadows]);
 
   if (steps.length === 0) return null;
-
-  const tabsMode = displayMode === "tabs";
 
   // Streaming keeps the newest step open so work is visible as it happens.
   const streamingOpen = isStreaming ? steps[steps.length - 1]?.id : null;
@@ -752,82 +758,12 @@ export function ProcessGroup({
     });
   };
 
-  // fork:process-live — with no chip selected the strip showed nothing at all, so a
-  // running turn looked like a row of labels. Follow the newest step until the user
-  // picks one (their choice then wins for the rest of the session).
-  // fork:process-tabs — 空闲时默认选**第一片**：不然「标签视图」就是一墙芯片，
-  // 下面空着，看不出芯片和内容是连着的（参考项目的 activeTab 也从 0 起）。
-  const shownChip = activeChip ?? (tabsMode
-    ? (isStreaming ? steps[steps.length - 1]?.id : steps[0]?.id) ?? null
-    : null);
-  const chipStep = tabsMode && shownChip ? steps.find((step) => step.id === shownChip) ?? null : null;
-
   return (
     <section
-      className={`process-group${tabsMode ? " is-tabs" : " is-timeline"}${className ? ` ${className}` : ""}`}
+      className={`process-group is-timeline${className ? ` ${className}` : ""}`}
       aria-label={t("process.groupLabel")}
       data-step-count={steps.length}
     >
-      {tabsMode ? (
-        <>
-          {/* fork:process-tabs — 芯片条只留「图标 + 动词 + 目标」：以前每片都塞进
-              文件 chip、命令细节和耗时，12 步就摊成五行，既占高度又看不出结构。
-              细节全部下沉到下面那个正文窗口。 */}
-          <div className="process-chips" role="tablist" aria-label={t("process.groupLabel")}>
-            {steps.map((step) => {
-              const active = step.id === shownChip;
-              const selectStep = () => {
-                if (step.id === steps[steps.length - 1]?.id && isStreaming) {
-                  // 点最新一片 = 回到「跟随」，而不是钉住它。
-                  setActiveChip(null);
-                } else {
-                  setActiveChip(step.id === activeChip ? null : step.id);
-                }
-              };
-              return (
-                <button
-                  key={step.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  className={[
-                    "process-chip",
-                    active ? " is-active" : "",
-                    step.failed ? " is-failed" : "",
-                    step.thinking ? " is-thinking" : "",
-                  ].filter(Boolean).join(" ")}
-                  onClick={selectStep}
-                >
-                  <StepIcon name={step.icon} />
-                  <span className="process-chip-label">{step.label}</span>
-                  {step.count !== undefined && step.count > 1 && (
-                    <span className="process-chip-count">×{step.count}</span>
-                  )}
-                  <FileChips targets={step.targets} onOpenFile={onOpenFile} compact />
-                  {step.failed && <span className="process-chip-failed">{t("process.failed")}</span>}
-                </button>
-              );
-            })}
-          </div>
-          {chipStep && (
-            <div className="process-tab-body">
-              <div ref={latestStepScrollRef} className="process-tab-body-scroll">
-                <StepBody
-                  step={chipStep}
-                  toolResults={toolResults}
-                  onOpenSession={onOpenSession}
-                />
-              </div>
-              {showTopShadow && (
-                <div aria-hidden="true" className="process-tab-body-fade is-top" />
-              )}
-              {showBottomShadow && (
-                <div aria-hidden="true" className="process-tab-body-fade is-bottom" />
-              )}
-            </div>
-          )}
-        </>
-      ) : (
         <ol className="process-steps">
           {steps.map((step, index) => {
             const id = step.id;
@@ -916,7 +852,6 @@ export function ProcessGroup({
             );
           })}
         </ol>
-      )}
     </section>
   );
 }
