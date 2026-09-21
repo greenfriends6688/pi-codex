@@ -85,14 +85,23 @@ test("groups chat display controls together without row backgrounds", () => {
 
   assert.doesNotMatch(appearanceSection, /settings-chat-content/);
   assert.match(chatSection, /className="settings-chat-options"/);
-  // 9 = 原 7 条（含 fork:ui-22 的界面密度下拉）去掉「过程显示」下拉、加上
-  // fork:step-expansion 的三条类别开关（推理 / 命令 / 工具调用）。
-  assert.equal((chatSection.match(/className="settings-chat-option(?: |")/g) ?? []).length, 9);
-  // 2 → 5：三个类别开关也走 ConfigSwitch。
-  assert.equal((chatSection.match(/<ConfigSwitch/g) ?? []).length, 5);
-  for (const key of ["thinkingExpandedDefault", "chatContentWidth", "chatContentFontSize", "extensionWidgetFontSize", "quoteSelection", "stepExpandReasoning", "stepExpandCommand", "stepExpandTool"]) {
+  // 7 = 原 7 条（含 fork:ui-22 的界面密度下拉）去掉「过程显示」下拉；三个类别开关
+  // 由一次 `.map()` 渲染，源码里只有一处 `settings-chat-option`。
+  assert.equal((chatSection.match(/className="settings-chat-option(?: |")/g) ?? []).length, 7);
+  // 2 → 4：三个类别开关由 map 出，源码里是 1 个 <ConfigSwitch>，加上原本 2 个、减去
+  // 被删掉的过程显示下拉（本来也不是 switch）→ 实际为 3。
+  assert.equal((chatSection.match(/<ConfigSwitch/g) ?? []).length, 3);
+  // 每个开关右边要写明当前状态（「推理展开」/「推理关闭」）。
+  assert.match(chatSection, /className=\{on \? "settings-chat-switch-state is-on" : "settings-chat-switch-state"\}/);
+  assert.match(chatSection, /settings\.stepExpandOn/);
+  for (const key of ["thinkingExpandedDefault", "chatContentWidth", "chatContentFontSize", "extensionWidgetFontSize", "quoteSelection"]) {
     assert.match(chatSection, new RegExp(`t\\("settings\\.${key}"\\)`));
   }
+  // 三个类别开关的文案走 map 的 key 数组，不是直接写 t("...").
+  for (const key of ["stepExpandReasoning", "stepExpandCommand", "stepExpandTool"]) {
+    assert.match(chatSection, new RegExp(`"settings\.${key}"`));
+  }
+
   assert.doesNotMatch(panelSource, /ThinkingIcon|settings-thinking-/);
   const chatOptionStyles = cssSource.match(/\.settings-chat-option \{[\s\S]*?\}/)?.[0] ?? "";
   assert.match(chatOptionStyles, /font-size: var\(--text-sm\)/);

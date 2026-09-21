@@ -400,31 +400,31 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
           {/* fork:step-expansion — 时间线里哪几类步骤默认摊开。原来这里是
               「过程显示：传统 / 时间线 / 标签」三选一，现在只剩时间线一种视图，
               这个下拉框换成了三个按类别控制的开关。 */}
-          <div className="settings-chat-option settings-chat-switch-option">
-            <span>{t("settings.stepExpandReasoning")}</span>
-            <ConfigSwitch
-              checked={stepExpansion.reasoning}
-              label={t("settings.stepExpandReasoning")}
-              onChange={(enabled) => setStepExpansion(setStepCategoryExpanded("reasoning", enabled))}
-            />
-          </div>
-          <div className="settings-chat-option settings-chat-switch-option">
-            <span>{t("settings.stepExpandCommand")}</span>
-            <ConfigSwitch
-              checked={stepExpansion.command}
-              label={t("settings.stepExpandCommand")}
-              onChange={(enabled) => setStepExpansion(setStepCategoryExpanded("command", enabled))}
-            />
-          </div>
-          <div className="settings-chat-option settings-chat-switch-option">
-            <span>{t("settings.stepExpandTool")}</span>
-            <ConfigSwitch
-              checked={stepExpansion.tool}
-              label={t("settings.stepExpandTool")}
-              onChange={(enabled) => setStepExpansion(setStepCategoryExpanded("tool", enabled))}
-            />
-          </div>
           <p className="settings-chat-range-hint">{t("settings.stepExpandHint")}</p>
+          {([
+            ["reasoning", "settings.stepExpandReasoning"],
+            ["command", "settings.stepExpandCommand"],
+            ["tool", "settings.stepExpandTool"],
+          ] as const).map(([category, labelKey]) => {
+            const label = t(labelKey);
+            const on = stepExpansion[category];
+            return (
+              <div key={category} className="settings-chat-option settings-chat-switch-option">
+                <span>{label}</span>
+                {/* 开关旁边写明当前状态：光看拨杆分不清「展开」是哪一边。 */}
+                <span className="settings-chat-switch-status">
+                  <span className={on ? "settings-chat-switch-state is-on" : "settings-chat-switch-state"}>
+                    {t(on ? "settings.stepExpandOn" : "settings.stepExpandOff", { name: label })}
+                  </span>
+                  <ConfigSwitch
+                    checked={on}
+                    label={label}
+                    onChange={(enabled) => setStepExpansion(setStepCategoryExpanded(category, enabled))}
+                  />
+                </span>
+              </div>
+            );
+          })}
           <div className="settings-chat-option settings-chat-range-option">
             <div className="settings-chat-range-header">
               <label htmlFor="settings-chat-content-width">{t("settings.chatContentWidth")}</label>

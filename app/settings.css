@@ -1640,3 +1640,22 @@
 .skill-content-view > :last-child {
   margin-bottom: 0;
 }
+
+/* fork:step-expansion — 三个「默认展开」开关右侧的状态文字（展开 / 关闭）。
+   放在开关左边，光看拨杆分不清哪边是展开。 */
+.settings-chat-switch-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.settings-chat-switch-state {
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.settings-chat-switch-state.is-on {
+  color: var(--accent);
+}

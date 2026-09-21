@@ -568,6 +568,8 @@ export const zhCNLocale: LocalePlugin = {
     "settings.stepExpandCommand": "命令（bash）",
     "settings.stepExpandTool": "工具调用",
     "settings.stepExpandHint": "时间线里哪些步骤默认展开。单行仍然可以点开收起。",
+    "settings.stepExpandOff": "{name}关闭",
+    "settings.stepExpandOn": "{name}展开",
     "settings.densityCompact": "紧凑",
     "settings.densityStandard": "标准",
     "settings.densityComfortable": "宽松",
