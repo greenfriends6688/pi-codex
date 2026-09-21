@@ -60,6 +60,7 @@ A conversation started in the pi terminal can be picked up in Pinkslab and hande
 
 - Multi-root file tree with scope badges and Git status decoration.
 - Upload with overwrite / skip / error conflict policies; create, rename and delete.
+- Right-click context menu on any entry: open, download, new file, new folder, rename, delete, plus ZIP / tar extract and compress. Mutations go through the same allowed-roots and realpath checks as reads and uploads.
 - Preview source, diffs, Markdown (editable, written back to disk), images, audio, video, PDF and DOCX.
 - Zoom for images and documents, auto-refresh when files change, fuzzy file index, line highlighting, and reveal in Finder/Explorer.
 

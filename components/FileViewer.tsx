@@ -86,6 +86,8 @@ interface Props {
   initialState?: FileViewerState;
   onStateChange?: (state: FileViewerState) => void;
   watchEnabled?: boolean;
+  /** Called after the file is saved so panels showing Git state can refresh. */
+  onFileMutated?: () => void;
 }
 
 interface FileData {
@@ -98,6 +100,8 @@ interface FileData {
 }
 
 const SOURCE_HIGHLIGHT_MAX_LINES = 1_000;
+// Matches the write endpoint's content cap in lib/file-mutations.ts.
+const EDIT_MAX_BYTES = 2 * 1024 * 1024;
 const DISPLAY_MODE_LABELS: Record<DisplayMode, string> = {
   source: "Source",
   preview: "Preview",
@@ -1593,6 +1597,7 @@ export function FileViewer({
   initialState,
   onStateChange,
   watchEnabled = true,
+  onFileMutated,
 }: Props) {
   if (isImagePath(filePath)) {
     return <ImageViewer filePath={filePath} cwd={cwd} sourceSessionId={sourceSessionId} watchEnabled={watchEnabled} />;
@@ -1632,6 +1637,7 @@ export function FileViewer({
       initialState={initialState}
       onStateChange={onStateChange}
       watchEnabled={watchEnabled}
+      onFileMutated={onFileMutated}
     />
   );
 }
@@ -1652,6 +1658,7 @@ function TextFileViewer({
   initialState,
   onStateChange,
   watchEnabled = true,
+  onFileMutated,
 }: Props) {
   const { isDark } = useTheme();
   const isMobile = useIsMobile();

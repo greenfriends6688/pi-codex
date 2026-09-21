@@ -364,6 +364,9 @@ export function ExplorerPanel({
             onAtMention={onAtMention}
             onAtMentions={onAtMentions}
             onUploadBusyChange={setExplorerUploadBusy}
+            /* PR #899 — 新建/重命名/删除/解压后在树里刷一次（上游把这一行加在
+               SessionSidebar，本 fork 的文件树在 ExplorerPanel）。 */
+            onFileMutated={onExplorerRefresh}
             changesCollapsed={changesCollapsed}
             onChangesCountChange={setChangesCount}
             fileSearchOpen={fileSearchOpen}
