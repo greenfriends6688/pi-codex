@@ -74,21 +74,6 @@ export interface ProjectTrustStatus {
   trusted: boolean;
 }
 
-export interface McpServersResponse {
-  servers: McpServerInfo[];
-  globalPath: string;
-  projectPath: string;
-  projectFileExists: boolean;
-}
-
-export interface McpActionResponse {
-  success: boolean;
-  changed?: boolean;
-  path?: string;
-  reloaded?: boolean;
-  busy?: boolean;
-}
-
 export interface AppUpdateResponse {
   currentVersion: string;
   latestVersion: string;
@@ -193,8 +178,4 @@ export interface McpResponse {
   settings: Record<string, unknown>;
   diagnostics: string[];
   projectResourcesLoaded: boolean;
-  /** PR #900 — 顶栏 MCP 面板展示用（`~` 缩写后的路径）。 */
-  globalPath: string;
-  projectPath: string;
-  projectFileExists: boolean;
 }
