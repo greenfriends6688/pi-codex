@@ -1175,7 +1175,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
         onFocus={prefetch}
       >
         <ThinkingIcon active={working} />
-        <span className="fork-thinking-label" data-live={working ? "true" : undefined}>
+        <span className="fork-live-label fork-thinking-label" data-live={working ? "true" : undefined}>
           {t("i18n.thinking")}
         </span>
         {duration !== undefined && !working && (

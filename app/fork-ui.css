@@ -824,10 +824,13 @@ html.keyboard-open .extension-status-shelf {
 .fork-thinking-label {
   flex-shrink: 0;
   font-weight: 500;
-  /* 落定时淡入：与 data-live 的规则互斥，属性一翻，浏览器即从流光切到这条。 */
+  /* 落定时淡入：与 .fork-live-label 的流光规则互斥，属性一翻就从流光切到这条。 */
   animation: fork-fade-in 350ms ease-out both;
 }
-.fork-thinking-label[data-live="true"] {
+
+/* 公共「在跑」标题：思考块与等待态共用（上游的 shimmer-text）。
+   背景要 200% 宽才能看到流光扫过，文字用 background-clip 挖空。 */
+.fork-live-label[data-live="true"] {
   background-image: linear-gradient(
     90deg,
     color-mix(in srgb, var(--text-muted) 40%, transparent) 0%,
@@ -931,10 +934,63 @@ html.keyboard-open .extension-status-shelf {
     animation: none;
   }
   /* 流光靠透明填充色显形，停掉动画必须同时还原填充色，否则文字会彻底不可见。 */
-  .fork-thinking-label[data-live="true"] {
+  .fork-live-label[data-live="true"] {
     animation: none;
     background: none;
     -webkit-text-fill-color: currentColor;
     color: var(--text-muted);
   }
+  .fork-pixel {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:beautifului-02 — 等待态（移植自 beautifului.dev/#loading-state 的 Drive 变体）。
+ *
+ * 3×3 像素格错相点亮 + 右侧等宽计时。格子只有 4px，用 gap 1.5px 拼；动画靠
+ * animation-delay 错相，节奏定义在组件里（跟上游同一套相位公式）。
+ * ------------------------------------------------------------------------- */
+@keyframes fork-pixel-on {
+  0%, 100% { opacity: 0.15; }
+  18%, 42% { opacity: 1; }
+  62% { opacity: 0.15; }
+}
+
+.fork-phase-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.fork-pixel-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 4px);
+  gap: 1.5px;
+  flex-shrink: 0;
+}
+
+.fork-pixel {
+  width: 4px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--text);
+  /* 未点亮的底色：动画的 0%/100% 帧会覆盖它，无动画（reduced-motion）时靠它兜底。 */
+  opacity: 0.15;
+  animation: fork-pixel-on 650ms ease-in-out infinite;
+}
+
+.fork-phase-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fork-phase-timer {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }

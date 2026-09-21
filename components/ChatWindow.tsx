@@ -29,6 +29,7 @@ import { extractTodoState } from "@/lib/todo-state";
 import { AnsiText } from "./AnsiText";
 import { useI18n } from "@/hooks/useI18n";
 import { ProcessGroup, summarizeProcessBlocks } from "./ProcessGroup";
+import { AgentPhaseLine } from "./fork/AgentPhaseLine";
 import { useProcessDisplayMode, type ProcessRendererPreference } from "@/hooks/useProcessDisplayMode";
 import { messageToProcessContentBlocks, type ProcessContentBlock } from "@/lib/process-content";
 import { useAgentSession, type AgentPhase, type NoticeItem } from "@/hooks/useAgentSession";
@@ -1756,15 +1757,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             )}
 
             {agentRunning && !hasStreamingContent && agentPhase && (
-              <div className="break-words py-2 text-xs text-text-muted" role="status" aria-live="polite">
-                <span>{phaseLabel(agentPhase, t)}</span>
-              </div>
+              <AgentPhaseLine label={phaseLabel(agentPhase, t)} />
             )}
 
             {bashRunning && !pendingBash && (
-              <div className="py-2 text-xs text-text-muted" role="status" aria-live="polite">
-                <span>{t("chat.runningCommand")}</span>
-              </div>
+              <AgentPhaseLine label={t("chat.runningCommand")} />
             )}
 
             {pendingBash && (
