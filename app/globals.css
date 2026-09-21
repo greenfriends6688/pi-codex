@@ -7,6 +7,11 @@
    只引入 token 层与排版层，不引入它的 globals.css（全局规则与本项目的全局样式冲突）。 */
 @import "./boardui/theme.css";
 @import "./boardui/typography.css";
+/* 试装：BeautifulUI 的 foundation（原样取自 beautifului.dev 的 shadcn registry）。
+   放在 BoardUI 之后、本项目自己的 :root 之前：它定义的 --page/--canvas/--ink… 是
+   新名字，但 --accent 与本项目重名，靠后面的 :root 块盖回去。
+   回滚：删掉这一行 + app/beautifui/ 目录。 */
+@import "./beautifui/foundation.css";
 
 /* fork:shadcn（PR-20）—— 声明式状态变体（shadcn/ui 的写法）。
    让弹层/开关可以用 `data-open:` / `data-closed:` 直接声明动效，
