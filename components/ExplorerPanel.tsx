@@ -1,10 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useCallback, type ReactNode } from "react";
 import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { useI18n } from "@/hooks/useI18n";
+import { DismissButton } from "./DismissButton";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
 import { TEXT } from "@/lib/typography";
+
+interface FileManagerAvailability {
+  supported: boolean;
+  reason: string | null;
+  platform: string;
+}
+
+// 服务端错误码 → 可翻译文案；未收录的错误码按原文显示。
+const FILE_MANAGER_ERROR_KEYS: Record<string, string> = {
+  remote: "sidebar.openInExplorerRemoteOnly",
+  "unsupported-platform": "sidebar.openInExplorerUnsupported",
+};
 
 function ToolbarIconButton({
   onClick,
@@ -91,6 +104,9 @@ export function ExplorerPanel({
 }) {
   const { t } = useI18n();
   const [explorerOpen, setExplorerOpen] = useState(true);
+  // PR #907 — 在系统文件管理器里打开当前工作区。
+  const [fileManager, setFileManager] = useState<FileManagerAvailability | null>(null);
+  const [fileManagerError, setFileManagerError] = useState<string | null>(null);
   const [explorerKey, setExplorerKey] = useState(0);
   const [explorerUploadBusy, setExplorerUploadBusy] = useState(false);
   const [fileSearchOpen, setFileSearchOpen] = useState(false);
@@ -115,6 +131,52 @@ export function ExplorerPanel({
   useEffect(() => () => {
     if (explorerRefreshTimerRef.current) clearTimeout(explorerRefreshTimerRef.current);
   }, []);
+
+  // PR #907 — 只有服务端能弹系统窗口，而且只有浏览器跑在同一台机器上才有意义。
+  // 问一次能力，按钮据此选文案（Explorer / Finder / 通用）并在不可用时置灰。
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/open-in-explorer")
+      .then((res) => res.ok ? res.json() as Promise<FileManagerAvailability> : null)
+      .then((data) => { if (!cancelled && data) setFileManager(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  // 失败提示属于它发生的那个项目。
+  useEffect(() => {
+    setFileManagerError(null);
+  }, [cwd, projectRoot]);
+
+  const openInFileManager = useCallback(async () => {
+    try {
+      const res = await fetch("/api/open-in-explorer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd }),
+      });
+      if (res.ok) {
+        setFileManagerError(null);
+        return;
+      }
+      const data = await res.json().catch(() => ({})) as { error?: string };
+      setFileManagerError(data.error ?? `HTTP ${res.status}`);
+    } catch (error) {
+      setFileManagerError(error instanceof Error ? error.message : String(error));
+    }
+  }, [cwd]);
+
+  const fileManagerLabel = t(
+    fileManager?.platform === "darwin"
+      ? "sidebar.openInFinder"
+      : fileManager?.platform === "win32"
+        ? "sidebar.openInExplorer"
+        : "sidebar.openInFileManager",
+  );
+  const fileManagerUnavailable = fileManager?.supported === false;
+  const fileManagerErrorMessage = fileManagerError
+    ? t(FILE_MANAGER_ERROR_KEYS[fileManagerError] ?? fileManagerError)
+    : null;
 
   return (
     <div
@@ -183,8 +245,20 @@ export function ExplorerPanel({
             {cwd.split(/[\/]/).filter(Boolean).at(-1) ?? cwd}
           </span>
         </button>
-        {onOpenTerminal && (
-          <ToolbarIconButton
+        {/* PR #907 — 在系统文件管理器里打开当前工作区（终端按钮左侧）。 */}
+        <ToolbarIconButton
+          onClick={() => { void openInFileManager(); }}
+          disabled={fileManagerUnavailable}
+          title={fileManagerUnavailable
+            ? t(fileManager?.reason === "remote" ? "sidebar.openInExplorerRemoteOnly" : "sidebar.openInExplorerUnsupported")
+            : fileManagerLabel}
+          color="var(--text-dim)"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 8a2 2 0 0 1 2-2h3.4l1.9 1.9H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+          </svg>
+        </ToolbarIconButton>
+        {onOpenTerminal && (          <ToolbarIconButton
             onClick={() => onOpenTerminal(cwd)}
             title={t("terminal.open")}
             color="var(--text-dim)"
@@ -273,6 +347,12 @@ export function ExplorerPanel({
         </ToolbarIconButton>
         {trailingActions}
       </div>
+      {fileManagerErrorMessage && (
+        <div role="alert" style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "0 10px 6px", fontSize: TEXT["2xs"], lineHeight: 1.35, color: "var(--danger)" }}>
+          <span style={{ minWidth: 0, flex: 1, overflowWrap: "anywhere" }}>{fileManagerErrorMessage}</span>
+          <DismissButton onClick={() => setFileManagerError(null)} title={t("files.dismissError")} />
+        </div>
+      )}
       {explorerOpen && (
         <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
           <FileExplorer
