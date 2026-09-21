@@ -6,12 +6,20 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { getProjectTrustStatus } from "@/lib/project-trust";
+import { getRpcSession } from "@/lib/rpc-manager";
+import { homedir } from "os";
 import type { McpResponse, McpScope, McpServerInfo } from "@/lib/api-types";
 import { validateMcpServer, type McpServerConfig } from "@/lib/mcp-validator";
 
 export const dynamic = "force-dynamic";
 
-type McpAction = "add" | "remove" | "enable" | "disable" | "update" | "move" | "test" | "get";
+type McpAction = "add" | "remove" | "enable" | "disable" | "update" | "move" | "test" | "get" | "reconnect";
+
+/** 配置文件路径展示用：`$HOME` 缩成 `~`。 */
+function displayPath(filePath: string): string {
+  const home = homedir();
+  return filePath.startsWith(home) ? `~${filePath.slice(home.length)}` : filePath;
+}
 
 interface McpFileData {
   settings?: Record<string, unknown>;
@@ -101,7 +109,16 @@ async function readMcp(cwd: string): Promise<McpResponse> {
   );
   const settings = { ...(global.settings ?? {}), ...(project.settings ?? {}) };
   const projectTrust = getProjectTrustStatus(cwd, getAgentDir());
-  return { servers, settings, diagnostics, projectResourcesLoaded: projectTrust.trusted };
+  // PR #900 — 顶栏 MCP 面板要展示配置文件位置，这两个路径算出来直接带上。
+  return {
+    servers,
+    settings,
+    diagnostics,
+    projectResourcesLoaded: projectTrust.trusted,
+    globalPath: displayPath(globalFile),
+    projectPath: displayPath(projectFile),
+    projectFileExists: existsSync(projectFile),
+  };
 }
 
 /**
@@ -322,6 +339,8 @@ export async function POST(req: Request) {
       def?: Record<string, unknown>;
       /** fork:gap-mcp-handshake — 跳过启用前握手校验（"先配好、服务稍后才起"）。 */
       force?: boolean;
+      /** PR #900 — reconnect 需要知道发给哪个会话。 */
+      sessionId?: string;
     };
     if (!body.cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
     if (!body.action) return NextResponse.json({ error: "action required" }, { status: 400 });
@@ -331,6 +350,33 @@ export async function POST(req: Request) {
     }
     const cwd = body.cwd;
     const projectTrust = getProjectTrustStatus(cwd, getAgentDir());
+
+    // PR #900 — 顶栏面板的「重连」：把 /mcp reconnect 当扩展命令发给活着的会话，
+    // 不产生聊天消息，结果由适配器通过 ui.notify（SSE notice）回报。
+    if (body.action === "reconnect") {
+      const sessionId = body.sessionId;
+      if (!sessionId) return NextResponse.json({ error: "sessionId required for reconnect" }, { status: 400 });
+      if (!body.name) return NextResponse.json({ error: "name required for reconnect" }, { status: 400 });
+      const wrapper = getRpcSession(sessionId);
+      if (!wrapper?.isAlive()) {
+        return NextResponse.json({ error: "Session is not running; start it first" }, { status: 409 });
+      }
+      if (wrapper.isRunning()) {
+        return NextResponse.json({ error: "Session is busy", busy: true }, { status: 409 });
+      }
+      // 没有适配器就没有 /mcp 命令，这条 prompt 会当成普通消息发给模型，宁可拒绝。
+      const { commands } = await wrapper.send({ type: "get_commands" }) as {
+        commands: { name: string; source: string }[];
+      };
+      const hasMcpCommand = (commands ?? []).some((command) =>
+        (command.name === "mcp" || command.name === "pi-mcp") && command.source === "extension",
+      );
+      if (!hasMcpCommand) {
+        return NextResponse.json({ error: "MCP adapter is not installed in this session" }, { status: 409 });
+      }
+      await wrapper.send({ type: "prompt", message: `/mcp reconnect ${body.name}` });
+      return NextResponse.json({ success: true });
+    }
 
     if (body.action === "test") {
       const scope = readScope(body.scope);
