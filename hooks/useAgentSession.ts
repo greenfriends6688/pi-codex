@@ -59,6 +59,8 @@ export interface SessionData {
     hasMore: boolean;
     thinkingLevel: string;
     model: { provider: string; modelId: string } | null;
+    /** fork:proma-02-mode — 会话级的权限档位，随会话文件走。 */
+    permissionMode?: string;
   };
   /** Cumulative usage over ALL session-file entries (incl. compacted history). */
   stats?: SessionFileStats;
@@ -602,6 +604,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setEntryIds([]);
           setHistoryCursor(null);
           setHasEarlierMessages(false);
+          // 新会话（还没落盘）不继承上一个会话的档位。
+          setPermissionMode(DEFAULT_PERMISSION_MODE);
           setError(null);
         }
         return null;
@@ -622,6 +626,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (d.context.thinkingLevel && d.context.thinkingLevel !== "off") {
         setThinkingLevel(d.context.thinkingLevel as ThinkingLevelOption);
       }
+      // fork:proma-02-mode — 档位也是会话属性：从**这个会话文件**读，而不是沿用上
+      // 一个会话的值。以前只有活着的 wrapper 才会回报档位，于是切到另一个会话时
+      // 控件显示的还是上一个会话的档位（看起来像全局设置），刷新后更是全部回到默认。
+      // 下面活着的 wrapper 仍会覆盖它（get_state 的 permissionMode 更权威）。
+      setPermissionMode(isPermissionMode(d.context.permissionMode) ? d.context.permissionMode : DEFAULT_PERMISSION_MODE);
 
       messagesLoaded = true;
       if (showLoading) setLoading(false);

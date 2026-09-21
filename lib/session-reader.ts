@@ -7,6 +7,7 @@ import { readdir } from "fs/promises";
 import { isAbsolute, join, normalize as normalizePath, relative, resolve as resolvePath, sep } from "path";
 import type { AgentMessage, ImageContent, SessionEntry, SessionHeader, SessionInfo, SessionContext } from "./types";
 import { normalizeToolCalls } from "./normalize";
+import { DEFAULT_PERMISSION_MODE, readPermissionMode } from "./permission-mode";
 import { getThinkingPreview } from "./message-display";
 import { projectIdentityKey } from "./project-identity";
 import { sessionPathKey } from "./session-path";
@@ -464,8 +465,8 @@ export function getLatestModelChange(entries: SessionEntry[]): SessionContext["m
   return null;
 }
 
-function getSessionSettings(entries: SessionEntry[], leafId?: string | null): Pick<SessionContext, "thinkingLevel" | "model"> {
-  if (leafId === null) return { thinkingLevel: "off", model: null };
+function getSessionSettings(entries: SessionEntry[], leafId?: string | null): Pick<SessionContext, "thinkingLevel" | "model" | "permissionMode"> {
+  if (leafId === null) return { thinkingLevel: "off", model: null, permissionMode: DEFAULT_PERMISSION_MODE };
   const branch = sliceActiveBranch(entries, leafId ?? null, entries.length);
   let thinkingLevel: string | undefined;
   let responseModel: SessionContext["model"] | undefined;
@@ -486,6 +487,9 @@ function getSessionSettings(entries: SessionEntry[], leafId?: string | null): Pi
   return {
     thinkingLevel: thinkingLevel ?? "off",
     model: getLatestModelChange(branch) ?? responseModel ?? null,
+    // fork:proma-02-mode — 档位也是**分支**属性：从活动分支里最后一条 custom entry 读，
+    // 这样在会话内切分支时档位跟着分支回退（与 appendPermissionMode 的写入语义一致）。
+    permissionMode: readPermissionMode(branch),
   };
 }
 

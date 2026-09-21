@@ -1,5 +1,7 @@
 // Types mirrored from pi-mono coding-agent session-manager
 
+import type { PermissionMode } from "./permission-mode";
+
 export interface SessionHeader {
   type: "session";
   version?: number;
@@ -354,4 +356,7 @@ export interface SessionContext {
   hasMore: boolean;
   thinkingLevel: string;
   model: { provider: string; modelId: string } | null;
+  /** fork:proma-02-mode — 会话级的权限档位（全自动 / 需审批 / 计划）。
+   *  和 thinkingLevel 一样从会话文件里读，所以刷新/换机器/换浏览器都跟着会话走。 */
+  permissionMode: PermissionMode;
 }
