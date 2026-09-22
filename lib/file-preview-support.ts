@@ -64,6 +64,15 @@ export function shouldShowUnsupportedCard(filePath: string): boolean {
 }
 
 /**
+ * fork:zc-12 — CSV / TSV 交给表格预览（而不是逐行文本渲染）。
+ * 这里只判路径；分隔符嗅探与内容解析在 `lib/csv-preview.ts`。
+ */
+export function isDelimitedTextPath(filePath: string): boolean {
+  const ext = extensionOf(filePath);
+  return ext === "csv" || ext === "tsv";
+}
+
+/**
  * 降级原因文案的 i18n 键与展示用扩展名。
  * 拆出来是为了让 UI 层不重复实现一遍分类。
  */

@@ -78,6 +78,8 @@ e2e_*.mjs
 /docs/fork-comparison-*
 /docs/ref-comparison-*
 /docs/zeno-*
+# fork: 同上 —— ZCode 借鉴项的对比/计划文档也只留本地。
+/docs/zcode-*
 /docs/screenshot2.png
 /docs/pr470-*.png
 

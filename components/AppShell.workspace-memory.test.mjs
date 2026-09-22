@@ -88,6 +88,10 @@ test("New restores the draft after session navigation and workspace auto-restore
         workspaceKeyOf: (value) => value.projectKey ?? value.cwd,
         useCallback: (callback) => callback,
         useGlobalKeyboardShortcuts() {},
+        // fork:zc-04 — 调用点现在直接把 AppShell 的开关句柄传进快捷键层（不再去 DOM 里点按钮），
+        // 这段源码切片会包含那个调用点，所以沙箱要把这两个标识符补上。
+        handleSidebarToggle() {},
+        handleRightPanelToggle() {},
         activeNewSessionDraftKeyRef: { current: `new:initial:${cwd}` },
         activeProjectKeyRef: { current: cwd },
         workspaceRestoreTokenRef: { current: 0 },

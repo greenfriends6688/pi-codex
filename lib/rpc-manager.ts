@@ -54,6 +54,8 @@ import {
   preferPiWebSubagentExtension,
 } from "./subagent-extension";
 import { createTodoExtension } from "./todo-extension";
+// fork:zc-21 — cron agent tools（创建/查询/修改/删除定时任务）
+import { createCronExtension } from "./cron-extension";
 import {
   listSubagentProfiles,
   readSubagentRun,
@@ -2296,6 +2298,12 @@ export async function startRpcSession(
               ),
               // fork:ui-todo — the session's task list (see lib/todo-extension.ts).
               createTodoExtension(),
+              // fork:zc-21 — let the agent create/list/update/delete scheduled tasks.
+              // Registered before the approval extension so a write can be blocked
+              // before the generic gate runs; reads need no approval at all.
+              createCronExtension({
+                getApprovalMode: () => approvalModeForPlanAwareMode(permissionMode),
+              }),
               // fork:proma-01-approval — 工具审批。默认档是 bypass，所以这个扩展在默认
               // 配置下等价于不存在（`decideApproval` 直接放行）—— 只有用户显式把会话
               // 设成 ask/plan 才会弹卡。

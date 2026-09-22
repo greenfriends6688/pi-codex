@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getFileIcon } from "./FileIcons";
+import { TabOverview } from "./fork/TabOverview";
 import { useI18n } from "@/hooks/useI18n";
 import type { FileViewerDisplayMode, FileViewerState } from "@/lib/file-viewer-state";
+import type { RestorableTab } from "@/lib/recent-closed-tabs";
 import { splitVisibleTabs } from "@/lib/tab-overflow";
 import { TEXT } from "@/lib/typography";
 
@@ -25,12 +27,23 @@ interface Props {
   activeTabId: string;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
+  /**
+   * fork:zc-06 — tab 概览（全部 tab + 最近关闭）。不传就不渲染入口按钮，
+   * 这样 TabBar 在没有 tab 状态所有者的场景（测试、静态渲染）里仍然可用。
+   */
+  overview?: {
+    recentClosed: RestorableTab[];
+    onCloseAll: () => void;
+    onCloseOthers: () => void;
+    onRestore: (tab: RestorableTab) => void;
+    onClearRecent: () => void;
+  };
 }
 
 // fork:ui-12 — width of the "…" fold button (kept in sync with its style below).
 const TAB_OVERFLOW_BUTTON_WIDTH = 34;
 
-export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
+export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab, overview }: Props) {
   const { t } = useI18n();
   const [hoveredClose, setHoveredClose] = useState<string | null>(null);
   // fork:ui-14 — the close control stays out of the way until the tab is
@@ -45,6 +58,25 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowPos, setOverflowPos] = useState<{ top: number; left: number } | null>(null);
+  // fork:zc-06 — tab 概览浮层。锚点仍然按 fixed 计算，理由与「…」菜单相同
+  // （这条 tab 栏横向裁切，in-flow 下拉会被切掉）。
+  const [overviewOpen, setOverviewOpen] = useState(false);
+  const [overviewPos, setOverviewPos] = useState<{ top: number; left: number } | null>(null);
+  // fork:zm-05 — sliding active-tab indicator. The pill is absolutely positioned
+  // and lives outside the flex flow, so none of the measurements below see it.
+  const tabElementsRef = useRef(new Map<string, HTMLElement>());
+  const pendingTabFocusRef = useRef<string | null>(null);
+  const pillFrameRef = useRef<number | null>(null);
+  const [pillState, setPillState] = useState<{ x: number; width: number; ready: boolean }>({
+    x: 0,
+    width: 0,
+    ready: false,
+  });
+
+  useEffect(() => {
+    // tab 全关光时浮层无事可做，留着只会悬在空栏上。
+    if (tabs.length === 0 && overviewOpen) setOverviewOpen(false);
+  }, [overviewOpen, tabs.length]);
 
   useLayoutEffect(() => {
     const element = containerRef.current;
@@ -57,7 +89,11 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
   }, []);
 
   const measureTab = (id: string) => (element: HTMLElement | null) => {
-    if (!element) return;
+    if (!element) {
+      tabElementsRef.current.delete(id);
+      return;
+    }
+    tabElementsRef.current.set(id, element);
     const width = element.offsetWidth;
     if (widthsRef.current.get(id) === width) return;
     widthsRef.current.set(id, width);
@@ -65,6 +101,58 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
   };
 
   const activeIndex = tabs.findIndex((tab) => tab.id === activeTabId);
+
+  // fork:zm-05 — measure the active tab and move the pill. `offsetLeft` is
+  // relative to the positioned tab bar (`.fork-tabbar`), so transform and width
+  // can be applied verbatim. Measurement is batched through rAF when it comes
+  // from observers; a commit (tab switch, keyboard navigation) updates in the
+  // layout phase so the pill and the content move in the same frame.
+  const updatePill = useCallback(() => {
+    const element = tabElementsRef.current.get(activeTabId);
+    if (!element) return;
+    const x = element.offsetLeft;
+    const width = element.offsetWidth;
+    setPillState((current) => (
+      current.ready && current.x === x && current.width === width
+        ? current
+        : { x, width, ready: true }
+    ));
+  }, [activeTabId]);
+
+  const schedulePillUpdate = useCallback(() => {
+    if (typeof window === "undefined" || pillFrameRef.current !== null) return;
+    pillFrameRef.current = window.requestAnimationFrame(() => {
+      pillFrameRef.current = null;
+      updatePill();
+    });
+  }, [updatePill]);
+
+  // Runs after every commit: covers click/keyboard selection, and restores focus
+  // to a tab that was folded into the overflow menu until it became visible.
+  useLayoutEffect(() => {
+    updatePill();
+    const pendingFocusId = pendingTabFocusRef.current;
+    if (!pendingFocusId) return;
+    pendingTabFocusRef.current = null;
+    tabElementsRef.current.get(pendingFocusId)?.focus();
+  });
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(schedulePillUpdate);
+    observer?.observe(container);
+    for (const element of tabElementsRef.current.values()) observer?.observe(element);
+    window.addEventListener("resize", schedulePillUpdate);
+    return () => {
+      if (pillFrameRef.current !== null) {
+        window.cancelAnimationFrame(pillFrameRef.current);
+        pillFrameRef.current = null;
+      }
+      observer?.disconnect();
+      window.removeEventListener("resize", schedulePillUpdate);
+    };
+  }, [activeTabId, containerWidth, layoutVersion, schedulePillUpdate, tabs.length]);
   // `layoutVersion` is the re-measure signal: widths live in a ref, and this state
   // value is what re-runs the split after a tab reports a new width.
   const measuredWidths = useMemo(
@@ -111,6 +199,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
     <div
       ref={containerRef}
       role="tablist"
+      className="fork-tabbar"
       style={{
         display: "flex",
         alignItems: "center",
@@ -123,6 +212,19 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
         minWidth: 0,
       }}
     >
+      {/* fork:zm-05 — the highlight pill. Absolutely positioned (out of flow) so
+          the per-tab offsetWidth measurements that drive the "…" fold are
+          unaffected; opacity stays 0 until the first measurement lands, which
+          prevents a flash at (0,0). */}
+      <span
+        aria-hidden="true"
+        className="fork-tab-pill"
+        style={{
+          transform: `translateX(${pillState.ready ? pillState.x : 0}px)`,
+          width: pillState.ready ? pillState.width : 0,
+          opacity: pillState.ready && activeIndex >= 0 && tabs.length > 0 ? 1 : 0,
+        }}
+      />
       {tabs.map((tab, index) => {
         if (!visibleSet.has(index)) return null;
         const isActive = tab.id === activeTabId;
@@ -131,6 +233,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
             key={tab.id}
             ref={measureTab(tab.id)}
             role="tab"
+            className="fork-tab"
             aria-label={tabAccessibleName(tab)}
             aria-selected={isActive}
             tabIndex={isActive || (!activeTabId && tabs[0].id === tab.id) ? 0 : -1}
@@ -144,8 +247,13 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
                 const index = tabs.findIndex((item) => item.id === tab.id);
                 const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
                   : (index + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
-                onSelectTab(tabs[next].id);
-                (event.currentTarget.parentElement?.children[next] as HTMLElement)?.focus();
+                const nextId = tabs[next].id;
+                onSelectTab(nextId);
+                // fork:zm-05 — the pill is the tab bar's first child, so the old
+                // positional `children[next]` lookup would land one node early.
+                // Focus by id after the selection re-renders (the tab may have
+                // been folded into the overflow menu before this keypress).
+                pendingTabFocusRef.current = nextId;
               }
             }}
             onClick={() => onSelectTab(tab.id)}
@@ -167,7 +275,9 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               paddingRight: 4,
               border: "none",
               borderRadius: "var(--radius-md)",
-              background: isActive ? "var(--bg-selected)" : "transparent",
+              // fork:zm-05 — the active surface now lives on `.fork-tab-pill`;
+              // the tab itself stays transparent so the pill can slide beneath it.
+              background: "transparent",
               cursor: "pointer",
               fontSize: TEXT.sm,
               color: isActive ? "var(--text)" : "var(--text-muted)",
@@ -176,7 +286,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
               minWidth: 80,
               flexShrink: 0,
               userSelect: "none",
-              transition: "background 0.1s, color 0.1s",
+              transition: "color 0.1s, transform 120ms var(--ease-out)",
             }}
           >
             <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7, display: "flex", alignItems: "center" }}>
@@ -239,6 +349,7 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
       {hiddenTabs.length > 0 && (
         <button
           type="button"
+          className="fork-tab-more"
           onClick={(event) => {
             const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
             setOverflowPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 240) });
@@ -260,6 +371,50 @@ export function TabBar({ tabs, activeTabId, onSelectTab, onCloseTab }: Props) {
           </svg>
           {hiddenTabs.length}
         </button>
+      )}
+      {/* fork:zc-06 — 概览入口。始终存在（只要还有 tab），因为溢出菜单只在
+          放不下时才出现 —— 那正是「tab 少的时候看不到全部 tab」的成因。 */}
+      {overview && tabs.length > 0 && (
+        <button
+          type="button"
+          data-tab-overview-trigger="true"
+          className="fork-tab-overview"
+          onClick={(event) => {
+            const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+            setOverviewPos({ top: rect.bottom + 4, left: Math.max(8, rect.right - 300) });
+            setOverviewOpen((current) => !current);
+          }}
+          title={t("tabs.overview")}
+          aria-label={t("tabs.overview")}
+          aria-expanded={overviewOpen}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center",
+            height: 28, width: 28, flexShrink: 0,
+            background: overviewOpen ? "var(--bg-selected)" : "transparent",
+            border: "none", borderRadius: "var(--radius-md)",
+            color: overviewOpen ? "var(--text)" : "var(--text-muted)", cursor: "pointer",
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <line x1="4" y1="7" x2="20" y2="7" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="17" x2="14" y2="17" />
+          </svg>
+        </button>
+      )}
+      {overview && (
+        <TabOverview
+          open={overviewOpen}
+          anchor={overviewPos}
+          tabs={tabs}
+          activeTabId={activeTabId}
+          recentClosed={overview.recentClosed}
+          onClose={() => setOverviewOpen(false)}
+          onSelectTab={onSelectTab}
+          onCloseTab={onCloseTab}
+          onCloseAll={overview.onCloseAll}
+          onCloseOthers={overview.onCloseOthers}
+          onRestore={overview.onRestore}
+          onClearRecent={overview.onClearRecent}
+        />
       )}
       {overflowOpen && overflowPos && hiddenTabs.length > 0 && (
         <div

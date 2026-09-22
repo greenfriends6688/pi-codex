@@ -4,6 +4,7 @@ import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { MarkdownBody } from "./MarkdownBody";
 import { useFileIndex, useSkillInfo } from "@/hooks/useProjectContext";
+import { useCollapsePresence } from "@/hooks/useCollapsePresence";
 import type { MentionValidators } from "@/lib/mention-tokens";
 import { CopyStateIcon } from "./fork/CopyStateIcon";
 import { ImagePreview } from "./ImagePreview";
@@ -13,6 +14,8 @@ import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
 import { getAssistantErrorMessage, getAssistantTruncationNotice, getThinkingPreview, isEmptyThinkingBlock } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell, type SplitDiffFile } from "@/lib/patch";
+// fork:zc-07 — 词级行内 diff：并排 diff 里只标记真正变化的字/词。
+import { buildIntralineSegments, diffIntraline, type IntralineSpan } from "@/lib/diff-intraline";
 import { applyPatchPreviewToFiles, extractApplyPatchPaths, getApplyPatchInputText, parseApplyPatchInput } from "@/lib/apply-patch";
 import { isApplyPatchToolName, isEditToolName } from "@/lib/tool-names";
 import { isThinkingExpandedByDefault, THINKING_EXPANDED_EVENT } from "@/lib/thinking-expansion-preference";
@@ -362,6 +365,10 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  // fork:zm-01 — 折叠正文的两段式存在性：grid wrapper 常驻负责行高动画，正文在
+  // 收起过渡结束后才卸载（见 hooks/useCollapsePresence.ts）。
+  const collapseRef = useRef<HTMLDivElement>(null);
+  const bodyMounted = useCollapsePresence(expanded, undefined, collapseRef);
 
   const content =
     typeof message.content === "string"
@@ -530,9 +537,21 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
                   </span>
                 )}
               </div>
-              {expanded && (
-                <MarkdownBody className="markdown-user-message" {...markdownMentionProps}>{content}</MarkdownBody>
-              )}
+              {/* fork:zm-01 — 常驻 grid wrapper（0fr↔1fr）；正文只在收起动画期间保留。
+                  marginTop:-6 抵消父级 flex gap:6：收起时 wrapper 不额外占 6px，
+                  展开时由内层 marginTop:6 还回，展开态间距与原来一致。 */}
+              <div
+                ref={collapseRef}
+                className="fork-collapse"
+                data-fork-collapse={expanded ? "open" : "closed"}
+                style={{ marginTop: -6 }}
+              >
+                {bodyMounted && (
+                  <div className="fork-collapse-body" style={{ marginTop: 6 }}>
+                    <MarkdownBody className="markdown-user-message" {...markdownMentionProps}>{content}</MarkdownBody>
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
           <>
@@ -1003,7 +1022,10 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     return <div data-message-text data-search-target={searchTarget || undefined}><TextBlock block={block as TextContent} isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile} /></div>;
   }
   if (block.type === "thinking") {
-    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} isStreaming={isStreaming} />;
+    // fork:zc-02 — searchTarget 必须传到 ThinkingBlock：否则被搜到的思考正文在折叠态
+    // 下不在 DOM 里（两段式挂载 + 惰性加载），高亮与滚动都拿不到 Range。
+    // 注意 ThinkingBlock 的惰性加载副作用依赖 `expanded`，reveal 参与派生后会一并触发加载。
+    return <ThinkingBlock block={block as ThinkingContent} duration={streamingDuration} sessionId={sessionId} entryId={entryId} blockIndex={blockIndex} isStreaming={isStreaming} reveal={searchTarget} />;
   }
   if (block.type === "toolCall") {
     const tc = block as ToolCallContent;
@@ -1013,7 +1035,7 @@ function BlockView({ block, searchTarget, toolResults, isStreaming, streamingDur
     const toggleId = tc.toolCallId || fallbackKey;
     const isExpanded = expandedToolIds ? expandedToolIds.has(toggleId) : undefined;
     const handleToggle = onToggleTool ? () => onToggleTool(toggleId) : undefined;
-    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenSession={onOpenSession} expanded={isExpanded} onToggle={handleToggle} />;
+    return <ToolCallBlock block={tc} result={result} duration={duration} onOpenSession={onOpenSession} expanded={isExpanded} onToggle={handleToggle} reveal={searchTarget} />;
   }
   return null;
 }
@@ -1022,16 +1044,26 @@ function TextBlock({ block, isStreaming, cwd, onOpenFile }: { block: TextContent
   return <SafeMarkdownBody isStreaming={isStreaming} cwd={cwd} onOpenFile={onOpenFile}>{block.text}</SafeMarkdownBody>;
 }
 
-export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex, isStreaming }: {
+export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex, isStreaming, reveal }: {
   block: ThinkingContent;
   duration?: number;
   sessionId?: string;
   entryId?: string;
   blockIndex: number;
   isStreaming?: boolean;
+  /** fork:zc-02 — 被查找/搜索命中时强制展开（派生，不改用户的手动折叠状态）。 */
+  reveal?: boolean;
 }) {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState(isThinkingExpandedByDefault);
+  // fork:zc-02 — 被查找/搜索命中时强制展开。派生 `expandedView` 而不改 state：
+  // 1) 不动用户的手动折叠选择，命中消失（换查询/关查找条）后回到原状态；
+  // 2) 惰性加载的副作用判的是 `expanded`，所以下面把此副作用的读取口也改成 expandedView。
+  const expandedView = expanded || Boolean(reveal);
+  // fork:zm-01 — wrapper 常驻、正文两段式挂载。惰性加载的触发条件仍是 expanded，
+  // 收起态（正文已卸载）不会为每条历史消息拉 reasoning（lib/chat-lazy-load.ts）。
+  const collapseRef = useRef<HTMLDivElement>(null);
+  const bodyMounted = useCollapsePresence(expandedView, undefined, collapseRef);
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1100,7 +1132,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
   // from its cache, so re-running this effect is cheap and a failed load can
   // be retried by collapsing and expanding the block again.
   useEffect(() => {
-    if (!expanded || !block.deferred || content !== null) return;
+    if (!expandedView || !block.deferred || content !== null) return;
     if (!sessionId || !entryId) {
       setError(tRef.current("i18n.thinkingUnavailable"));
       return;
@@ -1124,7 +1156,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
     return () => {
       cancelled = true;
     };
-  }, [expanded, block.deferred, content, sessionId, entryId, blockIndex]);
+  }, [expandedView, block.deferred, content, sessionId, entryId, blockIndex]);
 
   return (
     <div style={{
@@ -1139,7 +1171,7 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
     }}>
       <button
         type="button"
-        aria-expanded={expanded}
+        aria-expanded={expandedView}
         aria-label={`${t("i18n.thinking")}${preview ? `: ${preview}` : ""}`}
         title={t("i18n.thinking")}
         onClick={() => {
@@ -1152,8 +1184,8 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
           display: "inline-flex",
           alignItems: "center",
           gap: 6,
-          width: expanded ? 14 : "100%",
-          flexShrink: expanded ? 0 : 1,
+          width: expandedView ? 14 : "100%",
+          flexShrink: expandedView ? 0 : 1,
           minWidth: 0,
           minHeight: "1.5em",
           padding: 0,
@@ -1165,31 +1197,39 @@ export function ThinkingBlock({ block, duration, sessionId, entryId, blockIndex,
           textAlign: "left",
         }}
       >
-        <ThinkingIcon active={expanded} />
-        {!expanded && (
+        <ThinkingIcon active={expandedView} />
+        {!expandedView && (
           <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {preview ? <ReactMarkdown allowedElements={[]} unwrapDisallowed skipHtml>{preview}</ReactMarkdown> : "..."}
           </span>
         )}
       </button>
-      {expanded && (
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            color: error ? "var(--danger)" : "var(--text-muted)",
-            whiteSpace: "pre-wrap",
-            overflowWrap: "anywhere",
-          }}
-        >
-          {loading ? (
-            <span style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0" }} aria-hidden="true">
-              <span className="skeleton-line" style={{ height: 10, width: "92%" }} />
-              <span className="skeleton-line" style={{ height: 10, width: "78%" }} />
-            </span>
-          ) : error ?? (block.deferred ? content : block.thinking)}
-        </div>
-      )}
+      {/* fork:zm-01 — 常驻 grid wrapper；正文在收起过渡结束后卸载。展开时正文与
+          wrapper 同一帧挂载，grid 从 0fr 过渡到 1fr（不是动画一个空行）。 */}
+      <div
+        ref={collapseRef}
+        className="fork-collapse"
+        data-fork-collapse={expandedView ? "open" : "closed"}
+        style={{ flex: 1, minWidth: 0 }}
+      >
+        {bodyMounted && (
+          <div
+            className="fork-collapse-body"
+            style={{
+              color: error ? "var(--danger)" : "var(--text-muted)",
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+            }}
+          >
+            {loading ? (
+              <span style={{ display: "flex", flexDirection: "column", gap: 6, padding: "2px 0" }} aria-hidden="true">
+                <span className="skeleton-line" style={{ height: 10, width: "92%" }} />
+                <span className="skeleton-line" style={{ height: 10, width: "78%" }} />
+              </span>
+            ) : error ?? (block.deferred ? content : block.thinking)}
+          </div>
+        )}
+      </div>
       {duration !== undefined && (
         <span style={{ flexShrink: 0, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>{duration}s</span>
       )}
@@ -1251,12 +1291,19 @@ function ToolCallIcon({ toolName }: { toolName: string }) {
 
 /** Exported for `components/ProcessGroup.tsx`, which reuses the exact same
  *  tool-call surface so the grouped and flat renderers cannot drift apart. */
-export function ToolCallBlock({ block, result, duration, onOpenSession, expanded: controlledExpanded, onToggle }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSession?: (sessionId: string) => void; expanded?: boolean; onToggle?: () => void }) {
+export function ToolCallBlock({ block, result, duration, onOpenSession, expanded: controlledExpanded, onToggle, reveal }: { block: ToolCallContent; result?: ToolResultMessage; duration?: number; onOpenSession?: (sessionId: string) => void; expanded?: boolean; onToggle?: () => void; /** fork:zc-02 — 被查找/搜索命中时强制展开（不改用户的展开集合）。 */ reveal?: boolean }) {
   const { t } = useI18n();
   const [localExpanded, setLocalExpanded] = useState(false);
   const isControlled = controlledExpanded !== undefined && onToggle !== undefined;
-  const expanded = isControlled ? controlledExpanded : localExpanded;
+  // fork:zc-02 — reveal 参与派生：命中在工具结果里时正文必须进 DOM，否则高亮拿不到 Range。
+  const expanded = (isControlled ? controlledExpanded : localExpanded) || Boolean(reveal);
   const handleToggle = isControlled ? onToggle! : () => setLocalExpanded((v) => !v);
+  // fork:zm-01 — 参数区与结果区各一条 grid（图片常显，必须留在两个 wrapper 之外
+  // 维持原 DOM 顺序）；两条同时 0fr↔1fr，正文在收起过渡结束后才卸载。
+  const argsCollapseRef = useRef<HTMLDivElement>(null);
+  const argsMounted = useCollapsePresence(expanded, undefined, argsCollapseRef);
+  const resultCollapseRef = useRef<HTMLDivElement>(null);
+  const resultMounted = useCollapsePresence(expanded, undefined, resultCollapseRef);
   const inputStr = getToolCallInputText(block);
   const isStreamingInput = block.rawInput !== undefined;
   const isEditTool = isEditToolName(block.toolName);
@@ -1344,56 +1391,76 @@ export function ToolCallBlock({ block, result, duration, onOpenSession, expanded
         )}
       </div>
 
-      {/* ── Expanded: input args (only when no richer view exists) ── */}
-      {expanded && !isEditTool && !patchFiles && (
-        <pre
-          style={{
-            margin: 0,
-            padding: "8px 10px",
-            color: "var(--text-muted)",
-            fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
-            lineHeight: 1.5,
-            overflow: "auto",
-            background: "var(--code-bg)",
-            borderTop: "1px solid var(--border)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-all",
-          }}
-        >
-          {inputStr}
-        </pre>
-      )}
+      {/* fork:zm-01 — 参数区：grid wrapper 常驻，行高 0fr↔1fr；正文在收起过渡结束
+          后才卸载，折叠态的 DOM 里仍然没有流式参数文本。 */}
+      <div
+        ref={argsCollapseRef}
+        className="fork-collapse"
+        data-fork-collapse={expanded ? "open" : "closed"}
+      >
+        {argsMounted && !isEditTool && !patchFiles && (
+          <div className="fork-collapse-body">
+            <pre
+              style={{
+                margin: 0,
+                padding: "8px 10px",
+                color: "var(--text-muted)",
+                fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
+                lineHeight: 1.5,
+                overflow: "auto",
+                background: "var(--code-bg)",
+                borderTop: "1px solid var(--border)",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-all",
+              }}
+            >
+              {inputStr}
+            </pre>
+          </div>
+        )}
+      </div>
 
       {/* ── Result images — always visible, independent of the collapsed details ── */}
       {resultImages.length > 0 && <ResultImages images={resultImages} isError={isError} />}
-      {/* ── Expanded: applied-patch split diff ── */}
-      {expanded && patchFiles && (
-        <div style={{ borderTop: "1px solid color-mix(in srgb, var(--success) 15%, transparent)", background: "var(--bg)" }}>
-          <SplitFilesView files={patchFiles} />
-        </div>
-      )}
+      {/* fork:zm-01 — 结果区（patch diff + paired result）与参数区同时过渡。 */}
+      <div
+        ref={resultCollapseRef}
+        className="fork-collapse"
+        data-fork-collapse={expanded ? "open" : "closed"}
+      >
+        {resultMounted && (
+          <div className="fork-collapse-body">
+            {/* ── Applied-patch split diff ── */}
+            {patchFiles && (
+              <div style={{ borderTop: "1px solid color-mix(in srgb, var(--success) 15%, transparent)", background: "var(--bg)" }}>
+                <SplitFilesView files={patchFiles} />
+              </div>
+            )}
 
-      {/* ── Paired result — only shown when expanded ── */}
-      {expanded && result && patchFiles && isError && (
-        <PairedResult
-          text={resultText ?? ""}
-          isEmpty={resultIsEmpty}
-          isError={isError}
-        />
-      )}
-      {expanded && result && !patchFiles && (
-        resultDiff ? (
-          <PairedDiffResult
-            diff={resultDiff}
-          />
-        ) : (!resultIsEmpty || resultImages.length === 0) && (
-          <PairedResult
-            text={resultText ?? ""}
-            isEmpty={resultIsEmpty}
-            isError={isError}
-          />
-        )
-      )}
+            {/* ── Paired result ── */}
+            {result && patchFiles && isError && (
+              <PairedResult
+                text={resultText ?? ""}
+                isEmpty={resultIsEmpty}
+                isError={isError}
+              />
+            )}
+            {result && !patchFiles && (
+              resultDiff ? (
+                <PairedDiffResult
+                  diff={resultDiff}
+                />
+              ) : (!resultIsEmpty || resultImages.length === 0) && (
+                <PairedResult
+                  text={resultText ?? ""}
+                  isEmpty={resultIsEmpty}
+                  isError={isError}
+                />
+              )
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1426,6 +1493,12 @@ function SplitPatchView({ text }: { text: string }) {
 function SplitFilesView({ files }: { files: SplitDiffFile[] }) {
   const { t } = useI18n();
   const showFileHeaders = files.length > 1;
+  // fork:zc-07 — 每个「删除 + 新增」行对只算一次词级差异，左右两格共用结果。
+  // undefined = 这对不是双边改动（纯增/纯删），保持原有整行底色。
+  const intraline = useMemo(() => files.map((file) => file.rows.map((row) => {
+    if (row.type !== "line" || row.left.type !== "removed" || row.right.type !== "added") return undefined;
+    return diffIntraline(row.left.text, row.right.text);
+  })), [files]);
 
   return (
     <div style={{ maxHeight: 560, overflowY: "auto", overflowX: "hidden", background: "var(--code-bg)" }}>
@@ -1463,10 +1536,11 @@ function SplitFilesView({ files }: { files: SplitDiffFile[] }) {
                 return null;
               }
 
+              const pair = intraline[fileIndex]?.[rowIndex];
               return (
                 <div key={rowIndex} style={{ display: "contents" }}>
-                  <SplitDiffCellView cell={row.left} side="left" />
-                  <SplitDiffCellView cell={row.right} side="right" />
+                  <SplitDiffCellView cell={row.left} side="left" intraline={pair === undefined ? undefined : pair?.left ?? null} />
+                  <SplitDiffCellView cell={row.right} side="right" intraline={pair === undefined ? undefined : pair?.right ?? null} />
                 </div>
               );
             })}
@@ -1495,7 +1569,12 @@ function SplitDiffHeader({ title, side }: { title: string; side: "left" | "right
   );
 }
 
-function SplitDiffCellView({ cell, side }: { cell: SplitDiffCell; side: "left" | "right" }) {
+function SplitDiffCellView({ cell, side, intraline }: {
+  cell: SplitDiffCell;
+  side: "left" | "right";
+  /** fork:zc-07 — undefined=不做行内标记；null=整行回退；数组=具体字符区间。 */
+  intraline?: IntralineSpan[] | null;
+}) {
   const bg =
     cell.type === "added"
       ? "var(--diff-added)"
@@ -1508,6 +1587,12 @@ function SplitDiffCellView({ cell, side }: { cell: SplitDiffCell; side: "left" |
     cell.type === "added" ? "+" : cell.type === "removed" ? "-" : " ";
   const markerColor =
     cell.type === "added" ? "var(--success)" : cell.type === "removed" ? "var(--danger)" : "var(--text-dim)";
+  // fork:zc-07 — 词级差异段。空文本（例如空行）仍然按原来的 nbsp 占位。
+  const segments = intraline === undefined ? null : buildIntralineSegments(cell.text, intraline);
+  const hasVisibleSegments = segments?.some((segment) => segment.text.length > 0) ?? false;
+  const changedBackground = cell.type === "added"
+    ? "color-mix(in srgb, var(--success) 30%, transparent)"
+    : "color-mix(in srgb, var(--danger) 30%, transparent)";
 
   return (
     <div
@@ -1554,7 +1639,16 @@ function SplitDiffCellView({ cell, side }: { cell: SplitDiffCell; side: "left" |
           overflowWrap: "anywhere",
         }}
       >
-        {cell.text || "\u00a0"}
+        {segments && hasVisibleSegments
+          ? segments.map((segment, index) => (
+              <span
+                key={index}
+                style={segment.changed ? { background: changedBackground, borderRadius: 2 } : undefined}
+              >
+                {segment.text}
+              </span>
+            ))
+          : (cell.text || "\u00a0")}
       </span>
     </div>
   );
@@ -1751,6 +1845,10 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
   // fork:pr15-compaction — 压缩卡默认收起：折叠态只留一行概览 + caret，展开后
   // 正文限高滚动。文件清单（CompactionFileMetadata）原样保留在展开区里。
   const [expanded, setExpanded] = useState(false);
+  // fork:zm-01 — 压缩正文同样走 grid 行高两段式折叠：wrapper 常驻，正文在收起
+  // 过渡结束后才卸载。
+  const collapseRef = useRef<HTMLDivElement>(null);
+  const bodyMounted = useCollapsePresence(expanded, undefined, collapseRef);
   const summary = getMessageText(message.content);
   const parsedSummary = useMemo(() => parseCompactionSummary(summary), [summary]);
   const time = formatTime(message.timestamp);
@@ -1806,22 +1904,31 @@ function CompactionMessageView({ message }: { message: CustomMessage }) {
           {time && <span style={{ marginLeft: "auto", flexShrink: 0, color: "var(--text-dim)", fontSize: TEXT["2xs"] }}>{time}</span>}
         </button>
 
-        {expanded && (
-          <div style={{ maxHeight: 280, overflowY: "auto", padding: "11px 13px 12px" }}>
-            <div style={{ color: "var(--text)", fontSize: "calc(15px + var(--chat-font-size-offset, 0px))", fontWeight: 700, lineHeight: 1.35 }}>
-               {t("i18n.conversationCompacted")}
+        {/* fork:zm-01 — 常驻 grid wrapper（0fr↔1fr）；正文在收起过渡结束后卸载。 */}
+        <div
+          ref={collapseRef}
+          className="fork-collapse"
+          data-fork-collapse={expanded ? "open" : "closed"}
+        >
+          {bodyMounted && (
+            <div className="fork-collapse-body">
+              <div style={{ maxHeight: 280, overflowY: "auto", padding: "11px 13px 12px" }}>
+                <div style={{ color: "var(--text)", fontSize: "calc(15px + var(--chat-font-size-offset, 0px))", fontWeight: 700, lineHeight: 1.35 }}>
+                   {t("i18n.conversationCompacted")}
+                </div>
+                <div style={{ marginTop: 3, marginBottom: 10, color: "var(--text)", fontSize: "calc(14px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
+                   {t("i18n.compactionDescription")}
+                </div>
+                {parsedSummary.body ? (
+                  <MarkdownBody className="markdown-compaction-message">{parsedSummary.body}</MarkdownBody>
+                ) : (
+                   <span style={{ color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("i18n.noSummary")}</span>
+                )}
+                <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
+              </div>
             </div>
-            <div style={{ marginTop: 3, marginBottom: 10, color: "var(--text)", fontSize: "calc(14px + var(--chat-font-size-offset, 0px))", lineHeight: 1.5 }}>
-               {t("i18n.compactionDescription")}
-            </div>
-            {parsedSummary.body ? (
-              <MarkdownBody className="markdown-compaction-message">{parsedSummary.body}</MarkdownBody>
-            ) : (
-               <span style={{ color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("i18n.noSummary")}</span>
-            )}
-            <CompactionFileMetadata readFiles={parsedSummary.readFiles} modifiedFiles={parsedSummary.modifiedFiles} />
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1867,6 +1974,13 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
   const text = getMessageText(message.content);
   const images = getMessageImages(message.content);
   const hasDetails = message.details !== undefined;
+  // fork:zm-01 — 正文区与 details 区各一条 grid。正文收起时先保留到过渡结束，
+  // 预览按钮等正文真正卸载后再出现（避免收起过程中按钮提前弹回）。
+  const contentCollapseRef = useRef<HTMLDivElement>(null);
+  const contentMounted = useCollapsePresence(contentExpanded, undefined, contentCollapseRef);
+  const detailsCollapseRef = useRef<HTMLDivElement>(null);
+  const showDetails = hasDetails && (isHiddenDisplay ? contentExpanded : detailsExpanded);
+  const detailsMounted = useCollapsePresence(showDetails, undefined, detailsCollapseRef);
   const detailsText = hasDetails ? safeJson(message.details) : "";
   const title = formatCustomType(message.customType);
   const time = formatTime(message.timestamp);
@@ -1908,29 +2022,40 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
           {time && <span style={{ marginLeft: "auto", color: "var(--text-dim)", fontSize: TEXT["2xs"] }}>{time}</span>}
         </div>
 
-        {contentExpanded ? (
-          <div style={{ padding: "6px 9px" }}>
-            {images.length > 0 && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: text ? 8 : 0 }}>
-                {images.map((img, i) => {
-                  const src = imageSource(img);
-                  if (!src) return null;
-                  return (
-                    <ImagePreview key={i} src={src}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={src}
-                        alt=""
-                        style={{ maxWidth: 240, maxHeight: 240, borderRadius: "var(--radius-sm)", objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
-                      />
-                    </ImagePreview>
-                  );
-                })}
+        {/* fork:zm-01 — 正文区的常驻 grid；折叠态由下面的预览按钮承担，正文在收起
+            过渡结束后才卸载，按钮随后才出现。 */}
+        <div
+          ref={contentCollapseRef}
+          className="fork-collapse"
+          data-fork-collapse={contentExpanded ? "open" : "closed"}
+        >
+          {contentMounted && (
+            <div className="fork-collapse-body">
+              <div style={{ padding: "6px 9px" }}>
+                {images.length > 0 && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: text ? 8 : 0 }}>
+                    {images.map((img, i) => {
+                      const src = imageSource(img);
+                      if (!src) return null;
+                      return (
+                        <ImagePreview key={i} src={src}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={src}
+                            alt=""
+                            style={{ maxWidth: 240, maxHeight: 240, borderRadius: "var(--radius-sm)", objectFit: "contain", display: "block", border: "1px solid var(--border)" }}
+                          />
+                        </ImagePreview>
+                      );
+                    })}
+                  </div>
+                )}
+                 {text ? <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{text}</MarkdownBody> : <span style={{ color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("i18n.noMessage")}</span>}
               </div>
-            )}
-             {text ? <MarkdownBody className="markdown-custom-message" cwd={cwd} onOpenFile={onOpenFile}>{text}</MarkdownBody> : <span style={{ color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("i18n.noMessage")}</span>}
-          </div>
-        ) : (
+            </div>
+          )}
+        </div>
+        {!contentExpanded && !contentMounted && (
           <button
             onClick={() => setContentExpanded(true)}
             style={{
@@ -1997,26 +2122,35 @@ function CustomMessageView({ message, cwd, onOpenFile }: { message: CustomMessag
           )}
         </div>
 
-        {hasDetails && ((isHiddenDisplay && contentExpanded) || (!isHiddenDisplay && detailsExpanded)) && (
-          <pre
-            style={{
-              margin: 0,
-              padding: "9px 10px",
-              borderTop: "1px solid var(--border)",
-              background: "var(--bg)",
-              color: "var(--text-muted)",
-              fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
-              lineHeight: 1.5,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              maxHeight: 360,
-              overflow: "auto",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
-            {detailsText}
-          </pre>
-        )}
+        {/* fork:zm-01 — details 区的常驻 grid；折叠时不渲染 pre，收起过渡期间保留。 */}
+        <div
+          ref={detailsCollapseRef}
+          className="fork-collapse"
+          data-fork-collapse={showDetails ? "open" : "closed"}
+        >
+          {detailsMounted && (
+            <div className="fork-collapse-body">
+              <pre
+                style={{
+                  margin: 0,
+                  padding: "9px 10px",
+                  borderTop: "1px solid var(--border)",
+                  background: "var(--bg)",
+                  color: "var(--text-muted)",
+                  fontSize: "calc(12px + var(--chat-font-size-offset, 0px))",
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  maxHeight: 360,
+                  overflow: "auto",
+                  fontFamily: "var(--font-mono)",
+                }}
+              >
+                {detailsText}
+              </pre>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

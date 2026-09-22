@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { useI18n } from "@/hooks/useI18n";
 import { ConfigButton, ConfigSwitch } from "../SettingsUi";
 import { CRON_EXAMPLES } from "@/lib/cron-expression";
-import type { CronScheduleKind, CronTaskView } from "@/lib/cron-schedule";
+import { compileCronRule, parseClockTime, type CronRule } from "@/lib/cron-rule";
+import type { CronRunRecord, CronSchedule, CronTaskView } from "@/lib/cron-schedule";
 import { TEXT } from "@/lib/typography";
 
 const THINKING_LEVELS = ["auto", "off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
@@ -26,14 +27,23 @@ function timezoneOptions(): string[] {
 /*
  * fork:cron — the scheduled-task page inside Settings.
  *
- * Scope, on purpose: create / enable / run now / delete, with the schedule reduced
- * to what the scheduler actually supports (daily · weekly · once + times). MusePi's
- * task center adds a calendar view and a run-history browser; both are only useful
- * once runs exist, and neither is worth building before the runner has been proven
- * on real tasks.
+ * Scope: create / enable / run now / delete + the run history and a
+ * human-readable frequency editor. fork:zc-14 adds the history region (start/end,
+ * status, output excerpt, open-session and delete-a-row, 8 rows per page);
+ * fork:zc-19 adds the frequency editor, which compiles the readable structure
+ * down to the same 5-field cron the scheduler already runs — there is no second
+ * schedule format at runtime.
  */
 
 const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+const MONTH_KEYS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"] as const;
+const ORDINALS = [1, 2, 3, 4, 5] as const;
+
+/** fork:zc-19 — the editor modes. `once`/`cron` keep the previous escape hatches. */
+type EditorMode = "minutes" | "hours" | "daily" | "weekly" | "monthly" | "yearly" | "once" | "cron";
+
+/** fork:zc-14 — the reference browser shows 8 runs per page. */
+const HISTORY_PAGE_SIZE = 8;
 
 /**
  * fork:fix-cron-model-list — shape of `GET /api/models`.
@@ -54,6 +64,168 @@ function toDateInputValue(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
+function formatDuration(ms: number | undefined): string {
+  if (ms === undefined) return "—";
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+const RUN_STATUS_COLOR: Record<string, string> = {
+  ok: "var(--success)",
+  error: "var(--danger)",
+  skipped: "var(--text-dim)",
+  running: "var(--accent)",
+};
+
+const RUN_STATUS_KEY: Record<string, string> = {
+  ok: "cron.runStatus.ok",
+  error: "cron.runStatus.error",
+  skipped: "cron.runStatus.skipped",
+  running: "cron.runStatus.running",
+};
+
+/**
+ * fork:zc-14 — one task's run history: newest first, 8 rows per page, with the
+ * output excerpt (or the skip reason / error) and a jump to the run's session.
+ */
+function TaskHistory({ task, onOpenSession, onDeleteRun }: {
+  task: CronTaskView;
+  onOpenSession?: (sessionId: string) => void;
+  onDeleteRun: (runId: string) => void;
+}): ReactNode {
+  const { t } = useI18n();
+  const [page, setPage] = useState(1);
+  const runs = task.history ?? [];
+  const totalPages = Math.max(1, Math.ceil(runs.length / HISTORY_PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = runs.slice((currentPage - 1) * HISTORY_PAGE_SIZE, currentPage * HISTORY_PAGE_SIZE);
+
+  const detail = (run: CronRunRecord): string => {
+    if (run.error) return run.error;
+    if (run.skipReason) return t(`cron.skipReason.${run.skipReason}`);
+    return run.outputExcerpt ?? "";
+  };
+
+  return (
+    <details style={{ marginTop: 2 }}>
+      <summary style={{ cursor: "pointer", fontSize: TEXT.xs, color: "var(--text-dim)" }}>
+        {t("cron.history")} · {runs.length}
+      </summary>
+      {runs.length === 0 ? (
+        <p className="settings-chat-range-hint" style={{ margin: "4px 0 0" }}>{t("cron.historyEmpty")}</p>
+      ) : (
+        <div style={{ marginTop: 4 }}>
+          <div style={{ display: "grid", gap: 2 }}>
+            {paged.map((run, index) => {
+              const started = new Date(run.at);
+              const finished = run.finishedAt ? new Date(run.finishedAt) : null;
+              const duration = finished ? finished.getTime() - started.getTime() : undefined;
+              const text = detail(run);
+              return (
+                <div
+                  key={run.id ?? `${run.at}-${index}`}
+                  style={{
+                    display: "grid",
+                    gap: 2,
+                    padding: "5px 7px",
+                    border: "1px solid var(--border-faint)",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--bg-panel)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: TEXT.xs }}>
+                    <span style={{ color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+                      {Number.isNaN(started.getTime()) ? run.at : started.toLocaleString()}
+                      {finished && !Number.isNaN(finished.getTime()) ? ` → ${finished.toLocaleTimeString()}` : ""}
+                    </span>
+                    <span style={{ color: RUN_STATUS_COLOR[run.status] ?? "var(--text-dim)" }}>
+                      ● {t(RUN_STATUS_KEY[run.status] ?? "cron.runStatus.error")}
+                    </span>
+                    {finished && <span style={{ color: "var(--text-dim)" }}>{formatDuration(duration)}</span>}
+                    {run.trigger && <span style={{ color: "var(--text-dim)" }}>{t(`cron.trigger.${run.trigger}`)}</span>}
+                    {run.attempt !== undefined && run.attempt > 1 && (
+                      <span style={{ color: "var(--warning)" }}>{t("cron.history.attempt", { attempt: run.attempt })}</span>
+                    )}
+                    <span style={{ flex: 1 }} />
+                    {run.sessionId && onOpenSession && (
+                      <button
+                        type="button"
+                        onClick={() => onOpenSession(run.sessionId!)}
+                        style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: TEXT.xs, padding: 0 }}
+                      >
+                        {t("cron.openRun")}
+                      </button>
+                    )}
+                    {run.id && (
+                      <button
+                        type="button"
+                        title={t("cron.history.deleteRun")}
+                        aria-label={t("cron.history.deleteRun")}
+                        onClick={() => onDeleteRun(run.id!)}
+                        style={{ border: "none", background: "none", color: "var(--text-dim)", cursor: "pointer", fontSize: TEXT.xs, padding: 0 }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                  {text && (
+                    <span
+                      title={text}
+                      style={{
+                        fontSize: TEXT.xs,
+                        color: run.error ? "var(--danger)" : "var(--text-dim)",
+                        fontFamily: "var(--font-mono)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {text}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {totalPages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6, marginTop: 4 }}>
+              <button
+                type="button"
+                title={t("cron.history.prev")}
+                aria-label={t("cron.history.prev")}
+                disabled={currentPage <= 1}
+                onClick={() => setPage(currentPage - 1)}
+                style={{ border: "1px solid var(--border-faint)", background: "transparent", color: "var(--text-dim)", cursor: "pointer", borderRadius: "var(--radius-sm)", fontSize: TEXT.xs, padding: "1px 6px" }}
+              >
+                ‹
+              </button>
+              <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+                {t("cron.history.pageOf", { current: currentPage, total: totalPages })}
+              </span>
+              <button
+                type="button"
+                title={t("cron.history.next")}
+                aria-label={t("cron.history.next")}
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage(currentPage + 1)}
+                style={{ border: "1px solid var(--border-faint)", background: "transparent", color: "var(--text-dim)", cursor: "pointer", borderRadius: "var(--radius-sm)", fontSize: TEXT.xs, padding: "1px 6px" }}
+              >
+                ›
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </details>
+  );
+}
+
 export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpenSession?: (sessionId: string) => void }): ReactNode {
   const { t } = useI18n();
   const [tasks, setTasks] = useState<CronTaskView[]>([]);
@@ -64,9 +236,19 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
   const [taskCwd, setTaskCwd] = useState(cwd ?? "");
-  const [kind, setKind] = useState<CronScheduleKind>("daily");
-  const [times, setTimes] = useState("09:00");
-  const [weekdays, setWeekdays] = useState<number[]>([1]);
+  // fork:zc-19 — human-readable frequency editor state. It compiles to the
+  // existing 5-field cron; the raw expression stays an escape hatch.
+  const [mode, setMode] = useState<EditorMode>("daily");
+  const [intervalValue, setIntervalValue] = useState("5");
+  const [time, setTime] = useState("09:00");
+  const [weekdays, setWeekdays] = useState<number[]>([1, 2, 3, 4, 5]);
+  const [monthlyMode, setMonthlyMode] = useState<"date" | "weekday">("date");
+  const [monthDay, setMonthDay] = useState("1");
+  const [monthWeekday, setMonthWeekday] = useState(1);
+  const [monthOrdinal, setMonthOrdinal] = useState(1);
+  const [yearMonth, setYearMonth] = useState("1");
+  const [yearDay, setYearDay] = useState("1");
+  const [endDate, setEndDate] = useState("");
   const [date, setDate] = useState(() => toDateInputValue(new Date()));
   const [expression, setExpression] = useState("*/5 * * * *");
   const [idleStart, setIdleStart] = useState("");
@@ -145,9 +327,62 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
     if (cwd) setTaskCwd((current) => current || cwd);
   }, [cwd]);
 
+  /**
+   * fork:zc-19 — build the readable rule from the editor state. Returns null when
+   * a field is not usable yet (the preview then shows the compile error instead).
+   */
+  const buildRule = (): CronRule | null => {
+    const interval = Number(intervalValue);
+    const parsedTime = parseClockTime(time);
+    const end = endDate ? { endDate } : {};
+    switch (mode) {
+      case "minutes":
+        return { kind: "minutes", interval, ...end };
+      case "hours":
+        return parsedTime ? { kind: "hours", interval, minute: parsedTime.minute, ...end } : null;
+      case "daily":
+        return parsedTime ? { kind: "daily", time, ...end } : null;
+      case "weekly":
+        return parsedTime ? { kind: "weekly", time, weekdays, ...end } : null;
+      case "monthly":
+        if (!parsedTime) return null;
+        return monthlyMode === "date"
+          ? { kind: "monthly", mode: "date", time, day: Number(monthDay), ...end }
+          : { kind: "monthly", mode: "weekday", time, weekday: monthWeekday, ordinal: monthOrdinal, ...end };
+      case "yearly":
+        return parsedTime ? { kind: "yearly", time, month: Number(yearMonth), day: Number(yearDay), ...end } : null;
+      default:
+        return null;
+    }
+  };
+
+  const compiled = buildRule();
+  const compiledResult = compiled ? compileCronRule(compiled) : null;
+
+  const scheduleForCreate = (): CronSchedule | null => {
+    const window = idleStart && idleEnd ? { idleWindow: { start: idleStart, end: idleEnd } } : {};
+    const shared = { ...(timezone !== "host" ? { timezone } : {}), ...window };
+    if (mode === "once") return { kind: "once", times: [time], date, ...shared };
+    if (mode === "cron") return { kind: "cron", times: [], expression: expression.trim(), ...shared };
+    const result = compiledResult;
+    if (!result || !result.ok) {
+      setError(result && !result.ok ? result.error : t("cron.ruleInvalid"));
+      return null;
+    }
+    // fork:zc-19 — readable structure compiles down to the one runtime format.
+    return {
+      kind: "cron",
+      times: [],
+      expression: result.expression,
+      ...(result.endDate ? { endDate: result.endDate } : {}),
+      ...shared,
+    };
+  };
+
   const create = async () => {
     setError(null);
-    const window = idleStart && idleEnd ? { idleWindow: { start: idleStart, end: idleEnd } } : {};
+    const schedule = scheduleForCreate();
+    if (!schedule) return;
     const body = {
       name: name.trim(),
       prompt: prompt.trim(),
@@ -159,15 +394,7 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
       ...(Number.isFinite(Number(maxRuns)) && Number(maxRuns) > 0 ? { maxRuns: Math.floor(Number(maxRuns)) } : {}),
       ...(sessionMode !== "new" ? { sessionMode } : {}),
       ...(notify !== "error" ? { notify } : {}),
-      schedule: {
-        kind,
-        times: kind === "cron" ? [] : times.split(",").map((value) => value.trim()).filter(Boolean),
-        ...(kind === "cron" ? { expression: expression.trim() } : {}),
-        ...(kind === "weekly" ? { weekdays } : {}),
-        ...(kind === "once" ? { date } : {}),
-        ...(timezone !== "host" ? { timezone } : {}),
-        ...window,
-      },
+      schedule,
     };
     try {
       const res = await fetch("/api/cron", {
@@ -215,18 +442,43 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
     }
   };
 
+  // fork:zc-14 — drop one run row without touching the task itself.
+  const removeRun = async (taskId: string, runId: string) => {
+    setBusyId(taskId);
+    try {
+      await fetch(`/api/cron?id=${encodeURIComponent(taskId)}&runId=${encodeURIComponent(runId)}`, { method: "DELETE" });
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const describe = (task: CronTaskView) => {
     const names = WEEKDAY_KEYS.map((key) => t(`cron.weekday.${key}`));
     const zone = task.schedule.timezone ? ` · ${task.schedule.timezone}` : "";
     const window = task.schedule.idleWindow ? ` · ${t("cron.window")} ${task.schedule.idleWindow.start}–${task.schedule.idleWindow.end}` : "";
-    if (task.schedule.kind === "cron") return `${task.schedule.expression ?? ""}${zone}${window}`;
-    if (task.schedule.kind === "daily") return `${t("cron.daily")} ${task.schedule.times.join(", ")}${zone}${window}`;
+    const end = task.schedule.endDate ? ` · ${t("cron.endDate")} ${task.schedule.endDate}` : "";
+    if (task.schedule.kind === "cron") return `${task.schedule.expression ?? ""}${zone}${window}${end}`;
+    if (task.schedule.kind === "daily") return `${t("cron.daily")} ${task.schedule.times.join(", ")}${zone}${window}${end}`;
     if (task.schedule.kind === "weekly") {
       const days = (task.schedule.weekdays ?? []).map((day) => names[day]).join("/");
-      return `${days} ${task.schedule.times.join(", ")}${zone}${window}`;
+      return `${days} ${task.schedule.times.join(", ")}${zone}${window}${end}`;
     }
-    return `${task.schedule.date ?? ""} ${task.schedule.times.join(", ")}${zone}${window}`;
+    return `${task.schedule.date ?? ""} ${task.schedule.times.join(", ")}${zone}${window}${end}`;
   };
+
+  const intervalInput = (unit: string) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <input
+        className="settings-field-input"
+        inputMode="numeric"
+        value={intervalValue}
+        onChange={(event) => setIntervalValue(event.target.value.replace(/[^0-9]/g, ""))}
+        style={{ width: 70, fontVariantNumeric: "tabular-nums" }}
+      />
+      <span style={{ fontSize: TEXT.sm, color: "var(--text-dim)" }}>{unit}</span>
+    </div>
+  );
 
   return (
     <div className="settings-general">
@@ -310,34 +562,154 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
                 <option value="never">{t("cron.notifyNever")}</option>
               </select>
             </label>
-            <label style={{ display: "grid", gap: 4 }}>
-              <span className="settings-chat-option-label">{t("cron.scheduleType")}</span>
-              <select className="settings-select" value={kind} onChange={(event) => setKind(event.target.value as CronScheduleKind)}>
-                <option value="cron">{t("cron.kindCron")}</option>
-                <option value="daily">{t("cron.daily")}</option>
-                <option value="weekly">{t("cron.weekly")}</option>
-                <option value="once">{t("cron.once")}</option>
-              </select>
-            </label>
-            {kind !== "cron" && (
-              <label style={{ display: "grid", gap: 4 }}>
-                <span className="settings-chat-option-label">{t("cron.times")}</span>
-                <input className="settings-field-input" value={times} onChange={(event) => setTimes(event.target.value)} placeholder="09:00, 18:30" style={{ width: 160, fontVariantNumeric: "tabular-nums" }} />
-              </label>
-            )}
-            {kind === "once" && (
-              <label style={{ display: "grid", gap: 4 }}>
-                <span className="settings-chat-option-label">{t("cron.date")}</span>
-                <input className="settings-field-input" type="date" value={date} onChange={(event) => setDate(event.target.value)} style={{ width: 160 }} />
-              </label>
-            )}
           </div>
 
           {modelsError && (
             <p className="settings-chat-range-hint" role="status">{t("cron.modelListError", { error: modelsError })}</p>
           )}
 
-          {kind === "cron" && (
+          {/* fork:zc-19 — human-readable frequency editor (compiles to 5-field cron). */}
+          <label style={{ display: "grid", gap: 4 }}>
+            <span className="settings-chat-option-label">{t("cron.frequency")}</span>
+            <select className="settings-select" value={mode} onChange={(event) => setMode(event.target.value as EditorMode)}>
+              <option value="minutes">{t("cron.freq.minutes")}</option>
+              <option value="hours">{t("cron.freq.hours")}</option>
+              <option value="daily">{t("cron.daily")}</option>
+              <option value="weekly">{t("cron.weekly")}</option>
+              <option value="monthly">{t("cron.freq.monthly")}</option>
+              <option value="yearly">{t("cron.freq.yearly")}</option>
+              <option value="once">{t("cron.once")}</option>
+              <option value="cron">{t("cron.kindCron")}</option>
+            </select>
+          </label>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+            {mode === "minutes" && (
+              <label style={{ display: "grid", gap: 4 }}>
+                <span className="settings-chat-option-label">{t("cron.interval")}</span>
+                {intervalInput(t("cron.unit.minutes"))}
+              </label>
+            )}
+            {mode === "hours" && (
+              <>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span className="settings-chat-option-label">{t("cron.interval")}</span>
+                  {intervalInput(t("cron.unit.hours"))}
+                </label>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span className="settings-chat-option-label">{t("cron.atTime")}</span>
+                  <input className="settings-field-input" type="time" value={time} onChange={(event) => setTime(event.target.value)} style={{ width: 130 }} />
+                </label>
+              </>
+            )}
+            {(mode === "daily" || mode === "weekly" || mode === "monthly" || mode === "yearly" || mode === "once") && (
+              <label style={{ display: "grid", gap: 4 }}>
+                <span className="settings-chat-option-label">{t("cron.atTime")}</span>
+                <input className="settings-field-input" type="time" value={time} onChange={(event) => setTime(event.target.value)} style={{ width: 130 }} />
+              </label>
+            )}
+            {mode === "once" && (
+              <label style={{ display: "grid", gap: 4 }}>
+                <span className="settings-chat-option-label">{t("cron.date")}</span>
+                <input className="settings-field-input" type="date" value={date} onChange={(event) => setDate(event.target.value)} style={{ width: 160 }} />
+              </label>
+            )}
+            {mode === "monthly" && (
+              <>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span className="settings-chat-option-label">{t("cron.monthlyMode")}</span>
+                  <select className="settings-select" value={monthlyMode} onChange={(event) => setMonthlyMode(event.target.value as "date" | "weekday")}>
+                    <option value="date">{t("cron.monthlyByDate")}</option>
+                    <option value="weekday">{t("cron.monthlyByWeekday")}</option>
+                  </select>
+                </label>
+                {monthlyMode === "date" ? (
+                  <label style={{ display: "grid", gap: 4 }}>
+                    <span className="settings-chat-option-label">{t("cron.dayOfMonth")}</span>
+                    <input
+                      className="settings-field-input"
+                      inputMode="numeric"
+                      value={monthDay}
+                      onChange={(event) => setMonthDay(event.target.value.replace(/[^0-9]/g, ""))}
+                      style={{ width: 80, fontVariantNumeric: "tabular-nums" }}
+                    />
+                  </label>
+                ) : (
+                  <>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span className="settings-chat-option-label">{t("cron.weekday")}</span>
+                      <select className="settings-select" value={monthWeekday} onChange={(event) => setMonthWeekday(Number(event.target.value))}>
+                        {WEEKDAY_KEYS.map((key, index) => <option key={key} value={index}>{t(`cron.weekday.${key}`)}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: 4 }}>
+                      <span className="settings-chat-option-label">{t("cron.ordinal")}</span>
+                      <select className="settings-select" value={monthOrdinal} onChange={(event) => setMonthOrdinal(Number(event.target.value))}>
+                        {ORDINALS.map((ordinal) => <option key={ordinal} value={ordinal}>{t(`cron.ordinal.${ordinal}`)}</option>)}
+                      </select>
+                    </label>
+                  </>
+                )}
+              </>
+            )}
+            {mode === "yearly" && (
+              <>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span className="settings-chat-option-label">{t("cron.month")}</span>
+                  <select className="settings-select" value={yearMonth} onChange={(event) => setYearMonth(event.target.value)}>
+                    {MONTH_KEYS.map((key, index) => <option key={key} value={index + 1}>{t(`cron.month.${key}`)}</option>)}
+                  </select>
+                </label>
+                <label style={{ display: "grid", gap: 4 }}>
+                  <span className="settings-chat-option-label">{t("cron.dayOfMonth")}</span>
+                  <input
+                    className="settings-field-input"
+                    inputMode="numeric"
+                    value={yearDay}
+                    onChange={(event) => setYearDay(event.target.value.replace(/[^0-9]/g, ""))}
+                    style={{ width: 80, fontVariantNumeric: "tabular-nums" }}
+                  />
+                </label>
+              </>
+            )}
+            {mode !== "once" && (
+              <label style={{ display: "grid", gap: 4 }}>
+                <span className="settings-chat-option-label">{t("cron.endDate")}</span>
+                <input className="settings-field-input" type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} style={{ width: 160 }} />
+              </label>
+            )}
+          </div>
+
+          {mode !== "once" && (
+            <p className="settings-chat-range-hint">{t("cron.endDateHint")}</p>
+          )}
+
+          {mode === "weekly" && (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              {WEEKDAY_KEYS.map((key, index) => {
+                const active = weekdays.includes(index);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setWeekdays((current) => (active ? current.filter((day) => day !== index) : [...current, index].sort()))}
+                    style={{
+                      minWidth: 34, height: 26, padding: "0 8px",
+                      border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
+                      background: active ? "var(--bg-selected)" : "transparent",
+                      color: active ? "var(--text)" : "var(--text-muted)",
+                      cursor: "pointer", fontSize: TEXT.xs,
+                    }}
+                  >
+                    {t(`cron.weekday.${key}`)}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {mode === "cron" && (
             <div style={{ display: "grid", gap: 6 }}>
               <label style={{ display: "grid", gap: 4 }}>
                 <span className="settings-chat-option-label">{t("cron.expression")}</span>
@@ -376,28 +748,19 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
             </div>
           )}
 
-          {kind === "weekly" && (
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {WEEKDAY_KEYS.map((key, index) => {
-                const active = weekdays.includes(index);
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setWeekdays((current) => (active ? current.filter((day) => day !== index) : [...current, index].sort()))}
-                    style={{
-                      minWidth: 34, height: 26, padding: "0 8px",
-                      border: "1px solid var(--border)", borderRadius: "var(--radius-md)",
-                      background: active ? "var(--bg-selected)" : "transparent",
-                      color: active ? "var(--text)" : "var(--text-muted)",
-                      cursor: "pointer", fontSize: TEXT.xs,
-                    }}
-                  >
-                    {t(`cron.weekday.${key}`)}
-                  </button>
-                );
-              })}
+          {mode !== "cron" && mode !== "once" && (
+            <div style={{ display: "grid", gap: 2 }}>
+              <span className="settings-chat-option-label">{t("cron.compiled")}</span>
+              {compiledResult?.ok ? (
+                <>
+                  <code style={{ fontSize: TEXT.sm, color: "var(--accent)", fontFamily: "var(--font-mono)" }}>{compiledResult.expression}</code>
+                  <span className="settings-chat-range-hint">{t("cron.compiledHint")}</span>
+                </>
+              ) : (
+                <span style={{ fontSize: TEXT.sm, color: "var(--danger)" }}>
+                  {t("cron.ruleInvalid", { error: compiledResult && !compiledResult.ok ? compiledResult.error : "" })}
+                </span>
+              )}
             </div>
           )}
 
@@ -427,7 +790,7 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
             <ConfigSwitch label={t("cron.enabled")} checked={taskEnabled} onChange={setTaskEnabled} />
           </div>
           <div>
-            <ConfigButton variant="primary" size="small" disabled={!prompt.trim() || !taskCwd.trim()} onClick={() => void create()}>
+            <ConfigButton variant="primary" size="small" disabled={!prompt.trim() || !taskCwd.trim() || (mode !== "once" && mode !== "cron" && !compiledResult?.ok)} onClick={() => void create()}>
               {t("cron.create")}
             </ConfigButton>
           </div>
@@ -469,31 +832,17 @@ export function CronConfig({ cwd, onOpenSession }: { cwd?: string | null; onOpen
                     {task.model ? `${task.model.provider}/${task.model.modelId}` : t("cron.default")}{task.thinking ? ` · ${task.thinking}` : ""}
                   </span>
                 )}
-                {task.history && task.history.length > 0 && (
-                  <details style={{ marginTop: 2 }}>
-                    <summary style={{ cursor: "pointer", fontSize: TEXT.xs, color: "var(--text-dim)" }}>
-                      {t("cron.history")} · {task.history.length}
-                    </summary>
-                    <ul style={{ margin: "4px 0 0", padding: 0, listStyle: "none", display: "grid", gap: 3 }}>
-                      {task.history.slice(0, 8).map((run, index) => (
-                        <li key={`${run.at}-${index}`} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: TEXT.xs, color: run.status === "error" ? "var(--danger)" : "var(--text-dim)" }}>
-                          <span style={{ fontVariantNumeric: "tabular-nums" }}>{new Date(run.at).toLocaleString()}</span>
-                          <span>{t(`cron.status.${run.status}`)}</span>
-                          {run.sessionId && (
-                            <button
-                              type="button"
-                              onClick={() => onOpenSession?.(run.sessionId!)}
-                              style={{ border: "none", background: "none", color: "var(--accent)", cursor: "pointer", fontSize: TEXT.xs, padding: 0 }}
-                            >
-                              {t("cron.openRun")}
-                            </button>
-                          )}
-                          {run.error && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={run.error}>{run.error}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
+                {/* fork:zc-19 — surface a pending backoff retry instead of hiding it. */}
+                {task.retryAt && (
+                  <span style={{ fontSize: TEXT.xs, color: "var(--warning)" }}>
+                    {t("cron.retryScheduled", { at: new Date(task.retryAt).toLocaleTimeString() })}
+                  </span>
                 )}
+                <TaskHistory
+                  task={task}
+                  {...(onOpenSession ? { onOpenSession } : {})}
+                  onDeleteRun={(runId) => void removeRun(task.id, runId)}
+                />
                 {task.lastStatus && (
                   <span style={{ fontSize: TEXT.xs, color: task.lastStatus === "error" ? "var(--danger)" : "var(--text-dim)" }}>
                     {t(`cron.status.${task.lastStatus}`)}{task.lastError ? ` · ${task.lastError}` : ""}

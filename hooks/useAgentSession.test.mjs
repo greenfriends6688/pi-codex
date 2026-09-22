@@ -6,6 +6,7 @@ const source = await readFile(new URL("./useAgentSession.ts", import.meta.url), 
 const chatWindowSource = await readFile(new URL("../components/ChatWindow.tsx", import.meta.url), "utf8");
 const chatInputSource = await readFile(new URL("../components/ChatInput.tsx", import.meta.url), "utf8");
 const appShellSource = await readFile(new URL("../components/AppShell.tsx", import.meta.url), "utf8");
+const phaseRollSource = await readFile(new URL("../components/fork/PhaseRoll.tsx", import.meta.url), "utf8");
 
 test("keeps the session event stream open through the idle grace window", () => {
   const finishSource = source.slice(
@@ -295,7 +296,17 @@ test("delegates event stream readiness and hides an empty agent phase", () => {
   assert.match(ensureSource, /eventConnectionRef\.current!\.maintain\(sid\)/);
   assert.match(chatWindowSource, /const hasStreamingContent = Boolean\(streamState\.streamingMessage\?\.content\.length\)/);
   assert.match(chatWindowSource, /streamState\.isStreaming && hasStreamingContent && streamState\.streamingMessage/);
-  assert.match(chatWindowSource, /agentRunning && !hasStreamingContent && agentPhase/);
+  // fork:zm-07 — 相位行现在由 PhaseRoll 渲染。契约不变（没相位就不占位），
+  // 但拆成了两半：挂载点只负责 agentRunning && !hasStreamingContent，
+  // “空相位不渲染”由 PhaseRoll 自己的 null 分支保证；同时外层 wrapper 不得带 padding，
+  // 否则 PhaseRoll 返回 null 时仍会留一条空行（这正是以前 gate 在 agentPhase 上的原因）。
+  assert.match(chatWindowSource, /agentRunning && !hasStreamingContent && \(/);
+  assert.match(chatWindowSource, /<PhaseRoll[\s\S]{0,200}?text=\{agentPhase \? phaseLabel\(agentPhase, t\) : null\}/);
+  assert.match(chatWindowSource, /break-words text-xs text-text-muted[\s\S]{0,400}?<PhaseRoll/);
+  assert.doesNotMatch(chatWindowSource, /break-words py-2 text-xs text-text-muted[\s\S]{0,400}?<PhaseRoll/,
+    "相位行的间距不能留在 wrapper 上，否则空相位会留下空隙");
+  assert.match(phaseRollSource, /if \(!displayed && !exiting\) return null;/);
+  assert.match(phaseRollSource, /padding: "8px 0"/);
   assert.match(chatWindowSource, /return null;/);
 });
 

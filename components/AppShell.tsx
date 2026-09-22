@@ -34,10 +34,13 @@ import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { FileViewer, type FileLocationTarget, type FileSelectionContext } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
 import { openFileTab, saveFileViewerState } from "./file-tab-state";
+// fork:zc-06 — 「最近关闭」快照的纯逻辑与存储。
+import { forgetClosedTab, loadRecentClosedTabs, recordClosedTab, saveRecentClosedTabs, type RestorableTab } from "@/lib/recent-closed-tabs";
 import { loadSessionList } from "@/lib/session-list";
 import { loadRightTabs, saveRightTabs } from "@/lib/right-tabs-memory";
 import { resolveRestoreTarget } from "@/lib/workspace-restore";
 import { GitGraphTab } from "./GitGraphTab";
+// fork:zc-05 — 右栏「变更」单例 tab。
 import { SettingsPanel } from "./SettingsPanel";
 import { ExplorerPanel } from "./ExplorerPanel";
 import { ProjectTrustDialog } from "./ProjectTrustDialog";
@@ -132,6 +135,7 @@ const TOP_BAR_ICON_BUTTON_SIZE = 28;
 const EXPLORER_COLUMN_MIN_PANEL_WIDTH = 760;
 /** fork:git-graph-tab — 单例图谱 tab 的 id（不与文件 tab 的 `file:<path>` 撞名）。 */
 const GIT_GRAPH_TAB_ID = "git-graph";
+/** fork:zc-05 — 单例变更面板 tab 的 id。 */
 const AGENT_PANEL_WIDTH = 420;
 /** Below this rendered panel width the tree column is dropped so the document keeps room. */
 
@@ -548,6 +552,7 @@ export function AppShell() {
   const [mountedFileTabs, setMountedFileTabs] = useState<ReadonlySet<string>>(() => new Set());
   // fork:git-graph-tab — 每个工作区一个单例 Git 图谱 tab（不持久化：它是“看一眼”的视图）。
   const [gitGraphOpen, setGitGraphOpen] = useState(false);
+  // fork:zc-05 — 单例 Git 变更面板（与图谱同为「看一眼」的视图，不持久化）。
   // fork:proma-05-explore — 探索分支的右栏只读 tab（可与主线并排看）
   const [branchTabs, setBranchTabs] = useState<{ id: string; sessionId: string; parentSessionId: string | null; label: string }[]>([]);
   const [browsersRestored, setBrowsersRestored] = useState(false);
@@ -609,7 +614,9 @@ export function AppShell() {
     });
   }, [activeFileTabId, fileTabs]);
 
-  const panelTabs: Tab[] = [...(gitGraphOpen ? [{
+  // fork:zc-06 — memoized so the tab-overview callbacks (close-all / close-others /
+  // close-with-history) do not get a new dependency every render.
+  const panelTabs: Tab[] = useMemo(() => [...(gitGraphOpen ? [{
     id: GIT_GRAPH_TAB_ID,
     label: translate("git.graph"),
     filePath: "",
@@ -630,7 +637,7 @@ export function AppShell() {
     label: tab.label,
     filePath: tab.sessionId,
     kind: "session" as const,
-  }))];
+  }))], [branchTabs, browserTabs, fileTabs, gitGraphOpen, terminalTabs, translate]);
 
   useEffect(() => {
     try {
@@ -999,6 +1006,9 @@ export function AppShell() {
   useGlobalKeyboardShortcuts({
     onNewSession: (cwd: string) => handleNewSession(`kb-${Date.now()}`, cwd),
     activeCwd,
+    // fork:zc-04 — 直接给句柄，不再让快捷键层去 DOM 里找按钮点。
+    onToggleSidebar: handleSidebarToggle,
+    onToggleRightPanel: handleRightPanelToggle,
   });
 
   // Client-built transient SessionInfo (new session / fork) lacks the
@@ -1387,9 +1397,16 @@ export function AppShell() {
   const handleCloseFileTab = useCallback((tabId: string) => {
     if (tabId === GIT_GRAPH_TAB_ID) {
       setGitGraphOpen(false);
-      const remaining = [...fileTabs, ...terminalTabs, ...browserTabs, ...branchTabs];
-      setActiveFileTabId((current) => current !== tabId ? current : remaining.at(-1)?.id ?? null);
-      if (!workspaceSwapped && remaining.length === 0) setRightPanelOpen(false);
+      const siblingSingleton: string[] = [];
+      const remainingIds = [
+        ...fileTabs.map((tab) => tab.id),
+        ...terminalTabs.map((tab) => tab.id),
+        ...browserTabs.map((tab) => tab.id),
+        ...branchTabs.map((tab) => tab.id),
+        ...siblingSingleton,
+      ];
+      setActiveFileTabId((current) => current !== tabId ? current : remainingIds.at(-1) ?? null);
+      if (!workspaceSwapped && remainingIds.length === 0) setRightPanelOpen(false);
       return;
     }
     if (branchTabs.some((tab) => tab.id === tabId)) {
@@ -1423,7 +1440,62 @@ export function AppShell() {
       const remaining = fileTabs.filter((t) => t.id !== tabId);
       return remaining.at(-1)?.id ?? terminalTabs.at(-1)?.id ?? null;
     });
-  }, [fileTabs, terminalTabs, workspaceSwapped]);
+  }, [branchTabs, browserTabs, fileTabs, terminalTabs, workspaceSwapped]);
+
+  // fork:zc-06 — tab 概览：记录「最近关闭」，并提供批量关闭 / 重开。
+  //
+  // 记录点放在「关闭」这个动作的包装层，而不是散在 handleCloseFileTab 的各条分支里：
+  // 它有六条分支（git-graph / 会话分支 / 浏览器 / 终端 / 文件），逐条插一遍必然漏一条。
+  // 只有能靠一个路径重建的 tab 会被记下（见 lib/recent-closed-tabs.ts 的头注释）。
+  const [recentClosedTabs, setRecentClosedTabs] = useState<RestorableTab[]>([]);
+  useEffect(() => {
+    // localStorage 只能在浏览器里读，所以放到 effect 而不是 useState 初始化器。
+    setRecentClosedTabs(loadRecentClosedTabs());
+  }, []);
+  useEffect(() => {
+    saveRecentClosedTabs(recentClosedTabs);
+  }, [recentClosedTabs]);
+
+  const handleCloseTabWithHistory = useCallback((tabId: string) => {
+    const tab = panelTabs.find((item) => item.id === tabId);
+    if (tab) setRecentClosedTabs((prev) => recordClosedTab(prev, tab));
+    handleCloseFileTab(tabId);
+  }, [handleCloseFileTab, panelTabs]);
+
+  // 批量关闭不循环调 handleCloseFileTab：它每次都从闭包里的旧数组推导剩余项，
+  // 同一 tick 连调会用第一次的结果覆盖第二次（越关越剩）。这里一次性算完。
+  const handleCloseAllTabs = useCallback(() => {
+    setRecentClosedTabs((prev) => panelTabs.reduce((list, tab) => recordClosedTab(list, tab), prev));
+    setFileTabs([]);
+    setTerminalTabs([]);
+    setBrowserTabs([]);
+    setBranchTabs([]);
+    setGitGraphOpen(false);
+    setActiveFileTabId(null);
+    if (!workspaceSwapped) setRightPanelOpen(false);
+  }, [panelTabs, workspaceSwapped]);
+
+  const handleCloseOtherTabs = useCallback(() => {
+    const keep = activeFileTabId;
+    const closing = panelTabs.filter((tab) => tab.id !== keep);
+    setRecentClosedTabs((prev) => closing.reduce((list, tab) => recordClosedTab(list, tab), prev));
+    setFileTabs((tabs) => tabs.filter((tab) => tab.id === keep));
+    setBrowserTabs((tabs) => tabs.filter((tab) => tab.id === keep));
+    setBranchTabs((tabs) => tabs.filter((tab) => tab.id === keep));
+    // 终端 tab 走 closing 标记（要等 PTY 收尾），与单个关闭时的行为一致。
+    setTerminalTabs((tabs) => tabs.map((tab) => (tab.id === keep ? tab : { ...tab, closing: "close" as const })));
+    setGitGraphOpen(keep === GIT_GRAPH_TAB_ID);
+  }, [activeFileTabId, panelTabs]);
+
+  const handleRestoreClosedTab = useCallback((tab: RestorableTab) => {
+    // 重开成功就从历史里拿掉，否则它会在列表里留着，看起来像没打开。
+    setRecentClosedTabs((prev) => forgetClosedTab(prev, tab.id));
+    if (tab.kind === "git-graph") {
+      openGitGraphTab();
+      return;
+    }
+    handleOpenFile(tab.filePath, tab.label);
+  }, [handleOpenFile, openGitGraphTab]);
 
   const handleViewFullHistory = useCallback(() => {
     if (!selectedSession) return;
@@ -2822,7 +2894,14 @@ export function AppShell() {
               tabs={panelTabs}
               activeTabId={activeFileTabId ?? ""}
               onSelectTab={setActiveFileTabId}
-              onCloseTab={handleCloseFileTab}
+              onCloseTab={handleCloseTabWithHistory}
+              overview={{
+                recentClosed: recentClosedTabs,
+                onCloseAll: handleCloseAllTabs,
+                onCloseOthers: handleCloseOtherTabs,
+                onRestore: handleRestoreClosedTab,
+                onClearRecent: () => setRecentClosedTabs([]),
+              }}
             />
           </div>
           {/* fork:ui-panel-row — while the file tree is the panel content this
@@ -2928,7 +3007,9 @@ export function AppShell() {
             && !terminalTabs.some((tab) => tab.id === activeFileTabId)
             && !browserTabs.some((tab) => tab.id === activeFileTabId)
             && !branchTabs.some((tab) => tab.id === activeFileTabId)
-            && activeFileTabId !== GIT_GRAPH_TAB_ID ? (
+            && activeFileTabId !== GIT_GRAPH_TAB_ID
+            // fork:zc-05 — 变更 tab 也占满 file-panel-main，不能再叠一层文件树。
+            ? (
             activeCwd ? (
               explorerPanel
             ) : (

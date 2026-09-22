@@ -10,7 +10,6 @@ import {
   normalizeCronTimes,
   normalizeIdleWindow,
   normalizeWeekdays,
-  CRON_HISTORY_LIMIT,
   type CronSchedule,
   type CronScheduleKind,
   type CronTask,
@@ -18,6 +17,12 @@ import {
   type CronRunRecord,
 } from "./cron-schedule";
 import { parseCronExpression } from "./cron-expression";
+import {
+  appendRunRecord,
+  deleteRunRecord,
+  parseRunHistory,
+  updateRunRecord,
+} from "./cron-history";
 import { isKnownTimezone } from "./cron-timezone";
 
 /**
@@ -115,13 +120,14 @@ export function normalizeTask(input: Partial<CronTask>): CronTask | null {
     enabled: input.enabled !== false,
     createdAt: typeof input.createdAt === "string" ? input.createdAt : new Date().toISOString(),
     ...(typeof input.lastRunAt === "string" ? { lastRunAt: input.lastRunAt } : {}),
-    ...(input.lastStatus === "running" || input.lastStatus === "ok" || input.lastStatus === "error" ? { lastStatus: input.lastStatus } : {}),
+    ...(input.lastStatus === "running" || input.lastStatus === "ok" || input.lastStatus === "error" || input.lastStatus === "skipped" ? { lastStatus: input.lastStatus } : {}),
     ...(typeof input.lastError === "string" ? { lastError: input.lastError } : {}),
     ...(typeof input.lastSessionId === "string" ? { lastSessionId: input.lastSessionId } : {}),
     ...(model ? { model } : {}),
     ...(typeof input.thinking === "string" && input.thinking ? { thinking: input.thinking } : {}),
     runCount: Number.isFinite(input.runCount) && (input.runCount ?? 0) >= 0 ? Math.floor(input.runCount as number) : 0,
-    ...(Array.isArray(input.history) ? { history: normalizeHistory(input.history) } : {}),
+    // fork:zc-14 — one corrupt row is dropped instead of making the task unreadable.
+    ...(Array.isArray(input.history) ? { history: parseRunHistory(input.history) } : {}),
     // fork:fix-cron-lifecycle — 生命周期字段（全部可选）。
     // 取值都做范围校验：坏数据宁可退回默认，也不要让调度器拿着 NaN 去比较。
     ...(Number.isFinite(input.maxRuns) && (input.maxRuns ?? 0) > 0 ? { maxRuns: Math.floor(input.maxRuns as number) } : {}),
@@ -133,32 +139,41 @@ export function normalizeTask(input: Partial<CronTask>): CronTask | null {
     ...(typeof input.reusableSessionId === "string" && input.reusableSessionId ? { reusableSessionId: input.reusableSessionId } : {}),
     ...(typeof input.reusableSessionDayKey === "string" && /^\d{4}-\d{2}-\d{2}$/.test(input.reusableSessionDayKey) ? { reusableSessionDayKey: input.reusableSessionDayKey } : {}),
     ...(input.notify === "never" || input.notify === "always" || input.notify === "success" || input.notify === "error" ? { notify: input.notify } : {}),
+    // fork:zc-19 — 心跳与退避重试状态。
+    ...(typeof input.heartbeatAt === "string" ? { heartbeatAt: input.heartbeatAt } : {}),
+    ...(typeof input.retryAt === "string" ? { retryAt: input.retryAt } : {}),
+    ...(Number.isFinite(input.retryAttempt) && (input.retryAttempt ?? 0) >= 0 ? { retryAttempt: Math.floor(input.retryAttempt as number) } : {}),
   };
 }
 
-function normalizeHistory(input: unknown[]): CronRunRecord[] {
-  return input
-    .map((raw) => {
-      const entry = (raw ?? {}) as Partial<CronRunRecord>;
-      if (typeof entry.at !== "string") return null;
-      const status = entry.status === "ok" ? "ok" : "error";
-      return {
-        at: entry.at,
-        status: status as CronRunRecord["status"],
-        ...(typeof entry.sessionId === "string" ? { sessionId: entry.sessionId } : {}),
-        ...(typeof entry.error === "string" ? { error: entry.error } : {}),
-      };
-    })
-    .filter((entry): entry is CronRunRecord => entry !== null)
-    .slice(0, CRON_HISTORY_LIMIT);
-}
-
-/** Prepend a run and keep the log bounded. */
+/** Prepend a run and keep the log bounded (fork:zc-14 — see lib/cron-history.ts). */
 export function appendCronHistory(id: string, record: CronRunRecord, file = getCronConfigPath()): void {
   const task = findCronTask(id, file);
   if (!task) return;
-  const history = [record, ...(task.history ?? [])].slice(0, CRON_HISTORY_LIMIT);
-  patchCronTask(id, { history }, file);
+  patchCronTask(id, { history: appendRunRecord(task.history ?? [], record) }, file);
+}
+
+/** Finish a still-running entry (matched by its stable id). */
+export function updateCronRun(
+  taskId: string,
+  runId: string,
+  patch: Partial<CronRunRecord>,
+  file = getCronConfigPath(),
+): CronRunRecord | null {
+  const task = findCronTask(taskId, file);
+  const existing = task?.history?.find((run) => run.id === runId);
+  if (!task || !existing) return null;
+  const next = { ...existing, ...patch, id: existing.id, at: existing.at };
+  patchCronTask(taskId, { history: updateRunRecord(task.history ?? [], next) }, file);
+  return next;
+}
+
+/** Remove one run row from a task's history. */
+export function deleteCronRun(taskId: string, runId: string, file = getCronConfigPath()): boolean {
+  const task = findCronTask(taskId, file);
+  if (!task?.history?.some((run) => run.id === runId)) return false;
+  patchCronTask(taskId, { history: deleteRunRecord(task.history, runId) }, file);
+  return true;
 }
 
 export function normalizeSchedule(input: unknown): CronSchedule | null {
@@ -176,7 +191,13 @@ export function normalizeSchedule(input: unknown): CronSchedule | null {
     ? raw.timezone
     : undefined;
   const idleWindow = normalizeIdleWindow(raw.idleWindow);
-  const shared = { ...(timezone ? { timezone } : {}), ...(idleWindow ? { idleWindow } : {}) };
+  // fork:zc-19 — 结束日期不属于 cron 表达式，但与「什么时候跑」一起存储。
+  const endDate = typeof raw.endDate === "string" && parseCronDate(raw.endDate) ? raw.endDate.trim() : undefined;
+  const shared = {
+    ...(timezone ? { timezone } : {}),
+    ...(idleWindow ? { idleWindow } : {}),
+    ...(endDate ? { endDate } : {}),
+  };
 
   if (kind === "cron") {
     const expression = typeof raw.expression === "string" ? raw.expression.trim().replace(/\s+/g, " ") : "";

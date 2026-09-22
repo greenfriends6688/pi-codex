@@ -45,6 +45,8 @@ import {
 } from "@/lib/favorite-models";
 import { ComposerContextStrip } from "./ComposerContextStrip";
 import { TodoChip } from "./fork/TodoChip";
+// fork:zc-08 — 附件 chip 的多类型预览（PDF / DOCX / 音视频 / 文本）。
+import { AttachmentPreview } from "./fork/AttachmentPreview";
 import type { TodoSummary } from "@/lib/todo-state";
 import {
   normalizeSelectionContext,
@@ -78,13 +80,15 @@ import { ComposerReferenceMenu } from "./ComposerReferenceMenu";
 // fork:gap07-attachments — 任意文件：分类 / 上限 / 路径引用
 import {
   MAX_ATTACHED_FILE_BYTES,
+  attachmentPreviewKind,
   buildAttachmentReference,
   expandAttachmentReferences,
   nextAvailableAttachmentName,
   planAttachments,
+  type AttachmentPreviewKind,
   type AttachmentSkipReason,
 } from "@/lib/composer-attachments";
-import { encodeFilePathForApi, joinFilePath } from "@/lib/file-paths";
+import { encodeFilePathForApi, getFileName, joinFilePath } from "@/lib/file-paths";
 import { desktopFilePathFor } from "@/lib/desktop-shell";
 // fork:pr13-composer — 拖入文件 cwd 相对化 + Markdown 列表续行
 import { toCwdRelativeMentions } from "@/lib/file-mentions";
@@ -1101,6 +1105,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     skipped: Array<{ name: string; reason: AttachmentSkipReason }>;
     failed: string[];
   } | null>(null);
+  // fork:zc-08 — 已插入输入框的 `@文件名` 附件 chips（点开预览 / X 移除）。
+  // 发送用的完整路径真相仍由 attachedReferencePathsRef 持有，这里只为渲染。
+  const [referenceAttachments, setReferenceAttachments] = useState<Array<{ path: string; name: string; kind: AttachmentPreviewKind }>>([]);
   const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
   const [historyActiveIndex, setHistoryActiveIndex] = useState(0);
   const [builtinCommandPending, setBuiltinCommandPending] = useState(false);
@@ -1179,6 +1186,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       const restoredImages = draftImagesToAttachedImages(getUserMessageDraftImages(message));
       valueRef.current = restoredText;
       attachedImagesRef.current = restoredImages;
+      // fork:zc-08 — 恢复历史消息会整段替换文本，旧 chip 不能再指向旧输入。
+      setReferenceAttachments([]);
       setValue(restoredText);
       setAtQuery(null);
       setHistoryMenuOpen(false);
@@ -1259,6 +1268,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
       const movedImages = draftImagesToAttachedImages(moved.images);
       valueRef.current = moved.value;
       attachedImagesRef.current = movedImages;
+      // fork:zc-08 — 草稿换 key 后输入框文本整段换了，chip 不跟随。
+      setReferenceAttachments([]);
       setValue(moved.value);
       setAttachedImages((current) => {
         current.forEach(revokeImagePreview);
@@ -1506,6 +1517,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     for (const path of paths) {
       if (!attachedReferencePathsRef.current.includes(path)) attachedReferencePathsRef.current.push(path);
     }
+    // fork:zc-08 — 同步 chip 状态：按完整路径去重，同一附件插两次不会出现两个 chip。
+    setReferenceAttachments((prev) => {
+      const known = new Set(prev.map((chip) => chip.path));
+      const additions = paths
+        .filter((path) => !known.has(path))
+        .map((path) => ({ path, name: getFileName(path), kind: attachmentPreviewKind({ name: path }) }));
+      return additions.length > 0 ? [...prev, ...additions] : prev;
+    });
     const needsSpace = cursor > 0 && !/\s/.test(current.slice(cursor - 1, cursor));
     const next = current.slice(0, cursor) + (needsSpace ? " " : "") + insert + current.slice(cursor);
     const nextCursor = cursor + (needsSpace ? 1 : 0) + insert.length;
@@ -1677,6 +1696,32 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     });
   }, []);
 
+  // fork:zc-08 — 附件内容 URL（复用 FileViewer 的 /api/files 路由与查询参数约定）。
+  // cwd 相对引用（fork:pr13-composer）先补回绝对路径；桌面路径与 POSIX 路径都认。
+  const attachmentPreviewUrl = useCallback((path: string, type: "read" | "preview" = "read") => {
+    const absolute = /^([a-zA-Z]:[\\/]|\/)/.test(path) ? path : (cwd ? joinFilePath(cwd, path) : path);
+    return `/api/files/${encodeFilePathForApi(absolute)}?type=${type}`;
+  }, [cwd]);
+
+  // fork:zc-08 — 移除附件 chip：同时清掉还原表、chip 状态和输入框里的 `@文件名` token，
+  // 三者保持一致；若用户已手动删了文本，则只清 chip。
+  const removeReferenceAttachment = useCallback((path: string) => {
+    attachedReferencePathsRef.current = attachedReferencePathsRef.current.filter((item) => item !== path);
+    setReferenceAttachments((prev) => prev.filter((chip) => chip.path !== path));
+    const token = buildAttachmentReference(path).text.trimEnd();
+    const current = valueRef.current;
+    const index = current.indexOf(token);
+    if (index === -1) return;
+    const next = current.slice(0, index) + current.slice(index + token.length);
+    valueRef.current = next;
+    setValue(next);
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.style.height = "auto";
+      if (next) textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    }
+  }, []);
+
   const clearImages = useCallback(() => {
     attachedImagesRef.current = [];
     setAttachedImages((prev) => {
@@ -1691,6 +1736,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     // fork:ui — 清掉附件路径还原表：下一轮输入里若出现同名 `@文件`，不应再
     // 被当成上一轮的附件还原成路径。
     attachedReferencePathsRef.current = [];
+    // fork:zc-08 — chip 与还原表同生命周期。
+    setReferenceAttachments([]);
     selectionContextsRef.current = [];
     setSelectionContexts([]);
     sessionReferencesRef.current = [];
@@ -1744,6 +1791,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
     attachedImagesRef.current = nextImages;
     selectionContextsRef.current = nextContexts;
     sessionReferencesRef.current = nextSessionReferences;
+    // fork:zc-08 — 切换会话/草稿后附件 chips 不再适用（引用表也没有持久化）。
+    setReferenceAttachments([]);
     setValue(nextValue);
     setSelectionContexts(nextContexts);
     setSessionReferences(nextSessionReferences);
@@ -3176,6 +3225,62 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput({
                 <button
                   type="button"
                   onClick={() => removeImage(i)}
+                  title={t("chat.removeAttachment")}
+                  aria-label={t("chat.removeAttachment")}
+                  style={{
+                    position: "absolute", top: -4, right: -4,
+                    width: 16, height: 16, borderRadius: "50%",
+                    background: "var(--bg-panel)", border: "1px solid var(--border)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: "pointer", padding: 0, color: "var(--text-muted)",
+                  }}
+                >
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                    <line x1="1" y1="1" x2="7" y2="7" /><line x1="7" y1="1" x2="1" y2="7" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* fork:zc-08 — 非图片附件的 chips：点开按类型预览（PDF/DOCX/音视频/文本），
+            X 移除时同步清掉输入框里的 `@文件名`。 */}
+        {referenceAttachments.length > 0 && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+            {referenceAttachments.map((chip) => (
+              <div key={chip.path} style={{ position: "relative", flexShrink: 0 }}>
+                <AttachmentPreview
+                  name={chip.name}
+                  kind={chip.kind}
+                  src={attachmentPreviewUrl(chip.path)}
+                  previewSrc={chip.kind === "docx" ? attachmentPreviewUrl(chip.path, "preview") : undefined}
+                >
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                      height: 28,
+                      maxWidth: 220,
+                      padding: "0 8px",
+                      boxSizing: "border-box",
+                      background: "var(--bg-panel)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "var(--radius-md)",
+                      color: "var(--text)",
+                      fontSize: TEXT.sm,
+                    }}
+                  >
+                    {getFileIcon(chip.name, 14)}
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{chip.name}</span>
+                  </span>
+                </AttachmentPreview>
+                <button
+                  type="button"
+                  onClick={() => removeReferenceAttachment(chip.path)}
+                  title={t("chat.removeAttachment")}
+                  aria-label={t("chat.removeAttachment")}
                   style={{
                     position: "absolute", top: -4, right: -4,
                     width: 16, height: 16, borderRadius: "50%",

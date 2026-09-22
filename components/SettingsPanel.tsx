@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useDialogA11y } from "@/hooks/useDialogA11y";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
@@ -20,10 +20,7 @@ import {
 } from "@/hooks/useChatAppearance";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ShellToolSettingsResponse } from "@/lib/api-types";
-import {
-  setLastSettingsSection,
-  type SettingsSection,
-} from "@/lib/settings-navigation";
+import { setLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
 import {
   isThinkingExpandedByDefault,
   setThinkingExpandedByDefault,
@@ -39,6 +36,10 @@ import { ModelsConfig } from "./ModelsConfig";
 import { CronConfig } from "./fork/CronConfig";
 import { McpConfig } from "./fork/McpConfig";
 import { PiMemoryConfig } from "./fork/PiMemoryConfig";
+// fork:zc-04 / fork:zc-03 / fork:zc-16 — new sections rendered by this panel.
+import { PromptsConfig } from "./fork/PromptsConfig";
+import { ShortcutsSettings } from "./fork/ShortcutsSettings";
+import { UsageStatsPanel } from "./fork/UsageStatsPanel";
 import { setupPushSubscription } from "@/lib/push-client";
 import { SkillsConfig } from "./SkillsConfig";
 import { AgentsConfig } from "./AgentsConfig";
@@ -91,6 +92,10 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
   if (section === "cron") return <svg {...common} className="settings-section-icon"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2.5 2" /><path d="M9 2h6" /></svg>;
   if (section === "memory") return <svg {...common} className="settings-section-icon"><path d="M12 3a5 5 0 0 1 5 5c0 1.5-.6 2.5-1.5 3.4-.8.8-1.5 1.7-1.5 3.1V16h-4v-1.5c0-1.4-.7-2.3-1.5-3.1C7.6 10.5 7 9.5 7 8a5 5 0 0 1 5-5Z" /><path d="M10 20h4" /></svg>;
   if (section === "agents") return <svg {...common} className="settings-section-icon is-agent"><rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" /></svg>;
+  // fork:zc-04 / fork:zc-03 / fork:zc-16 — glyphs for the three new sections.
+  if (section === "shortcuts") return <svg {...common}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" /></svg>;
+  if (section === "usage") return <svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M2 20h20" /></svg>;
+  if (section === "prompts") return <svg {...common}><path d="M4 17l6-6-6-6" /><path d="M12 19h8" /></svg>;
   return <svg {...common}><path d="M9 7V2M15 7V2M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0ZM12 19v3" /></svg>;
 }
 
@@ -602,33 +607,10 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
   );
 }
 
-// fork:ui-14 — section keyword table for the settings search. Kept next to the
-// component instead of in a lib: the terms are the wording users type, which is
-// the same thing the labels are, and they must move together.
-const SECTION_SEARCH_TERMS: Record<SettingsSection, string[]> = {
-  general: ["general", "appearance", "theme", "wallpaper", "language", "font", "width", "density", "border", "sound", "push", "shell", "通用", "外观", "主题", "壁纸", "语言", "字号", "宽度", "密度", "边框", "声音", "推送", "外观", "一般", "佈景", "桌布", "字級"],
-  models: ["models", "provider", "provider api key", "oauth", "catalog", "cost", "thinking map", "模型", "供应商", "密钥", "目录", "价格", "思考"],
-  skills: ["skills", "skill", "skills.sh", "install", "技能", "安装", "搜尋"],
-  agents: ["agents", "sub-agent", "subagent", "concurrency", "profile", "prompt", "智能体", "子代理", "并发", "提示词", "代理"],
-  plugins: ["plugins", "extension", "mcp", "npm", "server", "插件", "扩展", "服务"],
-  mcp: ["mcp", "model context protocol", "server", "stdio", "sse", "服务器", "服务"],
-  cron: ["cron", "schedule", "scheduled", "task", "timer", "nightly", "定时", "排程", "计划", "任务", "时间"],
-  memory: ["memory", "remember", "recall", "qmd", "scratchpad", "daily log", "记忆", "长期记忆", "记住", "笔记", "備忘", "語意搜尋"],
-};
-
-function sectionSearchTerms(id: SettingsSection): string[] {
-  return SECTION_SEARCH_TERMS[id] ?? [];
-}
-
+// fork:zc-15 — the section keyword table moved into `lib/settings-navigation.ts`
 export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange, onOpenSession, onOpenFile }: Props) {
   const { t } = useI18n();
   const [section, setSection] = useState<SettingsSection>(initialSection);
-  // fork:ui-14 — settings search. Sections stay mounted (they are `hidden`, not
-  // unmounted), so a query can light up rows in any of them; only the General
-  // section exposes stable row elements to scan, the other four are separate
-  // config panels and are covered by the keyword table below.
-  const [query, setQuery] = useState("");
-  const mainRef = useRef<HTMLElement | null>(null);
   const [mountedSections, setMountedSections] = useState<ReadonlySet<SettingsSection>>(
     () => new Set([section]),
   );
@@ -641,6 +623,10 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
     { id: "mcp", label: t("mcp.sectionTitle"), requiresProject: false },
     { id: "cron", label: t("cron.title"), requiresProject: false },
     { id: "memory", label: t("memory.title"), requiresProject: false },
+    // fork:zc-04 / fork:zc-03 / fork:zc-16 — global sections.
+    { id: "shortcuts", label: t("settings.shortcuts.title"), requiresProject: false },
+    { id: "usage", label: t("usage.title"), requiresProject: false },
+    { id: "prompts", label: t("prompts.title"), requiresProject: false },
   ];
 
   useEffect(() => setLastSettingsSection(initialSection), [initialSection]);
@@ -667,30 +653,6 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
     setSection(nextSection);
     setLastSettingsSection(nextSection);
   };
-
-  const normalizedQuery = query.trim().toLowerCase();
-  // Keyword hits for the sections whose rows live in their own panels. Both
-  // languages are listed so a Chinese query finds an English-labelled section
-  // and vice versa (the user may have switched locale after learning the names).
-  const sectionMatches = normalizedQuery
-    ? sections.filter((item) => sectionSearchTerms(item.id).some((term) => term.includes(normalizedQuery)))
-    : [];
-
-  // Highlight + reveal matching rows inside the visible section, and scroll the
-  // first one into view. Imperative on purpose: the rows are hand-written JSX, so
-  // there is no row index to filter with.
-  useEffect(() => {
-    const host = mainRef.current;
-    if (!host) return;
-    const rows = host.querySelectorAll<HTMLElement>(".settings-general-section > *");
-    let first: HTMLElement | null = null;
-    rows.forEach((row) => {
-      const hit = normalizedQuery.length > 1 && (row.textContent ?? "").toLowerCase().includes(normalizedQuery);
-      row.classList.toggle("settings-search-match", hit);
-      if (hit && !first) first = row;
-    });
-    if (first) (first as HTMLElement).scrollIntoView({ block: "center" });
-  }, [normalizedQuery, section]);
 
   const sectionHost = (id: SettingsSection, content: ReactNode) => mountedSections.has(id) ? (
     <div
@@ -740,24 +702,14 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
             select picker above and hides this column in CSS. */}
         <div className="settings-dialog-body">
           <nav aria-label={t("settings.title")} className="settings-section-tabs">
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t("settings.searchPlaceholder")}
-              aria-label={t("settings.searchPlaceholder")}
-              maxLength={80}
-              className="settings-search-input"
-            />
             {sections.map((item) => {
               const selected = section === item.id;
               const disabled = item.requiresProject && !cwd;
-              const jumpHit = sectionMatches.some((match) => match.id === item.id);
               return (
                 <button
                   key={item.id}
                   type="button"
-                  className={`settings-section-tab${jumpHit ? " settings-section-tab--hit" : ""}`}
+                  className="settings-section-tab"
                   disabled={disabled}
                   title={disabled ? t("settings.projectRequired") : item.label}
                   aria-current={selected ? "page" : undefined}
@@ -768,14 +720,9 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
                 </button>
               );
             })}
-            {normalizedQuery.length > 1 && sectionMatches.length === 0 && (
-              <p role="status" className="settings-search-empty">
-                {t("settings.searchNoMatch", { query: query.trim() })}
-              </p>
-            )}
           </nav>
 
-          <main className="settings-dialog-main" ref={mainRef}>
+          <main className="settings-dialog-main">
             {sectionHost("general", <GeneralSettings cwd={cwd} sessionId={sessionId} onSessionReloaded={onSessionReloaded} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={onQuoteSelectionChange} />)}
             {sectionHost("models", <ModelsConfig embedded onClose={onClose} />)}
             {cwd && sectionHost("skills", <SkillsConfig embedded key={cwd} cwd={cwd} onClose={onClose} />)}
@@ -785,6 +732,10 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
             {sectionHost("mcp", <McpConfig cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
             {sectionHost("cron", <CronConfig cwd={cwd} onOpenSession={onOpenSession} />)}
             {sectionHost("memory", <PiMemoryConfig cwd={cwd} onOpenFile={onOpenFile} />)}
+            {/* fork:zc-04 / fork:zc-03 / fork:zc-16 — shortcut table, usage stats, prompt files. */}
+            {sectionHost("shortcuts", <ShortcutsSettings />)}
+            {sectionHost("usage", <UsageStatsPanel />)}
+            {sectionHost("prompts", <PromptsConfig onOpenFile={onOpenFile} />)}
           </main>
         </div>
       </div>

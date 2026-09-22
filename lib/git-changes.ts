@@ -13,7 +13,6 @@ import {
   parseGitPorcelainV1,
   type GitPorcelainEntry,
 } from "./git-status";
-
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 10_000;
 const GIT_STATUS_MAX_BUFFER = 8 * 1024 * 1024;
@@ -60,7 +59,7 @@ async function readStatusEntries(repositoryRoot: string): Promise<GitPorcelainEn
   return parseGitPorcelainV1(output);
 }
 
-interface NumstatRecord {
+export interface NumstatRecord {
   additions: number | null;
   deletions: number | null;
   path: string;
@@ -131,6 +130,8 @@ interface UntrackedLineCount {
   bytes: number;
   /** fork:pr09 — 文件超过本次剩余预算，未统计；调用方保持该文件统计为 null。 */
   budgetExceeded?: boolean;
+  /** fork:zc-05 — 读取到的内容含 NUL 字节，按二进制处理。 */
+  binary?: boolean;
 }
 
 function countUntrackedTextLines(filePath: string, budget = Number.POSITIVE_INFINITY): UntrackedLineCount {
@@ -145,7 +146,9 @@ function countUntrackedTextLines(filePath: string, budget = Number.POSITIVE_INFI
       return { lines: 0, bytes: 0, budgetExceeded: true };
     }
     const content = fs.readFileSync(filePath);
-    if (hasNullByte(content) || content.length === 0) return { lines: 0, bytes: content.length };
+    // fork:zc-05 — 二进制文件没有行数概念，UI 显示「binary」而不是 +0 行。
+    if (hasNullByte(content)) return { lines: 0, bytes: content.length, binary: true };
+    if (content.length === 0) return { lines: 0, bytes: content.length };
     const text = content.toString("utf8");
     const lines = text.endsWith("\n") ? text.split("\n").length - 1 : text.split("\n").length;
     return { lines, bytes: content.length };
@@ -333,3 +336,16 @@ export async function getGitFileDiff(cwd: string, filePath: string): Promise<Git
   if (!patch.includes("\n@@ ")) return { supported: false };
   return { supported: true, status, patch };
 }
+
+// ============================================================================
+// fork:zc-05 — Git 变更面板的数据层。
+//
+// 与 `getGitStatus`（文件树徽标，按 HEAD 汇总）不同，这里按**来源**分开：
+//   unstaged = 工作区 vs 索引（untracked 也在这一侧）
+//   staged   = 索引 vs HEAD
+// 同一文件两侧都有改动时会在两个来源各出现一次（`MM`），diff 也各取各的基准。
+//
+// 纯函数（isChangeInSource / classifyChangeSide / buildChangeFiles /
+// sortChangeFiles / groupChangeFiles）只做字符串与数组处理，直接单测；
+// 带 git / fs 的部分放在后面，复用本文件已有的 execFile 封装。
+// ============================================================================

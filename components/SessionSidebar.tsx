@@ -8,6 +8,8 @@ import { skillExpansionToCommand } from "@/lib/slash-display";
 import { chatProjectOf, getProjectActivity, getRecentProjects, sessionsForProject, withoutChatProject } from "@/lib/project-groups";
 import type { RecentProject } from "@/lib/project-groups";
 import { SESSION_TAG_TONES, applySessionFlags, archivedSessions, useSessionFlags, type SessionTag } from "@/lib/session-flags";
+// fork:zc-11 — 用户自定义项目分组 + 拖拽排序（localStorage 展示层偏好）。
+import { useSessionGroups } from "@/lib/session-groups";
 import { bucketOf, groupByTimeBucket, timeBucketKey, type TimeBucket, type TimeGroupEntry } from "@/lib/time-groups";
 import { loadCollapsedTimeGroups, saveCollapsedTimeGroups, type CollapsedTimeGroups } from "@/lib/time-group-state";
 import { desktopTrafficLightInset } from "@/lib/desktop-shell";
@@ -16,6 +18,8 @@ import { formatRelativeTime } from "@/lib/i18n/format";
 import { getFileName } from "@/lib/file-paths";
 import { useI18n } from "@/hooks/useI18n";
 import { DirectoryPicker } from "./DirectoryPicker";
+// fork:zc-11 + fork:zm-06 — 分组/排序列表渲染（含 FLIP 重排）。
+import { GroupedProjectList, useProjectDrag } from "./fork/GroupedProjectList";
 // fork:chat-workspace — standalone chat section (docs/patches/0001-chat-workspace.md)
 import { ChatWorkspaceRow } from "./ChatWorkspaceRow";
 import { NewTaskPicker } from "./NewTaskPicker";
@@ -391,6 +395,7 @@ function SidebarNavButton({
 }
 
 function ProjectRow({
+  projectKey,
   label,
   title,
   selected,
@@ -400,6 +405,7 @@ function ProjectRow({
   activity,
   onClick,
 }: {
+  projectKey: string;
   label: string;
   title: string;
   selected: boolean;
@@ -411,6 +417,9 @@ function ProjectRow({
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
+  // fork:zc-11 — 拖拽句柄由 GroupedProjectList 的 context 注入；
+  // 不在分组列表里（或 context 缺失）时是禁用态，点击/展开行为不变。
+  const drag = useProjectDrag(projectKey);
 
   return (
     <button
@@ -420,6 +429,9 @@ function ProjectRow({
       aria-current={selected ? "page" : undefined}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      draggable={drag.draggable}
+      onDragStart={drag.onDragStart}
+      onDragEnd={drag.onDragEnd}
       style={{
         width: "100%",
         // fork:zn-02 — full-bleed 32px row (Zeno project card): no inset, no gap.
@@ -437,6 +449,9 @@ function ProjectRow({
         fontSize: TEXT.md,
         fontWeight: selected ? 500 : 400,
         transition: "background 0.12s, color 0.12s",
+        opacity: drag.dragging ? 0.55 : 1,
+        // fork:zc-11 — 落点指示用 inset box-shadow（不改高度，避免触发假 FLIP）。
+        boxShadow: drag.dropActive ? "inset 0 2px 0 0 var(--accent)" : "none",
       }}
     >
       <svg
@@ -530,6 +545,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   }, []);
   // 归档区默认折叠；每个项目独立记忆展开状态（取消归档的右键菜单入口）。
   const [expandedArchivedProjects, setExpandedArchivedProjects] = useState<Set<string>>(new Set());
+  // fork:zc-11 — 项目分组/顺序的 localStorage store（状态 + 纯操作封装）。
+  const sessionGroups = useSessionGroups();
   const toggleArchivedSection = useCallback((projectKey: string) => {
     setExpandedArchivedProjects((prev) => {
       const next = new Set(prev);
@@ -1333,7 +1350,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     observer.observe(list);
     observer.observe(section);
     return () => observer.disconnect();
-  }, [expandedProjects, selectedProject?.key, sessionListEntries.length, visibleProjects.length]);
+  }, [expandedProjects, selectedProject?.key, sessionListEntries.length, visibleProjects.length, sessionGroups.state]);
 
   const virtualIndices = getSessionListIndices(
     sessionListEntries.length,
@@ -1363,6 +1380,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const sessionEntryKey = (entry: TimeGroupEntry<SessionFamily>) => (
     entry.type === "header" ? `time-group-${entry.bucket}` : entry.item.root.id
   );
+  // fork:zc-11 — 项目节点仍按 visibleProjects 构建（保持原有每个项目的完整树），
+  // 但改存进 Map，由 GroupedProjectList 按用户分组与拖拽顺序决定渲染位置。
+  const projectRowNodes = new Map<string, ReactNode>();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
@@ -2113,9 +2133,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             const isSelectedProject = project.key === selectedProject?.key;
             const count = sessionsForProject(allSessions, project.key).length;
             const isExpanded = expandedProjects.has(project.key);
-            return (
+            projectRowNodes.set(project.key, (
               <div key={project.key}>
                 <ProjectRow
+                  projectKey={project.key}
                   label={getFileName(project.root) || project.root}
                   title={project.root}
                   selected={isSelectedProject}
@@ -2204,8 +2225,14 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     );
                   })()}
               </div>
-            );
+            ));
+            return null;
           })}
+          <GroupedProjectList
+            projects={visibleProjects}
+            store={sessionGroups}
+            renderProject={(project) => projectRowNodes.get(project.key) ?? null}
+          />
         </div>
       </SessionSearch>
 

@@ -8,6 +8,11 @@ export const SETTINGS_SECTION_VALUES = [
   "mcp",
   "cron",
   "memory",
+  // fork:zc-04 / fork:zc-03 / fork:zc-16 — the shortcut table, local usage stats
+  // and slash-command templates are global pages too.
+  "shortcuts",
+  "usage",
+  "prompts",
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTION_VALUES)[number];

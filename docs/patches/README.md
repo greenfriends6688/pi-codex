@@ -46,6 +46,86 @@
 | 0017 | [dev 服务看门狗](./0017-dev-watchdog.md) | 已实现（真杀真拉：5 秒恢复） | 无（纯新增脚本） |
 | 0018 | [命令环境测试的平台修正](./0018-command-env-test-platform.md) | 已实现（修掉 Windows 假失败，7/7） | 1 个文件（测试） |
 | 0019 | [过程步骤里的文件 chip 不再是嵌套 `<button>`](./0019-fix-nested-button.md) | 已实现（3 源码守卫 + 浏览器校验脚本） | 1 个文件 |
+| ~~0020~~ | ~~ZC-01 命令面板（⌘K）~~ | **已按用户要求移除**（2026-09-21）：用户判定它与顶栏按钮/侧栏搜索重复。删掉 4 个文件（含 17 单测）、AppShell 接线、9 个 i18n key、快捷键表里的 ⌘K 只读行 | — |
+| 0021 | ZC-02 会话内查找（⌘F，计数/步进/高亮） | 已实现（14 单测 + 浏览器实测 4 项）；**含交付后深修**：命中展开四根因（渲染窗口/过程组 reveal/toolResult blockIndex/ToolBody 透传），画出命中 2→15 | 4 个文件（ChatWindow 多处、MessageView、ProcessGroup、conversation-find） |
+| 0022 | ZC-06 右栏 tab 概览 + 最近关闭 | 已实现（12 单测 + 浏览器实测 5 项） | 2 个文件，均接线级 |
+| 0023 | ZC-18 MCP OAuth 入口（复制 `/mcp-auth <server>`） | 已实现（5 单测，含注入用例） | 2 个文件，均接线级 |
+| 0024 | ZM-01 折叠动效（`grid-template-rows` 0fr↔1fr + 两段式挂载） | 已实现（6 单测 + 浏览器实测展开/收起双向） | 2 个文件 |
+
+> 0020–0024 来自 `docs/zcode-comparison-2026-09-21.md` / `docs/zcode-pr-plan-2026-09-21.md`。
+> 它们的 `.patch` **未生成**：本仓现在有 git（不像 0011–0013 那个时期），重打以 `fork:<slug>` 标记为准，
+> 需要 diff 时直接 `git diff <base> -- <file>` 即可，无需再走 `scripts/fork-patch.mjs` 的分阶段基线。
+> slug 对应：`fork:zc-01` / `fork:zc-02` / `fork:zc-06` / `fork:zc-18` / `fork:zm-01`。
+
+### 第二批（ZCode 借鉴项全部落地，0025–0046）
+
+同一次交付里把计划中剩余的 22 项一次做完。每个补丁的完整规格仍在
+`docs/zcode-pr-plan-2026-09-21.md`；下面只记「做了什么 / 落在哪里 / 验到什么程度」。
+
+| 编号 | 名称 | 状态 | 新增文件（T0） | 上游接触面（T1） |
+| --- | --- | --- | --- | --- |
+| 0025 | ZC-03 本地用量统计 | 已实现（单测 15 + 浏览器实测分区在） | `lib/usage-stats.ts`、`app/api/usage-stats/route.ts`、`fork/UsageStatsPanel.tsx`、`fork/usage-charts.tsx` | `SettingsPanel.tsx`、`settings-navigation.ts` |
+| 0026 | ZC-04 快捷键内核 + 设置表 | 已实现（单测 15 + 分区在；⌘K/⌘F 以只读行展示，未改注册方） | `lib/shortcuts.ts`、`hooks/useShortcutBindings.ts`、`fork/ShortcutsSettings.tsx` | `useKeyboardShortcuts.ts`、`SettingsPanel.tsx` |
+| ~~0027~~ | ~~ZC-05 Git 变更面板~~ | **已按用户要求移除**（2026-09-21）：面板与路由整删（`fork/GitChangesPane.tsx`、`app/api/git/changes/route.ts`）、pane 专用导出与 4 条测试、AppShell tab 接线、TabBar/TabOverview 的 `changes` kind 与图标、16 个 i18n key。**保留 `lib/git-changes.ts` 的共享基础层**（`git()` / `findRepositoryRoot()` / `getGitStatus()` / `getGitFileDiff()`）—— 文件树状态色、git 图、查看器 diff 都依赖它 | — |
+| 0028 | ZC-07 词级行内 diff | 已实现（单测含长行回退与 CJK） | `lib/diff-intraline.ts` | `MessageView.tsx`、`FileViewer.tsx` |
+| 0029 | ZC-08 附件预览扩展 | 已实现（单测 + 类型分类） | `fork/AttachmentPreview.tsx` | `ChatInput.tsx`、`composer-attachments.ts` |
+| ~~0030~~ | ~~ZC-10 计划文档侧栏~~ | **已按用户要求移除**（2026-09-21）：计划正文本来就在聊天里，切档已有 composer 档位按钮。删 `lib/plan-document.ts`（+9 单测）、`fork/PlanPane.tsx`、ChatWindow 的计划广播与权限事件监听、AppShell 的 tab 接线与自动展示、8 个 i18n key | — |
+| 0031 | ZC-11 侧栏用户分组 + 拖拽 | 已实现（单测 16 + 浏览器实测入口） | `lib/session-groups.ts`、`fork/GroupedProjectList.tsx` | `SessionSidebar.tsx` |
+| 0032 | ZC-12 CSV/TSV 表格预览 | 已实现（单测 + 浏览器实测真实 csv 渲染） | `lib/csv-preview.ts`、`fork/CsvPreview.tsx` | `FileViewer.tsx`、`file-preview-support.ts` |
+| ~~0033~~ | ~~ZC-13 模型轨迹（近似快照）~~ | **已按用户要求移除**（2026-09-21）：聊天里已有消息，系统提示/工具定义已有专门弹层。删 `lib/model-trajectory.ts`（+13 单测）、`fork/ModelTrajectoryPane.tsx`（+2 单测）、ChatWindow 的面板与懒加载触发、AppShell 顶栏入口与 props、35 个 i18n key、`fork:zc-13` 的 51 条 CSS 选择器 | — |
+| 0034 | ZC-14 cron 运行历史 | 已实现（单测 + 分区在） | `lib/cron-history.ts` | `lib/cron-*.ts`、`fork/CronConfig.tsx`、`app/api/cron/route.ts` |
+| ~~0035~~ | ~~ZC-15 设置搜索覆盖全分区~~ | **已按用户要求移除**（2026-09-21）：连上游原有的搜索框一起删（用户判定与命令面板重复）。删掉 entry index、两个搜索函数、搜索 UI、18 处 `data-settings-entry` 锚点、4 个 i18n key、7 条死 CSS | — |
+| 0036 | ZC-16 自定义命令管理 | 已实现（单测含 frontmatter 保留与越界拒绝） | `lib/prompt-files.ts`、`app/api/prompts/route.ts`、`fork/PromptsConfig.tsx` | `SettingsPanel.tsx` |
+| 0037 | ZC-17 空状态引导 | 已实现（三条起步路径 + 复用 recent-projects） | `fork/EmptyStateGuide.tsx` | `ChatWindow.tsx` |
+| 0038 | ZC-19 cron 引擎健壮性 | 已实现（单测含错过/单飞/退避/规则往返一致） | `lib/cron-rule.ts`、`lib/cron-failure.ts` | `lib/cron-*.ts`、`fork/CronConfig.tsx` |
+| 0039 | ZC-20 记忆目录视图 | 已实现（单测含穿越/符号链接逃逸拒绝） | `lib/memory-catalog.ts` | `fork/PiMemoryConfig.tsx`、`app/api/memory/files/route.ts`（GET 读取面 + catalog） |
+| 0040 | ZC-21 cron 的 agent 工具 | 已实现（单测含递归护栏与窄更新面） | `lib/cron-extension.ts` | `lib/rpc-manager.ts`（注册 2 处） |
+| 0041 | ZM-02 流式入场 + 逐条 stagger | 已实现（单测 9 + 源码守卫） | `lib/stream-enter-memory.ts` | `ProcessGroup.tsx`、`app/fork-ui.css` |
+| 0042 | ZM-03 滚动正确性 + 渐隐遮罩 | 已实现（单测 + 浏览器实测遮罩状态随滚动切换） | `lib/scroll-follow.ts`、`fork/ScrollFadeViewport.tsx` | `ChatWindow.tsx`、`app/fork-ui.css`（删除死规则 `.fork-scroll-fade-b`） |
+| 0043 | ZM-04 倒计时条 + 数字滚动 | 已实现（单测含 reduced-motion 静态文本） | `fork/RollingNumber.tsx` | `ChatWindow.tsx`、`SessionStatsBar.tsx` |
+| 0044 | ZM-05 TabBar 滑动指示器 | 已实现（源码守卫 5 条 + 浏览器实测已挂载） | — | `TabBar.tsx`、`app/fork-ui.css` |
+| 0045 | ZM-06 FLIP 列表重排 | 已实现（单测 10） | `lib/flip-animate.ts` | `SessionSidebar.tsx`、`fork/GroupedProjectList.tsx` |
+| 0046 | ZM-07 等待态状态行 | 已实现（单测含队列上限/迟到丢积压） | `fork/PhaseRoll.tsx` | `ChatWindow.tsx` |
+
+**门禁（本次交付）**：`tsc --noEmit` 退出码 0 · `npm test` **2034/2034** · `npm run lint` **0 error**（250 warning 全为既有）·
+`npm run prod` 构建成功 · 浏览器实测 **13/14 项通过**（唯一失败项是我自己写错了属性名，复测通过）· 页面零错误。
+
+**用户验收后的移除（2026-09-21）**：用户复核时判定 **命令面板（ZC-01）** 与 **设置搜索（ZC-15）**
+属于重复入口 —— 命令面板的「动作」组镜像顶栏按钮、会话/文件组与侧栏搜索重叠；设置搜索与命令面板
+都在做「打字找东西」。两项**整块移除**，共删 4 个源文件、17 + 14 条单测、13 个 i18n key、18 处锚点、7 条 CSS。
+
+> 移除时的教训记在这里：批量删属性时用 `re.sub` 匹配 `key={...}` 会误伤**模板字符串键**
+> （`` key={`a-${b}`} `` 里 `${b}` 的 `}` 会让 `[^}]*` 提前收尾）。本次因此弄坏了 12 处 JSX
+> 键与 1 处属性，靠 tsc 全量报错逐个修回。**动 JSX 属性的批量脚本必须按括号/反引号配对扫描，
+> 不能靠 `[^}]*` 这类近似正则。**
+
+**用户验收后的第二次移除（2026-09-21）**：用户看截图后判定**模型轨迹 / 计划 / 变更**三个右栏面板重复
+（轨迹 = 聊天 + 两个弹层；计划 = 聊天正文 + composer 档位按钮；变更 = 文件树状态色 + 查看器 diff），
+三项**整块移除**：删 8 个源文件、24 条单测、59 个 i18n key、51 条 CSS 选择器。
+
+> ⚠️ **`lib/git-changes.ts` 不能整删**：GIT-DIFF 代理把**既有 git 基础层**（`git()` / `findRepositoryRoot()` /
+> `getGitStatus()` / `getGitFileDiff()`）也搬进了这个文件，文件树的 git 状态色、git 图、查看器 diff 全依赖它。
+> 本次只删了 pane 专用的那半（`getGitChanges` / `getGitFileDiffForSource` / 分组排序纯函数）。
+> **教训：删「某功能新增的模块」前，先按导出逐个查外部使用者，别按文件名判断归属。**
+
+**集成阶段拆掉的一处症状级补丁**：ZC-04 原先是用 CSS 选择器去 DOM 里找顶栏按钮再 `.click()` 来切换
+侧栏/右栏（当时 `AppShell.tsx` 归另一个补丁所有）。集成时 AppShell 已空闲，于是改成 AppShell 直接把
+`handleSidebarToggle` / `handleRightPanelToggle` 传给快捷键层，**选择器与 `clickFirstAvailable` 全部删除**
+（`hooks/useKeyboardShortcuts.ts` 里 DOM 查询归零）。实测 ⌘B / ⌥⌘B / ⇧⌘L 三项均生效。
+
+**两处仍需知道的技术债**（已写进代码注释）：
+1. **ZM-03 的 `container.scrollTo` 拦截是症状级补丁**。根因在 `hooks/useAgentSession.ts` 的
+   `isNearBottomRef`：它由 `scroll` 事件驱动，因而把程序化滚动也当成了用户意图。正确做法是让
+   live-follow 只被用户输入（wheel/touch/键盘）改变；当时改动那个 hook 的风险高于它修的问题，
+   所以保留拦截并在此记账。
+2. **ZC-13 是近似快照**。SDK 确实有 `before_provider_request` 事件携带最终请求体
+   （`dist/core/extensions/types.d.ts:519`），但只对进程内扩展可见，pi-web 未捕获。
+   要做成真实请求体需在 `lib/rpc-manager.ts` 注册扩展 + 服务端环形缓冲 + 新 SSE 事件。
+   当前 UI 已用 `data-trajectory-approximation="true"` 和一行说明明确标注。
+
+**未做（有意）**：ZC-09 多会话分屏。计划的判定是「先 spike，不通过就砍」——
+`sessionId` 单值贯穿 `useAgentSession`（SSE/流式/草稿/滚动），两 pane = 两份独立实例 + 两套 SSE，
+不是加一层 CSS grid 能解决的；PROMA 计划也早已判定方向相反（`proma-pr-plan:953`）。
 
 ## 工具：没有版本控制时怎么产出 `.patch`
 

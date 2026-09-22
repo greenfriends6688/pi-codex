@@ -20,8 +20,9 @@ import { encodeFilePathForApi, getFileName, getRelativeFilePath, sameFilePath } 
 import { buildAtMentionText, buildFileLineMentionText } from "@/lib/file-fuzzy";
 import { clearLocationTextHighlight, LOCATION_HIGHLIGHT_CLASS } from "@/lib/location-highlight";
 import { clampZoom, formatZoomPercent, isZoomed, stepZoom, wheelZoom, withPdfZoom, ZOOM_MAX, ZOOM_MIN } from "@/lib/viewer-zoom";
-import { shouldShowUnsupportedCard } from "@/lib/file-preview-support";
+import { shouldShowUnsupportedCard, isDelimitedTextPath } from "@/lib/file-preview-support";
 import { UnsupportedFilePreview } from "./fork/UnsupportedFilePreview";
+import { CsvPreview } from "./fork/CsvPreview";
 import { PathActions } from "./fork/PathActions";
 // fork:perf-highlighter — the markdown stack (react-markdown + rehype/remark plugins +
 // frontmatter) rides along with the preview only; a plain text/image/office file must not
@@ -36,6 +37,8 @@ import { MarkdownEditorBoundary } from "./MarkdownEditorBoundary";
 import type { MarkdownEditorLocationApi, MarkdownEditorSelection } from "./MarkdownFileEditor";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { parseUnifiedPatch } from "@/lib/patch";
+// fork:zc-07 — 统一 diff 也复用词级行内差异（与 MessageView 的并排视图同一套纯函数）。
+import { buildIntralineSegments, diffIntraline, type IntralineSpan } from "@/lib/diff-intraline";
 import type { GitFileDiffResponse } from "@/lib/git-types";
 import { useI18n } from "@/hooks/useI18n";
 import {
@@ -352,6 +355,8 @@ type DiffLine = {
   text: string;
   oldLineNo: number | null;
   newLineNo: number | null;
+  /** fork:zc-07 — 行内词级差异；undefined=不标，null=整行回退。 */
+  intraline?: IntralineSpan[] | null;
 };
 
 function formatSize(bytes: number): string {
@@ -376,12 +381,17 @@ function diffLines(patch: string): DiffLine[] {
     }
 
     const lines: DiffLine[] = [];
+    // fork:zc-07 — 双边改动只算一次词级差异，删除/新增两行各取自己那一侧。
+    const pair = row.left.type === "removed" && row.right.type === "added"
+      ? diffIntraline(row.left.text, row.right.text)
+      : undefined;
     if (row.left.type === "removed") {
       lines.push({
         type: "removed",
         text: row.left.text,
         oldLineNo: row.left.lineNo,
         newLineNo: null,
+        intraline: pair === undefined ? undefined : pair?.left ?? null,
       });
     }
     if (row.right.type === "added") {
@@ -390,6 +400,7 @@ function diffLines(patch: string): DiffLine[] {
         text: row.right.text,
         oldLineNo: null,
         newLineNo: row.right.lineNo,
+        intraline: pair === undefined ? undefined : pair?.right ?? null,
       });
     }
     return lines;
@@ -478,6 +489,12 @@ function DiffView({ patch }: { patch: string }) {
             line.type === "added" ? "+" : line.type === "removed" ? "-" : " ";
           const prefixColor =
             line.type === "added" ? "var(--success)" : line.type === "removed" ? "var(--danger)" : "var(--text-dim)";
+          // fork:zc-07 — 行内差异段；空行（或无可显示字符）仍用 nbsp 占位。
+          const segments = line.intraline === undefined ? null : buildIntralineSegments(line.text, line.intraline);
+          const hasVisibleSegments = segments?.some((segment) => segment.text.length > 0) ?? false;
+          const changedBackground = line.type === "added"
+            ? "color-mix(in srgb, var(--success) 30%, transparent)"
+            : "color-mix(in srgb, var(--danger) 30%, transparent)";
 
           return (
             <div
@@ -520,7 +537,16 @@ function DiffView({ patch }: { patch: string }) {
                   color: "var(--text)",
                 }}
               >
-                {line.text || "\u00a0"}
+                {segments && hasVisibleSegments
+                  ? segments.map((segment, index) => (
+                      <span
+                        key={index}
+                        style={segment.changed ? { background: changedBackground, borderRadius: 2 } : undefined}
+                      >
+                        {segment.text}
+                      </span>
+                    ))
+                  : (line.text || "\u00a0")}
               </span>
             </div>
           );
@@ -1900,15 +1926,18 @@ function TextFileViewer({
     // is usually more useful viewed than read as source. Both have a preview
     // mode already; the source tab stays one click away. A restored choice or
     // explicit mode hint always wins over this default.
+    // fork:zc-12 — CSV/TSV 同样默认预览：解析层自带行/列上限与截断标记，
+    // 所以 256KB 源截断也不阻止表格预览。
     if (
       defaultPreviewEligibleRef.current
-      && !data?.truncated
-      && (data?.language === "markdown" || data?.language === "html")
+      && data !== null
+      && (isDelimitedTextPath(filePath)
+        || (!data.truncated && (data.language === "markdown" || data.language === "html")))
     ) {
       defaultPreviewEligibleRef.current = false;
       updateDisplayMode("preview");
     }
-  }, [data?.language, data?.truncated, updateDisplayMode]);
+  }, [data, filePath, updateDisplayMode]);
 
   const hasGitDiff = gitDiff?.supported === true && typeof gitDiff.patch === "string";
   const isDeletedDiff = hasGitDiff && gitDiff.status === "deleted";
@@ -1931,6 +1960,8 @@ function TextFileViewer({
   const language = data?.language ?? "text";
   const isHtml = language === "html";
   const isMarkdown = language === "markdown";
+  // fork:zc-12 — .csv/.tsv 的表格预览（与 language 无关，语言映射里它们是 text）。
+  const isDelimitedText = isDelimitedTextPath(filePath);
   const isCodeText = isEditableTextPath(filePath) && !isMarkdown;
   const hasPreview = !data?.truncated && (isHtml || isMarkdown);
   const effectiveDisplayMode = isDeletedDiff ? "diff" : displayMode;
@@ -2427,7 +2458,7 @@ function TextFileViewer({
     ? ["diff"]
     : [
         "source",
-        ...(hasPreview ? ["preview" as const] : []),
+        ...(hasPreview || isDelimitedText ? ["preview" as const] : []),
         ...(hasGitDiff ? ["diff" as const] : []),
       ];
   const metadata = isDeletedDiff
@@ -2762,6 +2793,9 @@ function TextFileViewer({
               sourceSessionId={sourceSessionId} onOpenFile={onOpenFile}
               sourceLines={Boolean(locationTarget)} />
           </div>
+        ) : isDelimitedText && effectiveDisplayMode === "preview" ? (
+          // fork:zc-12 — CSV/TSV 表格预览（行窗口化、ragged/截断提示都在组件内）。
+          <CsvPreview content={content} filePath={filePath} sourceTruncated={data?.truncated === true} />
         ) : shouldShowUnsupportedCard(filePath) ? (
           // fork:gap-unsupported-preview — 二进制/未知类型不再以文本呈现（那是乱码），
           // 改为带元数据与"用默认应用打开"的卡片。

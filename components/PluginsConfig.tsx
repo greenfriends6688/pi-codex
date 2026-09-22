@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { McpResponse, McpScope, McpServerInfo, PluginPackageInfo, PluginStandaloneExtensionInfo, PluginUpdateResult, PluginsResponse } from "@/lib/api-types";
 import { useI18n } from "@/hooks/useI18n";
@@ -663,6 +663,7 @@ function McpServerDetail({
   onMove,
   onTest,
   onEdit,
+  authActions,
 }: {
   server: McpServerInfo;
   cwd: string;
@@ -674,6 +675,8 @@ function McpServerDetail({
   onMove: () => void;
   onTest: () => void;
   onEdit: () => void;
+  /** fork:zc-18 — optional OAuth entry slot; rendered by fork/McpConfig.tsx. */
+  authActions?: ReactNode;
 }) {
   const { t } = useI18n();
   const enabled = !server.disabled;
@@ -779,6 +782,8 @@ function McpServerDetail({
           {shortenPath(cwd)}
         </div>
       </div>
+
+      {authActions}
 
       {actionMessage && (
         <div style={{ fontSize: TEXT.sm, color: "var(--success)" }}>{actionMessage}</div>
@@ -1028,6 +1033,7 @@ export function PluginsConfig({
   onReloaded,
   embedded = false,
   only,
+  renderMcpAuthActions,
 }: {
   cwd: string;
   sessionId: string | null;
@@ -1041,6 +1047,12 @@ export function PluginsConfig({
    * why this is a mode rather than a second copy of 500 lines.
    */
   only?: "mcp";
+  /**
+   * fork:zc-18 — optional OAuth entry slot for the MCP detail view. The MCP
+   * panel (fork/McpConfig.tsx) supplies the implementation; this shared
+   * component stays free of OAuth-command copy.
+   */
+  renderMcpAuthActions?: (server: McpServerInfo) => ReactNode;
 }) {
   const mcpOnly = only === "mcp";
   const { t } = useI18n();
@@ -1794,6 +1806,7 @@ export function PluginsConfig({
                       setMcpActionError(null);
                       setMcpActionMessage(null);
                     }}
+                    authActions={renderMcpAuthActions?.(selectedMcp)}
                   />
                 ) : (
                   <ConfigEmptyState>{t("mcp.emptyDetail")}</ConfigEmptyState>

@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { ConfigButton, ConfigSwitch } from "../SettingsUi";
 import { PI_MEMORY_PACKAGE_SOURCE, PI_MEMORY_TEMPLATES, PI_MEMORY_TOOLS } from "@/lib/pi-memory";
+import { filterMemoryEntries, isWritableMemoryPath, type MemoryCatalogEntry } from "@/lib/memory-catalog";
 import { TEXT } from "@/lib/typography";
 
 /*
@@ -20,6 +21,12 @@ import { TEXT } from "@/lib/typography";
  *      used to make the whole feature look missing;
  *   3. reading and hand-editing those files, and opening them in the main file
  *      viewer where the markdown editor lives.
+ *
+ * fork:zc-20 — (3) grew into a directory view: the panel now renders the
+ * read-only catalog of `~/.pi/agent/memory/` (root files plus `daily/` and
+ * `recovery/`) with a filename filter and mtime, while the create/edit actions
+ * are still restricted to the paths pi-memory itself manages. The catalog
+ * never changes the storage layout: `lib/memory-catalog.ts` only lists.
  */
 
 interface MemoryFileInfo {
@@ -49,6 +56,8 @@ export function PiMemoryConfig({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [files, setFiles] = useState<MemoryFileInfo[]>([]);
+  const [catalog, setCatalog] = useState<MemoryCatalogEntry[]>([]);
+  const [fileQuery, setFileQuery] = useState("");
   const [dir, setDir] = useState("");
   // fork:fix-memory-ui — 自动保存 + 冲突保护：openFile 是磁盘上的已存内容（含读时的
   // mtime 基线），draft 是编辑中的草稿；draft 变更后防抖自动保存；磁盘被 agent
@@ -65,9 +74,14 @@ export function PiMemoryConfig({
         fetch("/api/memory/files", { cache: "no-store" }),
       ]);
       const plugins = await pluginsRes.json() as { packages?: PluginPackageView[] };
-      const filesData = await filesRes.json() as { dir?: string; files?: MemoryFileInfo[] };
+      const filesData = await filesRes.json() as {
+        dir?: string;
+        files?: MemoryFileInfo[];
+        catalog?: { entries?: MemoryCatalogEntry[] };
+      };
       setPkg((plugins.packages ?? []).find((entry) => entry.source === PI_MEMORY_PACKAGE_SOURCE) ?? null);
       setFiles(filesData.files ?? []);
+      setCatalog(filesData.catalog?.entries ?? []);
       setDir(filesData.dir ?? "");
       setError(null);
     } catch (e) {
@@ -83,8 +97,10 @@ export function PiMemoryConfig({
 
   // fork:fix-memory-ui — 自动保存：draft 偏离基线后防抖 800ms 写盘；冲突时停下，
   // 等用户点「重新加载」再继续。write 未列入依赖：它每次渲染重建，列入会重置防抖计时。
+  // fork:zc-20 — recovery/ 等非 pi-memory 管理的文件只读，绝不触发自动保存。
   useEffect(() => {
     if (!openFile || conflict || draft === openFile.content) return;
+    if (!isWritableMemoryPath(openFile.path)) return;
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
       autoSaveTimerRef.current = null;
@@ -192,6 +208,9 @@ export function PiMemoryConfig({
 
   const installed = Boolean(pkg);
   const enabled = installed && pkg?.disabled !== true;
+  const missingFiles = files.filter((file) => !file.exists);
+  const visibleCatalog = useMemo(() => filterMemoryEntries(catalog, fileQuery), [catalog, fileQuery]);
+  const openFileWritable = openFile ? isWritableMemoryPath(openFile.path) : false;
 
   return (
     <div className="settings-general">
@@ -248,41 +267,43 @@ export function PiMemoryConfig({
       </section>
 
       <section className="settings-general-section">
-        <h3 className="settings-general-heading">{t("memory.files")}</h3>
+        {/* fork:zc-20 — directory view: count + filename search + the read-only
+            catalog. The create buttons stay for the pi-memory files that do not
+            exist yet, because an empty install must not look like a missing
+            feature. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <h3 className="settings-general-heading" style={{ margin: 0 }}>{t("memory.files")}</h3>
+          <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+            {t("memory.fileCount", { count: catalog.length })}
+          </span>
+          <span style={{ flex: 1 }} />
+          <input
+            type="search"
+            value={fileQuery}
+            onChange={(event) => setFileQuery(event.target.value)}
+            placeholder={t("memory.fileSearch")}
+            aria-label={t("memory.fileSearch")}
+            maxLength={60}
+            className="settings-search-input"
+            style={{ width: 200, maxWidth: "45%" }}
+          />
+        </div>
         {dir && <p className="settings-chat-range-hint" style={{ marginTop: -2, fontFamily: "var(--font-mono)", fontSize: TEXT.xs }}>{dir}</p>}
-        <div style={{ display: "grid", gap: 4 }}>
-          {files.map((file) => (
-            <div
-              key={file.path}
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "6px 9px", border: "1px solid var(--border-faint)", borderRadius: "var(--radius-md)",
-                background: openFile?.path === file.path ? "var(--bg-selected)" : "var(--bg-panel)",
-                opacity: file.exists ? 1 : 0.75,
-              }}
-            >
-              <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 1 }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.sm, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+
+        {missingFiles.length > 0 && (
+          <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
+            {missingFiles.map((file) => (
+              <div
+                key={file.path}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "6px 9px", border: "1px dashed var(--border-faint)", borderRadius: "var(--radius-md)",
+                  background: "var(--bg-panel)", opacity: 0.85,
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--font-mono)", fontSize: TEXT.sm, color: "var(--text-dim)" }}>
                   {file.path}
                 </span>
-                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
-                  {file.exists
-                    ? `${file.size} B · ${new Date(file.mtime).toLocaleString()}`
-                    : t("memory.fileMissing")}
-                </span>
-              </span>
-              {file.exists ? (
-                <>
-                  <ConfigButton variant="secondary" size="small" disabled={busy === file.path} onClick={() => void read(file.path)}>
-                    {t("memory.preview")}
-                  </ConfigButton>
-                  {onOpenFile && (
-                    <ConfigButton variant="ghost" size="small" onClick={() => onOpenFile(`${dir}/${file.path}`)}>
-                      {t("memory.openInEditor")}
-                    </ConfigButton>
-                  )}
-                </>
-              ) : (
                 <ConfigButton
                   variant="secondary"
                   size="small"
@@ -291,11 +312,47 @@ export function PiMemoryConfig({
                 >
                   {t("memory.createFile")}
                 </ConfigButton>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gap: 4 }}>
+          {visibleCatalog.map((file) => (
+            <div
+              key={file.path}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "6px 9px", border: "1px solid var(--border-faint)", borderRadius: "var(--radius-md)",
+                background: openFile?.path === file.path ? "var(--bg-selected)" : "var(--bg-panel)",
+              }}
+            >
+              <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 1 }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: TEXT.sm, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {file.path}
+                </span>
+                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", fontVariantNumeric: "tabular-nums" }}>
+                  {`${file.size} B · ${new Date(file.mtime).toLocaleString()}`}
+                </span>
+              </span>
+              <ConfigButton variant="secondary" size="small" disabled={busy === file.path} onClick={() => void read(file.path)}>
+                {isWritableMemoryPath(file.path) ? t("i18n.edit") : t("memory.preview")}
+              </ConfigButton>
+              {onOpenFile && (
+                <ConfigButton variant="ghost" size="small" onClick={() => onOpenFile(`${dir}/${file.path}`)}>
+                  {t("memory.openInEditor")}
+                </ConfigButton>
               )}
             </div>
           ))}
+          {!loading && visibleCatalog.length === 0 && (
+            <p role="status" className="settings-chat-range-hint" style={{ margin: 0 }}>
+              {fileQuery.trim() ? t("memory.fileNoMatch") : t("memory.filesEmpty")}
+            </p>
+          )}
         </div>
         <p className="settings-chat-range-hint">{t("memory.filesHint")}</p>
+
         {openFile && conflict && (
           // fork:fix-memory-ui — 外部冲突横幅：磁盘上的文件在读取后变了（多半是 agent
           // 刚写完记忆），编辑器里的草稿不会自动覆盖它；重新加载后重新改。
@@ -311,24 +368,30 @@ export function PiMemoryConfig({
           <div style={{ marginTop: 8 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
               <strong style={{ fontSize: TEXT.sm, fontFamily: "var(--font-mono)" }}>{openFile.path}</strong>
+              {!openFileWritable && (
+                <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)" }}>{t("memory.readOnlyFile")}</span>
+              )}
               <ConfigButton variant="ghost" size="small" onClick={() => setOpenFile(null)}>{t("i18n.close")}</ConfigButton>
-              <ConfigButton
-                variant="primary"
-                size="small"
-                disabled={busy === openFile.path || draft === openFile.content}
-                onClick={() => void write(openFile.path, draft, t("memory.fileSaved"), openFile.mtime)}
-              >
-                {t("i18n.save")}
-              </ConfigButton>
+              {openFileWritable && (
+                <ConfigButton
+                  variant="primary"
+                  size="small"
+                  disabled={busy === openFile.path || draft === openFile.content}
+                  onClick={() => void write(openFile.path, draft, t("memory.fileSaved"), openFile.mtime)}
+                >
+                  {t("i18n.save")}
+                </ConfigButton>
+              )}
             </div>
             <textarea
               className="settings-field-input"
               value={draft}
               spellCheck={false}
+              readOnly={!openFileWritable}
               onChange={(event) => setDraft(event.target.value)}
-              style={{ minHeight: 200, fontFamily: "var(--font-mono)", fontSize: TEXT.sm, lineHeight: 1.55, resize: "vertical" }}
+              style={{ minHeight: 200, fontFamily: "var(--font-mono)", fontSize: TEXT.sm, lineHeight: 1.55, resize: "vertical", opacity: openFileWritable ? 1 : 0.85 }}
             />
-            <p className="settings-chat-range-hint">{t("memory.autoSaveHint")}</p>
+            {openFileWritable && <p className="settings-chat-range-hint">{t("memory.autoSaveHint")}</p>}
           </div>
         )}
       </section>

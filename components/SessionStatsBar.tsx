@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { copyText } from "@/lib/clipboard";
 import { TEXT } from "@/lib/typography";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+// fork:zm-04 — token / 成本 / 耗时这些数字变化时逐位滚动，而不是整串跳。
+import { RollingNumber } from "./fork/RollingNumber";
 
 /**
  * fork:ui-stats-inline — 会话统计从「聊天区右上角按钮 + 悬浮面板」搬到
@@ -143,12 +145,15 @@ export function SessionStatsBar({ sessionStats, contextUsage, session, expanded,
   const panelId = "session-stats-inline-panel";
   const formatNumber = (value: number) => value.toLocaleString(locale);
 
-  const rows: Array<[string, string, SessionCopyField | null]> = [];
+  const rows: Array<[string, ReactNode, SessionCopyField | null]> = [];
   if (sessionStats) {
     if (sessionStats.sessionName) rows.push([t("session.name"), sessionStats.sessionName, null]);
     rows.push([t("session.file"), sessionStats.sessionFile ?? t("session.inMemory"), "file"]);
     rows.push([t("session.id"), sessionStats.sessionId, "id"]);
-    if ((sessionStats.totalActiveMs ?? 0) > 0) rows.push([t("session.totalActive"), formatStatsDuration(sessionStats.totalActiveMs ?? 0), null]);
+    // fork:zm-04 — 耗时每秒都在变，滚动比跳字更不容易看成「页面在闪」。
+    if ((sessionStats.totalActiveMs ?? 0) > 0) {
+      rows.push([t("session.totalActive"), <RollingNumber key="active" value={formatStatsDuration(sessionStats.totalActiveMs ?? 0)} />, null]);
+    }
     if (session) {
       rows.push([t("session.projectDir"), session.projectRoot ?? session.cwd, "projectDir"]);
       if (session.branch) rows.push([t("session.gitBranch"), session.branch, "gitBranch"]);
@@ -185,7 +190,7 @@ export function SessionStatsBar({ sessionStats, contextUsage, session, expanded,
     gitWorktree: "session.copyGitWorktree",
   };
 
-  const renderSection = (title: string, sectionRows: Array<[string, string, SessionCopyField | null]>) => (
+  const renderSection = (title: string, sectionRows: Array<[string, ReactNode, SessionCopyField | null]>) => (
     <div key={title} style={{ minWidth: 168, maxWidth: 320 }}>
       <div style={{ fontSize: TEXT.xs, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>{title}</div>
       <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", columnGap: 12, rowGap: 4 }}>
@@ -200,8 +205,8 @@ export function SessionStatsBar({ sessionStats, contextUsage, session, expanded,
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
                 fontVariantNumeric: "tabular-nums",
-              }} title={value}>{value}</span>
-              {copyField && (
+              }} title={typeof value === "string" ? value : undefined}>{value}</span>
+              {copyField && typeof value === "string" && (
                 <button
                   type="button"
                   title={copiedField === copyField ? t("session.copied") : t(copyTitleKey[copyField])}
@@ -269,28 +274,29 @@ export function SessionStatsBar({ sessionStats, contextUsage, session, expanded,
           <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M1 2.5 Q1 1 2.5 1 L7.5 1 Q9 1 9 2.5 L9 5 Q9 6.5 7.5 6.5 L4 6.5 L2 8.5 L2 6.5 Q1 6.5 1 5 Z" />
           </svg>
-          {formatCompactTokens(totalMessages)}
+          <RollingNumber value={formatCompactTokens(totalMessages)} />
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.input ? 1 : 0.45 }}>
           <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <line x1="5" y1="8.5" x2="5" y2="1.5" /><polyline points="2 4 5 1.5 8 4" />
           </svg>
-          {formatCompactTokens(tokens?.input ?? 0)}
+          <RollingNumber value={formatCompactTokens(tokens?.input ?? 0)} />
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.output ? 1 : 0.45 }}>
           <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <line x1="5" y1="1.5" x2="5" y2="8.5" /><polyline points="2 6 5 8.5 8 6" />
           </svg>
-          {formatCompactTokens(tokens?.output ?? 0)}
+          <RollingNumber value={formatCompactTokens(tokens?.output ?? 0)} />
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 4, opacity: tokens?.cacheRead ? 1 : 0.45 }}>
           <svg width="12" height="12" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M8.5 5a3.5 3.5 0 1 1-1-2.45" /><polyline points="6.5 1.5 8.5 2.5 7.5 4.5" />
           </svg>
-          {formatCompactTokens(tokens?.cacheRead ?? 0)}
+          <RollingNumber value={formatCompactTokens(tokens?.cacheRead ?? 0)} />
         </span>
         <span style={{ color: costText ? "var(--text)" : "var(--text-muted)", fontWeight: 500, opacity: costText ? 1 : 0.6 }}>
-          {costText ?? "$0.00"}
+          {/* fork:zm-04 — 成本是最常变的数字（每轮都涨），适合逐位滚动。 */}
+          <RollingNumber value={costText ?? "$0.00"} />
         </span>
         {/* fork:ui-stats-inline — 平均缓存命中率也从明细里提到这一行：它是唯一能
             一眼看出“缓存有没有在起作用”的数字，藏在面板里没人看。 */}

@@ -108,15 +108,6 @@ test("groups chat display controls together without row backgrounds", () => {
   assert.doesNotMatch(chatOptionStyles, /background/);
 });
 
-test("settings search filters sections and highlights rows", () => {
-  assert.match(panelSource, /className="settings-search-input"/);
-  assert.match(panelSource, /sectionSearchTerms\(item\.id\)/);
-  assert.match(panelSource, /settings-search-match/);
-  assert.match(panelSource, /scrollIntoView\(\{ block: "center" \}\)/);
-  assert.match(cssSource, /\.settings-search-match \{[\s\S]*?background:/);
-  assert.match(cssSource, /\.settings-search-input \{/);
-});
-
 test("keeps General free of divider rows", () => {
   assert.match(panelSource, /className="settings-dialog-header"/);
   assert.match(cssSource, /\.settings-dialog-header \{[\s\S]*?display: flex[\s\S]*?align-items: center[\s\S]*?min-height: 50px/);
@@ -128,8 +119,8 @@ test("keeps General free of divider rows", () => {
 test("uses a left section column on desktop and one compact picker on mobile", () => {
   assert.match(panelSource, /className="settings-mobile-section-picker"/);
   assert.match(panelSource, /className="settings-section-tabs"/);
-  // fork:ui-14 — the class is composed with the search-hit modifier now.
-  assert.match(panelSource, /className=\{`settings-section-tab\$\{jumpHit \? " settings-section-tab--hit" : ""\}`\}/);
+  // 搜索已移除：命中修饰符（settings-section-tab--hit）随之一并去掉。
+  assert.match(panelSource, /className="settings-section-tab"/);
   // fork:ui-08 — a vertical column (upstream 0.14.6 layout) instead of a row of
   // fixed 96px cells.
   assert.match(panelSource, /className="settings-dialog-body"/);
@@ -149,7 +140,8 @@ test("uses a left section column on desktop and one compact picker on mobile", (
   assert.match(cssSource, /@media \(max-width: 640px\)[\s\S]*?\.settings-mobile-section-picker \{[\s\S]*?display: block/);
   assert.doesNotMatch(panelSource, /width: isMobile \? "100%" : 188/);
   // fork:ui-14 — the content column carries the search-highlight ref now.
-  assert.match(panelSource, /<main className="settings-dialog-main" ref=\{mainRef\}>/);
+  // 搜索已移除：mainRef 只服务于搜索高亮，随之删掉，这里只断言容器本身。
+  assert.match(panelSource, /<main className="settings-dialog-main">/);
   assert.doesNotMatch(panelSource, /<style>/);
   assert.doesNotMatch(panelSource, /style=\{\{/);
 });

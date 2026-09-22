@@ -959,11 +959,6 @@
   font-weight: 600;
 }
 
-/* fork:zn-09 — section cards (Zeno .settings-card): a hairline boundary groups
-   each section so the page reads as cards, not a flat list. Border only, no
-   fill — a fill would fight the theme-option grids and sliders inside.
-   Per-row inset dividers deliberately skipped: Zeno's rows are uniform
-   label/control pairs, ours are heterogeneous control groups. */
 .settings-general-section {
   margin-top: 16px;
   padding: 14px 16px 16px;
@@ -1552,39 +1547,8 @@
 }
 
 /* fork:ui-14 — settings search: input, jump hint, row highlight. */
-/* fork:zn-09 — 36px pill search (Zeno .settings-search): one shell style for
-   the rail search, replacing the 28px box. */
-.settings-search-input {
-  width: 100%;
-  height: 36px;
-  margin: 0 0 8px;
-  padding: 0 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  background: var(--bg);
-  color: var(--text);
-  font-size: var(--text-md);
-}
-.settings-search-input:focus-visible {
-  outline: 2px solid var(--focus-ring, var(--accent));
-  outline-offset: -1px;
-}
-.settings-section-tab--hit {
-  color: var(--text);
-}
-.settings-search-empty {
-  margin: 6px 4px 0;
-  color: var(--text-dim);
-  font-size: 11.5px;
-  line-height: 1.5;
-}
 /* Matching rows get a tinted wash rather than a border: rows are different
    components, and only a background survives their own hover rules. */
-.settings-search-match {
-  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
-  border-radius: var(--radius-md);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 32%, transparent);
-}
 
 /* fork:cron / fork:memory — compact form fields used by the two new sections. */
 .settings-field-input {

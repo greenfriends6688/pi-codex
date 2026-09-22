@@ -615,6 +615,45 @@ html.keyboard-open .extension-status-shelf {
 }
 
 /* ---------------------------------------------------------------------------
+ * fork:zm-01 — 折叠内容用 grid 行高滑开/收起（ZCode M1）。
+ *
+ * 根因：思考块 / 工具详情 / 扩展消息详情此前是条件渲染，DOM 直接增删，高度
+ * 瞬时跳变；只加 transition 没有可动的东西。现在外层 grid wrapper 常驻，行高
+ * 在 0fr ↔ 1fr 之间过渡，这是 JS-free 的高度动画。
+ *
+ * 内层 `.fork-collapse-body` 的 `min-height: 0` 是必须的：grid 轨道默认按内容
+ * 最小尺寸撑开，没有它 0fr 不会真的收到 0。`overflow: hidden` 负责裁剪动画中间
+ * 态（两个属性都只作用在内层，不参与 width/height 主动画）。
+ *
+ * 正文的挂载/卸载由 hooks/useCollapsePresence.ts 两段式管理：收起时保留到
+ * transitionend（或 duration + 50ms 兜底）之后再卸载，惰性加载的思考正文不会
+ * 因此常驻 DOM。时长必须与该文件的 COLLAPSE_DURATION_MS(260) 保持一致。
+ * ------------------------------------------------------------------------- */
+:root {
+  --fork-collapse-duration: 260ms;
+  --fork-collapse-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.fork-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--fork-collapse-duration) var(--fork-collapse-ease);
+}
+.fork-collapse[data-fork-collapse="open"] {
+  grid-template-rows: 1fr;
+}
+.fork-collapse-body {
+  min-height: 0;
+  overflow: hidden;
+}
+/* reduced-motion：保留 0fr/1fr 终态，但不播动画（transitionend 不会触发，
+   正文由 useCollapsePresence 的兜底定时器卸载）。 */
+@media (prefers-reduced-motion: reduce) {
+  .fork-collapse {
+    transition: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
  * fork:shadcn — 消息区底部渐隐（shadcn message-scroller 的 scroll-fade-b）。
  *
  * 还没滚到底时，内容在底部 40px 内渐隐，提示“下面还有”；滚到底时渐隐自动
@@ -623,11 +662,6 @@ html.keyboard-open .extension-status-shelf {
  * 复用已有的 `showScrollToBottom` 状态（它本来就是“是否还有内容在下方”），
  * 而不是再写一套滚动监听，也不用 scroll-driven animation（依赖较新特性）。
  * ------------------------------------------------------------------------- */
-.fork-scroll-fade-b {
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent 100%);
-}
-
 /* ---------------------------------------------------------------------------
  * fork:zn-02 — rail title fade + section-action hover gate.
  *
@@ -770,3 +804,105 @@ html.keyboard-open .extension-status-shelf {
   height: 24px !important; /* 一行文本（约 13px 字号 × 1.6 行高） */
   overflow: hidden !important;
 }
+
+/* ---------------------------------------------------------------------------
+ * fork:zm-02 — 流式入场：新追加的过程步骤逐条淡入。
+ *
+ * 只有 `opacity` + `translateY(4px)`（不动布局），时长/错位走本文件新增的
+ * token。`backwards` fill 让延迟期间先保持透明，避免「先闪一下再动」。
+ *
+ * 触发条件有三层，缺一不可：
+ *   1. 容器 `[data-fork-stream-animate="true"]`（只在流式 + 用户显式
+ *      no-preference 时才由 ProcessGroup 输出）；
+ *   2. 行上有 `[data-fork-enter="true"]`（lib/stream-enter-memory 每个 id 只
+ *      允许一次，重挂载不重播）；
+ *   3. 本文件的 no-preference 媒体块（reduce 下即使属性在也不会有动画）。
+ * keyframe 名带 fork- 前缀，避免 ZCode 那种同名覆盖（后写的静默盖掉先写的）。
+ * ------------------------------------------------------------------------- */
+:root {
+  --fork-enter-duration: 260ms;
+  --fork-enter-step: 36ms;
+}
+
+@keyframes fork-stream-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-fork-stream-animate="true"] > .process-step[data-fork-enter="true"] {
+    animation: fork-stream-enter var(--fork-enter-duration) var(--ease-out)
+      var(--fork-enter-delay, 0ms) backwards;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .process-step[data-fork-enter="true"] {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zm-05 — TabBar 滑动指示器 + 按压反馈。
+ *
+ * 高亮块从「直接换 background」改成绝对定位的 pill：TabBar 用
+ * `offsetLeft/offsetWidth` 定位（200ms transform/width 过渡），首次测量前
+ * opacity 0，避免在 (0,0) 闪一下。
+ *
+ * 为什么必须 absolute + pointer-events:none：`lib/tab-overflow.ts` 的折叠逻辑
+ * 依赖每个 tab 的 offsetWidth 与容器 clientWidth —— pill 在文档流里就会污染
+ * 这两个测量值。绝对定位脱离流，`pointer-events:none` 让它不吃点击。
+ * tab 自身 `position:relative; z-index:1` 才能画在 pill 之上（定位元素晚于
+ * 静态内容绘制，跟 DOM 顺序无关）。
+ *
+ * reduced-motion 下 `transition: none !important`：tab 的 transition 是内联
+ * 样式，只有 !important 压得住（本文件纪律 2 的既定例外）。
+ * ------------------------------------------------------------------------- */
+:root {
+  --fork-tab-pill-duration: 200ms;
+}
+
+.fork-tabbar {
+  position: relative;
+}
+.fork-tab {
+  position: relative;
+  z-index: 1;
+}
+.fork-tab-pill {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--bg-selected);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fork-tab-pill {
+    transition:
+      opacity var(--motion-fast) var(--ease-out),
+      transform var(--fork-tab-pill-duration) var(--ease-out),
+      width var(--fork-tab-pill-duration) var(--ease-out);
+  }
+  .fork-tab:active,
+  .fork-tab-more:active,
+  .fork-tab-overview:active {
+    transform: scale(0.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fork-tab,
+  .fork-tab-pill {
+    transition: none !important;
+  }
+  .fork-tab:active,
+  .fork-tab-more:active,
+  .fork-tab-overview:active {
+    transform: none;
+  }
+}
+

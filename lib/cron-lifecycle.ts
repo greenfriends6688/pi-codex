@@ -21,6 +21,12 @@ export const MAX_CONSECUTIVE_FAILURES = 5;
 /** 单次运行上限：无人值守的任务不能无限占着一个会话。 */
 export const DEFAULT_RUN_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
+/**
+ * fork:zc-19 — 认领过期时间。运行中的任务靠心跳续期；超过这个时间没有任何心跳，
+ * 就认为持有者（进程）已经死了，允许重新认领（与对照项目同值）。
+ */
+export const CRON_CLAIM_STALE_MS = 10 * 60 * 1000;
+
 /** 复用的会话上下文占用超过这个比例就换新会话（给 SDK 压缩留余量）。 */
 export const SESSION_REUSE_CONTEXT_LIMIT = 0.7;
 
@@ -92,6 +98,26 @@ export function shouldReuseSession(
 export function isRunLimitReached(task: Pick<CronTask, "maxRuns" | "runCount">): boolean {
   if (typeof task.maxRuns !== "number" || task.maxRuns <= 0) return false;
   return task.runCount >= task.maxRuns;
+}
+
+/**
+ * fork:zc-19 — 运行中任务的认领是否已过期。
+ *
+ * 心跳优先；没有心跳字段的旧数据退回 `lastRunAt`。时间戳缺失或畸形的任务
+ * 一律算「没过期」——宁可让用户手动处理，也不要因为一个坏字段把正在跑的任务
+ * 再拉起来一次（单飞比自动恢复更重要）。
+ */
+export function claimIsStale(
+  task: Pick<CronTask, "lastStatus" | "lastRunAt" | "heartbeatAt">,
+  now: Date,
+  staleMs = CRON_CLAIM_STALE_MS,
+): boolean {
+  if (task.lastStatus !== "running") return false;
+  const stamp = task.heartbeatAt ?? task.lastRunAt;
+  if (!stamp) return false;
+  const at = Date.parse(stamp);
+  if (!Number.isFinite(at)) return false;
+  return now.getTime() - at > staleMs;
 }
 
 /** 该任务是否应该被跳过（已停用、已完成、已达上限）。 */

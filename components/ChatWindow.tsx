@@ -23,6 +23,16 @@ import { SessionStatsBar } from "./SessionStatsBar";
 import { NewSessionHome } from "./fork/NewSessionHome";
 import { ProjectChip, type NewSessionTargets } from "./fork/ProjectChip";
 import { ComposerTipLine } from "./fork/ComposerTipLine";
+// fork:zc-02 — in-conversation find bar (⌘F): bar component + pure search index.
+import { ConversationFindBar } from "./fork/ConversationFindBar";
+import {
+  buildSearchIndex,
+  CONVERSATION_FIND_MAX_HITS,
+  conversationFindHitKey,
+  findHits,
+  nextHitIndex,
+  type ConversationFindHit,
+} from "@/lib/conversation-find";
 // fork:proma-05-explore — 分支会话的来源抬头条 + 带回结论
 import { ExplorationBanner } from "./fork/ExplorationBanner";
 import { extractTodoState } from "@/lib/todo-state";
@@ -45,6 +55,28 @@ import {
   restoreScrollTop,
   VISIBLE_PAGE_SIZE,
 } from "@/lib/chat-lazy-load";
+// fork:zm-03 — 滚动权状态机 / prepend 锚定 / 渐隐遮罩（纯逻辑见 lib/scroll-follow.ts）。
+import {
+  captureScrollAnchor,
+  initialFollowing,
+  keyboardScrollIntent,
+  nextFollowingAfterIntent,
+  resolveFollowingAfterScroll,
+  resolvePrependRestoreScrollTop,
+  shouldAllowProgrammaticScroll,
+  touchScrollIntent,
+  wheelScrollIntent,
+  type ScrollAnchorSample,
+  type ScrollEventSource,
+  type ScrollIntent,
+} from "@/lib/scroll-follow";
+import { ScrollFadeViewport } from "./fork/ScrollFadeViewport";
+// fork:zm-07 — 等待态状态行（串行滚动）。
+import { PhaseRoll } from "./fork/PhaseRoll";
+// fork:zm-04 — 倒计时条共享同一个动效偏好守卫。
+import { useMotionPreference } from "./fork/RollingNumber";
+// fork:zc-17 — 零会话首屏的三条起步路径。
+import { EmptyStateGuide } from "./fork/EmptyStateGuide";
 import { TEXT } from "@/lib/typography";
 
 interface Props {
@@ -106,6 +138,52 @@ function phaseLabel(phase: AgentPhase, t: (key: string, params?: Record<string, 
   return null;
 }
 
+/**
+ * fork:zm-07 — 相位身份（PhaseRoll 的 key）。
+ *
+ * 同一个工具/命令的 progress 更新必须保持同 key（原地换文字，不重播滚动）；
+ * 换工具、换相位才是一条新状态。
+ */
+function phaseKeyOf(phase: AgentPhase): string {
+  if (!phase) return "idle";
+  if (phase.kind === "running_tools") {
+    const latest = phase.tools[phase.tools.length - 1];
+    if (!latest) return "tools";
+    return `tools:${latest.id || latest.name}`;
+  }
+  return phase.kind;
+}
+
+/** fork:zm-03 — 滚动指标（纯读数，不触碰布局）。 */
+function scrollMetricsOf(container: HTMLElement): { scrollTop: number; viewportHeight: number; contentHeight: number } {
+  return {
+    scrollTop: container.scrollTop,
+    viewportHeight: container.clientHeight,
+    contentHeight: container.scrollHeight,
+  };
+}
+
+/**
+ * fork:zm-03 — 把「视口顶部附近的第一条消息」采成锚点。
+ *
+ * 用 rect 差而不是 `offsetTop`：offsetParent 不一定是消息容器，rect 差在任何
+ * 嵌套/滚动结构下都是同一坐标系。视口之上的最后一条作为兜底（整个视口都在两条消息之间）。
+ */
+function captureMessageAnchor(container: HTMLElement, content: HTMLElement | null): ScrollAnchorSample | null {
+  if (!content) return null;
+  const viewportTop = container.getBoundingClientRect().top;
+  let fallback: ScrollAnchorSample | null = null;
+  for (const item of content.querySelectorAll<HTMLElement>("[data-entry-id]")) {
+    const entryId = item.dataset.entryId;
+    if (!entryId) continue;
+    const top = item.getBoundingClientRect().top;
+    const sample = captureScrollAnchor({ entryId, elementViewportTop: top, viewportTop });
+    if (top >= viewportTop - 1) return sample;
+    fallback = sample;
+  }
+  return fallback;
+}
+
 function assistantTextNodes(root: HTMLElement): Text[] {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
@@ -149,6 +227,187 @@ function rangeFromTextOffsets(root: HTMLElement, startOffset: number, endOffset:
   range.setEnd(endPoint[0], endPoint[1]);
   return range;
 }
+
+// ---------------------------------------------------------------------------
+// fork:zc-02 — CSS Custom Highlight painting for the in-conversation find bar.
+//
+// Why ranges instead of <mark> elements: MarkdownBody is memoized and re-rendered
+// on every streamed chunk, so injecting highlight markup into its React tree would
+// invalidate that memoization and fight incremental streaming. The CSS Custom
+// Highlight API paints over the existing DOM without touching React. Environments
+// without it (jsdom, older browsers) are a safe no-op: the bar still counts and
+// navigates, it just cannot paint.
+// ---------------------------------------------------------------------------
+const CONVERSATION_FIND_HIGHLIGHT = "pi-conversation-find";
+const CONVERSATION_FIND_ACTIVE_HIGHLIGHT = "pi-conversation-find-active";
+const CONVERSATION_FIND_STYLE_ID = "pi-conversation-find-highlight-style";
+const CONVERSATION_FIND_HIGHLIGHT_CSS = `
+::highlight(${CONVERSATION_FIND_HIGHLIGHT}) {
+  background-color: var(--accent-soft);
+  color: var(--text);
+}
+::highlight(${CONVERSATION_FIND_ACTIVE_HIGHLIGHT}) {
+  background-color: var(--accent);
+  color: var(--bg);
+}
+`;
+
+interface ConversationHighlightRegistryLike {
+  set: (name: string, highlight: unknown) => void;
+  delete: (name: string) => void;
+}
+
+interface ConversationHighlightLike {
+  priority?: number;
+}
+
+type ConversationHighlightConstructor = new (...ranges: Range[]) => unknown;
+
+function conversationHighlightSupport(): {
+  registry: ConversationHighlightRegistryLike;
+  Highlight: ConversationHighlightConstructor;
+} | null {
+  if (typeof document === "undefined" || typeof CSS === "undefined") return null;
+  const registry = (CSS as unknown as { highlights?: ConversationHighlightRegistryLike }).highlights;
+  const Highlight = (globalThis as unknown as { Highlight?: ConversationHighlightConstructor }).Highlight;
+  if (!registry || typeof Highlight !== "function") return null;
+  return { registry, Highlight };
+}
+
+function ensureConversationFindHighlightStyle(): void {
+  if (typeof document === "undefined") return;
+  let style = document.getElementById(CONVERSATION_FIND_STYLE_ID);
+  if (!(style instanceof HTMLStyleElement)) {
+    style = document.createElement("style");
+    style.id = CONVERSATION_FIND_STYLE_ID;
+    document.head.appendChild(style);
+  }
+  if (style.textContent !== CONVERSATION_FIND_HIGHLIGHT_CSS) {
+    style.textContent = CONVERSATION_FIND_HIGHLIGHT_CSS;
+  }
+}
+
+function isConversationFindIgnoredText(node: Text): boolean {
+  const parent = node.parentElement;
+  if (!parent) return true;
+  return Boolean(parent.closest(
+    "button,input,textarea,select,script,style,[contenteditable='true'],[aria-hidden='true']",
+  ));
+}
+
+/** All non-overlapping occurrences of `query` among the element's text nodes. */
+function conversationFindRangesIn(
+  root: HTMLElement,
+  query: string,
+  caseSensitive: boolean,
+  limit = CONVERSATION_FIND_MAX_HITS,
+): Range[] {
+  const needle = query.trim();
+  if (needle.length === 0 || limit <= 0) return [];
+  const comparable = caseSensitive ? needle : needle.toLowerCase();
+  const ranges: Range[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const text = node as Text;
+    if (!isConversationFindIgnoredText(text)) {
+      const haystack = caseSensitive ? text.data : text.data.toLowerCase();
+      let from = 0;
+      while (from <= haystack.length - comparable.length) {
+        const start = haystack.indexOf(comparable, from);
+        if (start < 0) break;
+        const range = document.createRange();
+        range.setStart(text, start);
+        range.setEnd(text, start + comparable.length);
+        ranges.push(range);
+        if (ranges.length >= limit) return ranges;
+        from = start + comparable.length;
+      }
+    }
+    node = walker.nextNode();
+  }
+  return ranges;
+}
+
+function conversationFindAnchor(root: ParentNode, entryId: string | undefined | null): HTMLElement | null {
+  if (!entryId || typeof CSS === "undefined" || typeof CSS.escape !== "function") return null;
+  return root.querySelector<HTMLElement>(`[data-entry-id="${CSS.escape(entryId)}"]`);
+}
+
+/**
+ * Closest anchored message to an entry that has no DOM anchor of its own.
+ * Grouped process messages (thinking / tool calls / tool results) render inside
+ * a shared process-group element, so a hit there can only be located by turn.
+ */
+function nearestConversationFindAnchor(
+  root: HTMLElement,
+  entryId: string,
+  entryIds: readonly string[],
+): HTMLElement | null {
+  const targetIndex = entryIds.indexOf(entryId);
+  if (targetIndex < 0) return null;
+  let best: HTMLElement | null = null;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  root.querySelectorAll<HTMLElement>("[data-entry-id]").forEach((anchor) => {
+    const anchorId = anchor.dataset.entryId;
+    if (!anchorId) return;
+    const anchorIndex = entryIds.indexOf(anchorId);
+    if (anchorIndex < 0) return;
+    const distance = Math.abs(anchorIndex - targetIndex);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = anchor;
+    }
+  });
+  return best;
+}
+
+function applyConversationFindHighlights(
+  root: HTMLElement,
+  query: string,
+  activeHit: ConversationFindHit | null,
+): Range | null {
+  ensureConversationFindHighlightStyle();
+  const support = conversationHighlightSupport();
+  if (!support) return null;
+
+  const allRanges = conversationFindRangesIn(root, query, false);
+  let activeRange: Range | null = null;
+  const anchor = conversationFindAnchor(root, activeHit?.entryId);
+  if (activeHit && anchor) {
+    const anchorRanges = conversationFindRangesIn(anchor, query, false);
+    if (anchorRanges.length > 0) {
+      // `occurrence` counts model-level hits; collapsed or deferred blocks may
+      // not be mounted, so clamp to the nearest rendered occurrence instead of
+      // dropping the active highlight entirely.
+      activeRange = anchorRanges[Math.min(Math.max(activeHit.occurrence, 0), anchorRanges.length - 1)] ?? null;
+    }
+  }
+
+  const allHighlight = new support.Highlight(...allRanges) as ConversationHighlightLike;
+  allHighlight.priority = 0;
+  support.registry.set(CONVERSATION_FIND_HIGHLIGHT, allHighlight);
+
+  const activeHighlight = new support.Highlight(...(activeRange ? [activeRange] : [])) as ConversationHighlightLike;
+  activeHighlight.priority = 1;
+  support.registry.set(CONVERSATION_FIND_ACTIVE_HIGHLIGHT, activeHighlight);
+
+  return activeRange;
+}
+
+function clearConversationFindHighlights(): void {
+  const support = conversationHighlightSupport();
+  if (!support) return;
+  support.registry.delete(CONVERSATION_FIND_HIGHLIGHT);
+  support.registry.delete(CONVERSATION_FIND_ACTIVE_HIGHLIGHT);
+}
+
+// fork:zc-02 — cap on how much history the find bar pages in before it reports
+// partial results; unbounded loading would turn a search in a 5k-message session
+// into hundreds of requests.
+const CONVERSATION_FIND_MAX_SEARCH_MESSAGES = 2000;
+// fork:zc-02 — 把窗口撑到命中处时多带几条，避免命中恰好贴在可视区边缘。
+const CONVERSATION_FIND_REVEAL_MARGIN = 8;
 
 const CHAT_MINIMAP_WIDTH = 36;
 const CHAT_COLUMN_PADDING = 12;
@@ -669,6 +928,18 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const sentinelRef = useRef<HTMLDivElement>(null);
   const messageContentRef = useRef<HTMLDivElement | null>(null);
   const prevScrollDistanceRef = useRef<number | null>(null);
+  // fork:zm-03 — 滚动跟随权 + prepend 锚点（纯逻辑见 lib/scroll-follow.ts）。
+  // followingRef 只由真实用户输入改变；程序化滚动（流式贴底 / resize / prepend）读取它。
+  const followingRef = useRef(initialFollowing());
+  const prependAnchorRef = useRef<ScrollAnchorSample | null>(null);
+  const programmaticScrollTargetRef = useRef<number | null>(null);
+  const layoutShiftUntilRef = useRef(0);
+  const userIntentRef = useRef<ScrollIntent>("none");
+  const touchYRef = useRef<number | null>(null);
+  // fork:zm-03 — 发消息后 `scrollUserMsgToTop` 会把消息顶到视口顶部（远离底部）；
+  // 这次程序化滚动必须保持 following=true，否则随后的流式内容会被否决权挡住。
+  // 用短窗口而不是布尔量：万一那次滚动没产生事件，窗口过期后不会误判用户滚动。
+  const sendFollowUntilRef = useRef(0);
   const loadingOlderRef = useRef(false);
   const [loadingEarlier, setLoadingEarlier] = useState(false);
   const restoreStartedRef = useRef(false);
@@ -846,12 +1117,20 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     const container = scrollContainerRef.current;
     if (container) {
       prevScrollDistanceRef.current = captureScrollDistance(container.scrollHeight, container.scrollTop);
+      // fork:zm-03 — prepend 锚定：先记下「视口顶部附近那条消息」的像素偏移，
+      // 插入后按同一元素的实时位置把它放回去，而不是只补总高度差。
+      prependAnchorRef.current = captureMessageAnchor(container, messageContentRef.current);
     }
     loadingOlderRef.current = true;
     setLoadingEarlier(true);
     try {
       // loadContext handles prepend + scroll anchoring.
-      await loadContext(sid, activeLeafId, oldestId);
+      const context = await loadContext(sid, activeLeafId, oldestId);
+      if (!context) {
+        // 拉取失败：不要让本次采样留给下一次无关的 visibleCount 变化。
+        prevScrollDistanceRef.current = null;
+        prependAnchorRef.current = null;
+      }
     } finally {
       loadingOlderRef.current = false;
       setLoadingEarlier(false);
@@ -883,13 +1162,210 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
   // After visibleCount increases (more messages prepended), restore the
   // scroll position so the viewport doesn't jump.
+  //
+  // fork:zm-03 — 优先用消息锚点（offsetTop 语义）而不是「距底距离」：图片异步加载、
+  // 折叠展开都会改变高度，距底补偿会漂；锚点按像素把同一条消息放回原视口偏移。
   useEffect(() => {
-    if (prevScrollDistanceRef.current == null) return;
+    if (prevScrollDistanceRef.current == null) {
+      // 搜索跳转等显式导航会清掉这个 ref 来取消本次恢复；锚点同样清掉。
+      prependAnchorRef.current = null;
+      return;
+    }
     const container = scrollContainerRef.current;
     if (!container) return;
-    container.scrollTop = restoreScrollTop(container.scrollHeight, prevScrollDistanceRef.current);
+    const savedDistance = prevScrollDistanceRef.current;
+    const anchor = prependAnchorRef.current;
     prevScrollDistanceRef.current = null;
+    prependAnchorRef.current = null;
+
+    if (anchor) {
+      const element = messageContentRef.current?.querySelector<HTMLElement>(
+        `[data-entry-id="${CSS.escape(anchor.entryId)}"]`,
+      );
+      if (element) {
+        const target = resolvePrependRestoreScrollTop(anchor, {
+          elementViewportTop: element.getBoundingClientRect().top,
+          viewportTop: container.getBoundingClientRect().top,
+          scrollTop: container.scrollTop,
+        });
+        if (target !== null) {
+          programmaticScrollTargetRef.current = target;
+          container.scrollTop = target;
+          return;
+        }
+      }
+    }
+
+    const fallback = restoreScrollTop(container.scrollHeight, savedDistance);
+    programmaticScrollTargetRef.current = fallback;
+    container.scrollTop = fallback;
   }, [visibleCount, scrollContainerRef]);
+
+  // ---------------------------------------------------------------------------
+  // fork:zm-03 — 滚动跟随状态机（用户意图优先）。
+  //
+  // 背景：`useAgentSession` 里的 live-follow 只看自己的 near-bottom 旗标；
+  // 一次程序化滚动（流式追加 / 窗口 resize / prepend）就可能把用户读到的位置拉回底部。
+  // 这里按来源拆分（user / programmatic / layout）：只有 wheel / touch / 键盘 + 用户
+  // 落点能改变 following；此外一律不动。并在 following=false 时否决
+  // 「滚到最底」的程序化请求（lib/scroll-follow.ts 的 shouldAllowProgrammaticScroll）。
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const applyFollowing = (next: boolean) => {
+      if (followingRef.current === next) return;
+      followingRef.current = next;
+      // data 属性方便调试与以后按需做样式分支，不参与渲染。
+      container.dataset.forkFollowing = next ? "true" : "false";
+    };
+
+    const onWheel = (event: WheelEvent) => {
+      const intent = wheelScrollIntent(event.deltaY);
+      if (intent === "none") return;
+      userIntentRef.current = intent;
+      layoutShiftUntilRef.current = 0;
+      applyFollowing(nextFollowingAfterIntent({
+        following: followingRef.current,
+        intent,
+        metrics: scrollMetricsOf(container),
+      }));
+    };
+
+    const onTouchStart = (event: TouchEvent) => {
+      touchYRef.current = event.touches[0]?.clientY ?? null;
+    };
+
+    const onTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY ?? null;
+      const previousY = touchYRef.current;
+      touchYRef.current = nextY;
+      if (nextY === null || previousY === null) return;
+      const intent = touchScrollIntent(previousY, nextY);
+      if (intent === "none") return;
+      userIntentRef.current = intent;
+      layoutShiftUntilRef.current = 0;
+      applyFollowing(nextFollowingAfterIntent({
+        following: followingRef.current,
+        intent,
+        metrics: scrollMetricsOf(container),
+      }));
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const editableTarget = Boolean(target && (
+        target.tagName === "INPUT"
+        || target.tagName === "TEXTAREA"
+        || target.tagName === "SELECT"
+        || target.isContentEditable
+      ));
+      const intent = keyboardScrollIntent({ key: event.key, shiftKey: event.shiftKey, editableTarget });
+      if (intent === "none") return;
+      userIntentRef.current = intent;
+      layoutShiftUntilRef.current = 0;
+      applyFollowing(nextFollowingAfterIntent({
+        following: followingRef.current,
+        intent,
+        metrics: scrollMetricsOf(container),
+      }));
+    };
+
+    const onScroll = () => {
+      // 任何带用户意图的滚动都取消「刚发消息」窗口，用户操作永远优先。
+      if (userIntentRef.current !== "none") sendFollowUntilRef.current = 0;
+      if (
+        sendFollowUntilRef.current > Date.now()
+        && userIntentRef.current === "none"
+        && programmaticScrollTargetRef.current === null
+      ) {
+        sendFollowUntilRef.current = 0;
+        applyFollowing(true);
+        return;
+      }
+      const metrics = scrollMetricsOf(container);
+      const pendingTarget = programmaticScrollTargetRef.current;
+      let source: ScrollEventSource = "user";
+      if (pendingTarget !== null) {
+        // 任何 scroll 事件都消费掉待定目标，避免它留给之后的用户滚动误判。
+        programmaticScrollTargetRef.current = null;
+        if (Math.abs(metrics.scrollTop - pendingTarget) <= 2 || userIntentRef.current === "none") {
+          source = "programmatic";
+        }
+      } else if (userIntentRef.current === "none" && layoutShiftUntilRef.current > Date.now()) {
+        source = "layout";
+      }
+      const intent = userIntentRef.current;
+      userIntentRef.current = "none";
+      if (source === "user" && intent === "awayFromBottom") {
+        // 上滑意图立即生效（哪怕只滑了 10px，仍在 48px 容差内）。
+        applyFollowing(false);
+        return;
+      }
+      applyFollowing(resolveFollowingAfterScroll({
+        following: followingRef.current,
+        metrics,
+        source,
+      }));
+    };
+
+    container.addEventListener("wheel", onWheel, { passive: true });
+    container.addEventListener("touchstart", onTouchStart, { passive: true });
+    container.addEventListener("touchmove", onTouchMove, { passive: true });
+    container.addEventListener("keydown", onKeyDown);
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      container.removeEventListener("wheel", onWheel);
+      container.removeEventListener("touchstart", onTouchStart);
+      container.removeEventListener("touchmove", onTouchMove);
+      container.removeEventListener("keydown", onKeyDown);
+      container.removeEventListener("scroll", onScroll);
+    };
+  }, [scrollContainerRef, session?.id]);
+
+  // fork:zm-03 — 程序化「滚到最底」的否决权。
+  // live-follow 在 `useAgentSession` 里调用 `container.scrollTo({ top: scrollHeight })`；
+  // 用户已上滑时把它拦住，流式追加就不再抢走阅读位置。其它滚动目标（跳转到某条消息、
+  // prepend 锚定）不受影响。
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const originalScrollTo = container.scrollTo;
+    const guarded = ((...args: unknown[]) => {
+      const first = args[0] as ScrollToOptions | number | undefined;
+      const requestedTop = typeof first === "number" ? first : first?.top;
+      if (typeof requestedTop === "number" && !shouldAllowProgrammaticScroll({
+        requestedTop,
+        contentHeight: container.scrollHeight,
+        following: followingRef.current,
+      })) {
+        // 被否决的贴底不会产生 scroll 事件；清掉目标，别留给下一次用户滚动误判。
+        programmaticScrollTargetRef.current = null;
+        return;
+      }
+      return (originalScrollTo as (...inner: unknown[]) => void).apply(container, args);
+    }) as typeof container.scrollTo;
+    container.scrollTo = guarded;
+    return () => {
+      if (container.scrollTo === guarded) container.scrollTo = originalScrollTo;
+    };
+  }, [scrollContainerRef, session?.id]);
+
+  // fork:zm-03 — 视口尺寸变化（窗口 resize / 移动端键盘）会让内容重排：
+  // 跟随时贴回底部，不跟随时不动（浏览器原生 overflow-anchor 会保住阅读位置）。
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      layoutShiftUntilRef.current = Date.now() + 150;
+      if (!followingRef.current) return;
+      programmaticScrollTargetRef.current = container.scrollHeight;
+      scrollToBottom("auto");
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [scrollContainerRef, scrollToBottom, session?.id]);
   // Push session stats up to AppShell for the top bar.
   // Compare scalar fields to avoid loops from new object identity each render.
   const statsKey = sessionStats
@@ -971,12 +1447,244 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   }, [messages.length]);
 
   const isEmptyNew = isNew && messages.length === 0 && !streamState.isStreaming && !sessionBusy;
+  // fork:zc-17 — 零会话首屏引导：新会话页 + 已知项目为空（= 侧栏一个会话都没有）才出现。
+  const showEmptyStateGuide = isEmptyNew && (newSessionTargets?.projects.length ?? -1) === 0;
   // fork:zn-03 — report emptiness up (Zeno shows ThreadHeader only once the
   // timeline has activity). Effect, not render-time call: the parent setState
   // must not run during this render.
   useEffect(() => {
     onEmptyChange?.(isEmptyNew);
   }, [isEmptyNew, onEmptyChange]);
+
+  // ---------------------------------------------------------------------------
+  // fork:zc-10 — 计划快照广播 + 权限档位请求（右栏 PlanPane 的接线）。
+  //
+  // pi 不写计划文件，所以「当前计划」= 最后一条 assistant 消息里的编号列表；
+  // 流式中的消息也并进来，右栏能看着计划逐条长出来。签名相同就不重复广播。
+  // ---------------------------------------------------------------------------
+  // 已提交消息里的计划：只在 messages 变化时重算（大多数帧都命中缓存）。
+  // -------------------------------------------------------------------------
+  // fork:zc-02 — in-conversation find (⌘F).
+  //
+  // The chat renders a paged window, not a virtualized list, and only the newest
+  // ~50 messages are loaded at first; a DOM-only search would answer "no results"
+  // for exactly the old hits long sessions contain. The model index
+  // (lib/conversation-find.ts) is therefore the source of truth for counting and
+  // stepping; `loadOlderPage` is reused to page history in until the search cap is
+  // hit, and the DOM is only painted (ranges above) and scrolled.
+  // -------------------------------------------------------------------------
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findActiveKey, setFindActiveKey] = useState<string | null>(null);
+  const [findNavSeq, setFindNavSeq] = useState(0);
+  const [findFocusSeq, setFindFocusSeq] = useState(0);
+  const findOpenRef = useRef(findOpen);
+  findOpenRef.current = findOpen;
+  const findPreviousFocusRef = useRef<HTMLElement | null>(null);
+  const findLastScrollKeyRef = useRef("");
+
+  const findIndex = useMemo(() => buildSearchIndex(messages, entryIds), [messages, entryIds]);
+  const findResult = useMemo(() => findHits(findIndex, findQuery), [findIndex, findQuery]);
+  const findHitsList = findResult.hits;
+  const findActiveIndex = useMemo(() => {
+    if (findHitsList.length === 0) return -1;
+    if (findActiveKey) {
+      const index = findHitsList.findIndex((hit) => conversationFindHitKey(hit) === findActiveKey);
+      if (index >= 0) return index;
+    }
+    return 0;
+  }, [findActiveKey, findHitsList]);
+  const activeFindHit = findActiveIndex >= 0 ? findHitsList[findActiveIndex] ?? null : null;
+  // fork:zc-02 — 把当前命中转成既有的 `searchBlock`（会话搜索跳转用的同一条通路）：
+  // 它会让那个块展开（thinking 触发惰性加载、工具卡展开结果），正文进 DOM 后
+  // 高亮与滚动才有 Range 可用。命中里 194/197 落在 thinking / 工具输出上，
+  // 不走这一步就只是「计数在动、画面不动」。
+  const findSearchBlock = useMemo(() => {
+    if (!activeFindHit || activeFindHit.blockIndex < 0) return undefined;
+    const message = messages[entryIds.indexOf(activeFindHit.entryId)];
+    if (!message || !Array.isArray((message as { content?: unknown }).content)) return undefined;
+    return (message as { content: AssistantContentBlock[] }).content[activeFindHit.blockIndex];
+  }, [activeFindHit, entryIds, messages]);
+  // fork:zc-02 — 命中落在工具结果里时，要展开的是**那个具体的工具卡**：
+  // 分组（timeline）路径下 ToolCallBlock 自带一层折叠，只靠组级 reveal 不够。
+  const findRevealToolCallId = findSearchBlock?.type === "toolCall" ? findSearchBlock.toolCallId : undefined;
+  // 惰性加载的思考正文要等一次往返才进 DOM，所以命中后允许有限次重绘（上限 3 次）。
+  const [findPaintSeq, setFindPaintSeq] = useState(0);
+  const findPaintTriesRef = useRef(0);
+  // 换命中就重置重绘预算，否则步进几次后就没预算了。
+  useEffect(() => {
+    findPaintTriesRef.current = 0;
+  }, [activeFindHit]);
+  const findSearchIncomplete = findOpen
+    && findQuery.trim().length > 0
+    && hasEarlierMessages
+    && messages.length >= CONVERSATION_FIND_MAX_SEARCH_MESSAGES;
+
+  // Rebase the active key onto the resolved hit. When older pages prepend, the
+  // numeric index of the active hit shifts; pinning the key keeps the viewport on
+  // the same message instead of jumping to whatever is now hit #0.
+  const activeFindKey = conversationFindHitKey(activeFindHit);
+  useEffect(() => {
+    if (activeFindKey && activeFindKey !== findActiveKey) setFindActiveKey(activeFindKey);
+  }, [activeFindKey, findActiveKey]);
+
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    const previous = findPreviousFocusRef.current;
+    findPreviousFocusRef.current = null;
+    if (previous && previous.isConnected) {
+      // Defer past the unmount so focus does not land on a removed input.
+      window.requestAnimationFrame(() => previous.focus());
+    }
+  }, []);
+
+  const stepFind = useCallback((direction: -1 | 1) => {
+    if (findHitsList.length === 0) return;
+    const next = nextHitIndex(findActiveIndex, findHitsList.length, direction);
+    setFindNavSeq((sequence) => sequence + 1);
+    setFindActiveKey(conversationFindHitKey(findHitsList[next] ?? null));
+  }, [findActiveIndex, findHitsList]);
+
+  const handleFindQueryChange = useCallback((nextQuery: string) => {
+    setFindQuery(nextQuery);
+    setFindActiveKey(null);
+    setFindNavSeq((sequence) => sequence + 1);
+  }, []);
+
+  // Page older history in while a query is active so hits outside the initially
+  // loaded tail are found. Same loadOlderPage path (and in-flight guard) as the
+  // minimap; stops at the search cap or once every page is in.
+  useEffect(() => {
+    if (!findOpen || findQuery.trim().length === 0) return;
+    if (!hasEarlierMessages || loadingEarlier || loadingOlderRef.current) return;
+    if (messages.length >= CONVERSATION_FIND_MAX_SEARCH_MESSAGES) return;
+    if (findResult.truncated) return;
+    void loadOlderPage();
+  }, [
+    findOpen,
+    findQuery,
+    findResult.truncated,
+    hasEarlierMessages,
+    loadOlderPage,
+    loadingEarlier,
+    messages.length,
+  ]);
+
+  // fork:zc-02 — 命中落在**渲染窗口之外**时，把窗口撑到能容纳它。
+  //
+  // 这是必需的一步，不是优化：命中计数基于「已加载的全部消息」（messages），
+  // 而聊天列只渲染尾部 visibleCount 条（getVisibleRenderWindow 是**后缀窗口**：
+  // startIndex = total - visibleCount）。不撑窗口的话，跳到较早的命中时计数会动、
+  // 画面不动 —— 既没有高亮也滚不过去，看起来就是坏了。
+  //
+  // 上界故意用 messages.length 而不是 rendered.length：rendered 会把一轮里的过程
+  // 消息合并成一个单元（长度 ≤ messages.length），按 messages 算只会多渲染一点，
+  // 不会少渲染。宁可多渲染，不能漏。
+  useEffect(() => {
+    if (!findOpen || !activeFindHit) return;
+    const hitIndex = entryIds.indexOf(activeFindHit.entryId);
+    if (hitIndex < 0) return;
+    const needed = messages.length - hitIndex + CONVERSATION_FIND_REVEAL_MARGIN;
+    if (needed > visibleCount) setVisibleCount(Math.min(needed, messages.length));
+  }, [activeFindHit, entryIds, findOpen, messages.length, visibleCount]);
+
+  // Paint ranges and bring the active hit into view. `visibleCount` and `messages`
+  // are dependencies so this re-runs after a page prepend or window expansion has
+  // committed; the scroll key keeps streaming re-renders from yanking the viewport
+  // back to the same hit.
+  useEffect(() => {
+    if (!findOpen || findQuery.trim().length === 0) {
+      clearConversationFindHighlights();
+      return;
+    }
+    const root = scrollContainerRef.current;
+    if (!root) return;
+    const frame = window.requestAnimationFrame(() => {
+      const range = applyConversationFindHighlights(root, findQuery, activeFindHit);
+      // fork:zc-02 — 思考正文是惰性加载的（展开后才拉），所以第一次重绘可能还在等
+      // 那一次往返。拿不到 Range 就有限次重绘（上限 3），拿到就归零。
+      if (range) {
+        findPaintTriesRef.current = 0;
+      } else if (activeFindHit && findPaintTriesRef.current < 3) {
+        findPaintTriesRef.current += 1;
+        window.setTimeout(() => setFindPaintSeq((sequence) => sequence + 1), 220);
+      }
+      const scrollKey = [
+        findQuery,
+        activeFindHit?.entryId ?? "",
+        String(activeFindHit?.occurrence ?? -1),
+        String(findNavSeq),
+        String(findPaintSeq),
+      ].join("\u0000");
+      if (findLastScrollKeyRef.current === scrollKey) return;
+      findLastScrollKeyRef.current = scrollKey;
+      if (!activeFindHit) return;
+
+      const anchor = conversationFindAnchor(root, activeFindHit.entryId);
+      if (range && anchor) {
+        // Center the matched range instead of the message top: a hit can sit deep
+        // inside a long message, where top-aligning would leave it offscreen.
+        const rangeRect = range.getBoundingClientRect();
+        const anchorRect = anchor.getBoundingClientRect();
+        const offset = (root.clientHeight - rangeRect.height) / 2 - (rangeRect.top - anchorRect.top);
+        // Same trick as the session-search jump: cancel the pending prepend
+        // scroll-anchor restore so it cannot land on top of this jump.
+        prevScrollDistanceRef.current = null;
+        scrollToMessage(anchor, offset);
+        return;
+      }
+      // Grouped process messages have no `data-entry-id` anchor of their own; fall
+      // back to the closest anchored message so the turn is at least shown.
+      const fallback = anchor ?? nearestConversationFindAnchor(root, activeFindHit.entryId, entryIds);
+      if (fallback) {
+        prevScrollDistanceRef.current = null;
+        scrollToMessage(fallback);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    activeFindHit,
+    entryIds,
+    findNavSeq,
+    findOpen,
+    findPaintSeq,
+    findQuery,
+    findRevealToolCallId,
+    findSearchBlock,
+    messages,
+    scrollContainerRef,
+    scrollToMessage,
+    visibleCount,
+  ]);
+
+  // Clear the browser-wide highlight registry when this chat unmounts.
+  useEffect(() => () => clearConversationFindHighlights(), []);
+
+  // ⌘F / Ctrl+F opens (or refocuses) the bar. Events originating from a
+  // textarea/input/contenteditable are deliberately ignored so the composer's own
+  // semantics and every settings field keep native ⌘F.
+  useEffect(() => {
+    const onFindShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      if (event.key.toLowerCase() !== "f") return;
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return;
+      }
+      if (isEmptyNew || extensionDialog) return;
+      if (!findOpenRef.current) {
+        findPreviousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      }
+      event.preventDefault();
+      setFindOpen(true);
+      setFindFocusSeq((sequence) => sequence + 1);
+      setFindNavSeq((sequence) => sequence + 1);
+    };
+    window.addEventListener("keydown", onFindShortcut);
+    return () => window.removeEventListener("keydown", onFindShortcut);
+  }, [extensionDialog, isEmptyNew]);
 
   // fork:ui-todo — the session's task list, read back from the transcript (the
   // built-in `todo` tool stores each list in its tool result). Memoized: the scan
@@ -1118,7 +1826,8 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
   const composerProtrusion = isEmptyNew && newSessionTargets ? (
     <div className="fork-protrusion-bar" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, minWidth: 0 }}>
       <ProjectChip targets={newSessionTargets} />
-      {!newSessionTargets.error && <ComposerTipLine />}
+      {/* fork:zc-17 — 空状态引导出现时，它自带轮播提示行；这里收掉一份避免同一句说两遍。 */}
+      {!newSessionTargets.error && !showEmptyStateGuide && <ComposerTipLine />}
       {newSessionTargets.error && (
         <span role="alert" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: TEXT.xs, color: "var(--danger)" }}>
           {newSessionTargets.error}
@@ -1131,7 +1840,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     <ChatInput
       ref={chatInputRef}
       protrusion={composerProtrusion}
-      onSend={handleSend}
+      onSend={(message, images, contexts, question, sessionReferences) => {
+        // fork:zm-03 — 发消息是「回到最新」的用户意图：先恢复跟随，再走原路径。
+        followingRef.current = true;
+        sendFollowUntilRef.current = Date.now() + 600;
+        void handleSend(message, images, contexts, question, sessionReferences);
+      }}
       onAbort={handleAbort}
       onSteer={agentRunning ? handleSteer : undefined}
       onFollowUp={agentRunning ? handleFollowUp : undefined}
@@ -1287,6 +2001,20 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden"
         style={hasChatMinimap ? { gridColumn: "1", gridRow: "1" } : undefined}
       >
+        {/* fork:zc-02 — in-conversation find bar (⌘F); state/effects live above. */}
+        {findOpen && !isEmptyNew && (
+          <ConversationFindBar
+            query={findQuery}
+            onQueryChange={handleFindQueryChange}
+            hitCount={findHitsList.length}
+            activeIndex={findActiveIndex}
+            onNext={() => stepFind(1)}
+            onPrevious={() => stepFind(-1)}
+            onClose={closeFind}
+            truncated={findResult.truncated || findIndex.truncated || findSearchIncomplete}
+            focusSignal={findFocusSeq}
+          />
+        )}
         {extensionDialog && (
           <ExtensionDialog key={extensionDialog.id} request={extensionDialog} onRespond={respondToExtensionUi} />
         )}
@@ -1295,16 +2023,28 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
         )}
         {/* fork:ui-newhome — hero + starter cards for a brand new session. */}
         {isEmptyNew && (
-          <NewSessionHome
-            cwd={messageCwd ?? null}
-            isMobile={isMobile}
-            onInsertPrompt={(text) => chatInputRef?.current?.insertIfEmpty(text)}
-          />
+          // fork:zc-17 — 零会话首屏在 hero 之上再给三条起步路径；有项目/会话时
+          // EmptyStateGuide 自己渲染成 null，布局与改动前一致。
+          <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
+            <EmptyStateGuide
+              targets={newSessionTargets}
+              onOpenSession={onOpenSession}
+              visible={showEmptyStateGuide}
+            />
+            <NewSessionHome
+              cwd={messageCwd ?? null}
+              isMobile={isMobile}
+              onInsertPrompt={(text) => chatInputRef?.current?.insertIfEmpty(text)}
+            />
+          </div>
         )}
         {!isEmptyNew && <>
-        <div
-          ref={scrollContainerRef}
-          className={`min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]${showScrollToBottom ? " fork-scroll-fade-b" : ""}`}
+        {/* fork:zm-03 — 消息列改用 ScrollFadeViewport：顶部/底部渐隐遮罩由它按滚动位置
+            自己算（inline maskImage + rAF + ResizeObserver），同时把 DOM 节点回填给
+            scrollContainerRef，既有 scroll 监听与 minimap 引用保持不变。 */}
+        <ScrollFadeViewport
+          viewportRef={scrollContainerRef}
+          className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]"
           style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING_CSS}` }}>
@@ -1393,7 +2133,12 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                     onOpenFile={onOpenFile}
                     onOpenSession={onOpenSession}
                     entryId={entryIds[idx]}
-                    searchBlock={entryIds[idx] === pendingSearchScroll?.entryId ? searchBlock : undefined}
+                    searchBlock={entryIds[idx] === pendingSearchScroll?.entryId
+                      ? searchBlock
+                      // fork:zc-02 — 当前查找命中所在的块，走同一条 reveal 通路。
+                      : entryIds[idx] === activeFindHit?.entryId
+                        ? findSearchBlock
+                        : undefined}
                     onFork={sessionBusy || isNew ? undefined : handleFork}
       // fork:proma-04-rewind — 回退是破坏性操作，先弹一道警示确认（回退不可撤销）
       onRewind={sessionBusy || isNew ? undefined : (entryId) => {
@@ -1525,7 +2270,16 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                 const groupedProcessBlocks: ProcessContentBlock[] = [];
                 let processToolCount = 0;
                 let processRefIdx: number | undefined;
-                let revealProcess = false;
+                // fork:zc-02 — 在查找条开着且有查询词时，把每一轮的过程步骤都展开。
+                //
+                // 不只是「顺手」，而是这个功能能不能用的前提：命中计数建在**模型里的正文**
+                // （thinking / 工具输出都在内），而折叠着的步骤正文**不在 DOM 里**
+                // （MessageView 两段式挂载 + 惰性加载），于是高亮与滚动都拿不到 Range ——
+                // 表现就是计数在动、画面不动。ProcessGroup 的 `reveal` 会把该组每个 step
+                // 都置为打开（ProcessGroup.tsx 的 isStepOpen），正文随之进 DOM。
+                // 复用会话搜索跳转已有的那条通路，不另建一套 reveal 状态。
+                const revealForFind = findOpen && findQuery.trim().length > 0;
+                let revealProcess = revealForFind;
 
                 for (let processIdx = userIdx + 1; processIdx <= finalAssistantIdx; processIdx++) {
                   const processMessage = messages[processIdx];
@@ -1584,6 +2338,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                           onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
                           onOpenSession={onOpenSession}
                           reveal={revealProcess}
+                          revealToolCallId={findRevealToolCallId}
                         />
                       </ProcessDetailsGroup>
                     </div>,
@@ -1686,9 +2441,16 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               })()
             )}
 
-            {agentRunning && !hasStreamingContent && agentPhase && (
-              <div className="break-words py-2 text-xs text-text-muted" role="status" aria-live="polite">
-                <span>{phaseLabel(agentPhase, t)}</span>
+            {agentRunning && !hasStreamingContent && (
+              // fork:zm-07 — 垂直间距放在 PhaseRoll 自己身上，不放在这层 wrapper 上：
+              // PhaseRoll 在“没有相位可显”时返回 null（与改动前同一契约），
+              // 而 wrapper 带着 py-2 渲染就会在等待结束后留下一条看不见的空隙。
+              <div className="break-words text-xs text-text-muted">
+                <PhaseRoll
+                  text={agentPhase ? phaseLabel(agentPhase, t) : null}
+                  phaseKey={phaseKeyOf(agentPhase)}
+                  lineHeightEm={1.4}
+                />
               </div>
             )}
 
@@ -1714,7 +2476,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             <div ref={promptAnchorSpacerRef} aria-hidden="true" />
             </div>
           </div>
-        </div>
+        </ScrollFadeViewport>
         </>}
       </div>
 
@@ -1828,6 +2590,11 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
               className={`chat-scroll-to-bottom${showScrollToBottom && !pendingScrollRestore ? " is-visible" : ""}`}
               title={t("chat.scrollToLatest")}
               aria-label={t("chat.scrollToLatest")}
+              onPointerDown={() => { followingRef.current = true; }}
+              onKeyDown={(event) => {
+                // 键盘触发 click 前先恢复跟随（zm-03 的回底否决权需要它）。
+                if (event.key === "Enter" || event.key === " ") followingRef.current = true;
+              }}
               onClick={() => scrollToBottom("smooth")}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -2034,6 +2801,90 @@ function renderDialogTitle(title: string): ReactNode {
   });
 }
 
+/** fork:zm-04 — 剩余秒数（组件外，避免在 render 里直接调用 Date.now）。 */
+function remainingSecondsUntil(expiresAt: number): number {
+  return Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+}
+
+/**
+ * fork:zm-04 — 倒计时秒数（1 Hz 的 **DOM 写入**，不触发 React 渲染）。
+ *
+ * 原来 `now` state 挂在 ExtensionDialog 上，每秒重渲染整张卡（含 MarkdownBody
+ * 与选项列表）。现在只在这里写一个 text node；父组件在倒计时期间渲染次数为 0。
+ */
+function ExtensionCountdownText({ expiresAt }: { expiresAt: number }) {
+  const { t } = useI18n();
+  const ref = useRef<HTMLSpanElement | null>(null);
+  const initialSeconds = remainingSecondsUntil(expiresAt);
+
+  useEffect(() => {
+    const write = () => {
+      const node = ref.current;
+      if (!node) return;
+      node.textContent = t("chat.extensionExpiresIn", { seconds: remainingSecondsUntil(expiresAt) });
+    };
+    write();
+    const timer = setInterval(write, 1000);
+    return () => clearInterval(timer);
+  }, [expiresAt, t]);
+
+  return (
+    <span ref={ref} style={{ fontSize: TEXT.xs, color: "var(--text-dim)", whiteSpace: "nowrap", flexShrink: 0 }}>
+      {t("chat.extensionExpiresIn", { seconds: initialSeconds })}
+    </span>
+  );
+}
+
+/** fork:zm-04 — 进度条高度（px）。 */
+const COUNTDOWN_BAR_HEIGHT_PX = 2;
+
+/**
+ * fork:zm-04 — 审批倒计时进度条（WAAPI，零每秒渲染）。
+ *
+ * `scaleX(1) → scaleX(0)` 的线性动画，duration = 剩余毫秒，`fill: forwards`。
+ * 只在显式 `no-preference` 时播放；reduced-motion / SSR / jsdom 直接隐藏
+ * （静态满格条会让人误以为时间还在多，不如只留秒数文本）。
+ */
+function ExtensionCountdownBar({ expiresAt }: { expiresAt: number }) {
+  const motion = useMotionPreference();
+  const ref = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const remainingMs = expiresAt - Date.now();
+    if (motion !== "no-preference" || remainingMs <= 0 || typeof node.animate !== "function") {
+      node.style.opacity = "0";
+      return;
+    }
+    const animation = node.animate(
+      [{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }],
+      { duration: remainingMs, easing: "linear", fill: "forwards" },
+    );
+    return () => animation.cancel();
+  }, [expiresAt, motion]);
+
+  return (
+    <span
+      ref={ref}
+      aria-hidden="true"
+      data-fork-countdown-bar
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        display: "block",
+        height: COUNTDOWN_BAR_HEIGHT_PX,
+        background: "var(--accent)",
+        opacity: 0.55,
+        transformOrigin: "left center",
+        pointerEvents: "none",
+      }}
+    />
+  );
+}
+
 function ExtensionDialog({
   request,
   onRespond,
@@ -2044,26 +2895,9 @@ function ExtensionDialog({
   const { t } = useI18n();
   const [value, setValue] = useState(request.method === "editor" ? request.prefill ?? "" : "");
   const [collapsed, setCollapsed] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
   const focusFirstOption = useCallback((element: HTMLDivElement | null) => element?.focus(), []);
   const summary = getExtensionDialogSummary(request);
   const { head: titleHead, rest: titleRest } = splitDialogTitle(request.title);
-  const remainingSeconds = request.expiresAt === undefined
-    ? null
-    : Math.max(0, Math.ceil((request.expiresAt - now) / 1000));
-
-  useEffect(() => {
-    if (request.expiresAt === undefined) return;
-    // The server closes expired requests via extension_ui_closed.
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [request.expiresAt]);
-
-  const countdown = remainingSeconds !== null && (
-    <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", whiteSpace: "nowrap", flexShrink: 0 }}>
-      {t("chat.extensionExpiresIn", { seconds: remainingSeconds })}
-    </span>
-  );
 
   const submitValue = () => {
     if (request.method === "confirm") {
@@ -2101,6 +2935,8 @@ function ExtensionDialog({
           aria-expanded={false}
           style={{
             pointerEvents: "auto",
+            position: "relative",
+            overflow: "hidden",
             display: "flex",
             alignItems: "center",
             gap: 10,
@@ -2127,10 +2963,12 @@ function ExtensionDialog({
               {summary}
             </span>
           )}
-          {countdown}
+          {request.expiresAt !== undefined && <ExtensionCountdownText expiresAt={request.expiresAt} />}
           <span style={{ fontSize: TEXT.sm, color: "var(--text-muted)", flexShrink: 0 }}>
             {t("chat.extensionExpand")}
           </span>
+          {/* fork:zm-04 — WAAPI 进度条；倒计时不产生任何 React 渲染。 */}
+          {request.expiresAt !== undefined && <ExtensionCountdownBar expiresAt={request.expiresAt} />}
         </button>
       ) : (
       <div
@@ -2140,6 +2978,7 @@ function ExtensionDialog({
         className="anim-dialog"
         style={{
           pointerEvents: "auto",
+          position: "relative",
           width: "min(560px, 100%)",
           maxHeight: "min(760px, 100%)",
           display: "flex",
@@ -2156,7 +2995,7 @@ function ExtensionDialog({
             <div style={{ color: "var(--text)", fontSize: TEXT.lg, fontWeight: 650, lineHeight: 1.4, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{titleHead}</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 3, color: "var(--text-dim)", fontSize: TEXT.xs, fontFamily: "var(--font-mono)" }}>
               <span>{t("chat.extensionRequest")}</span>
-              {countdown}
+              {request.expiresAt !== undefined && <ExtensionCountdownText expiresAt={request.expiresAt} />}
             </div>
           </div>
           <button
@@ -2340,6 +3179,8 @@ function ExtensionDialog({
             </button>
           ) : null}
         </div>
+        {/* fork:zm-04 — 卡片底边的倒计时进度条。 */}
+        {request.expiresAt !== undefined && <ExtensionCountdownBar expiresAt={request.expiresAt} />}
       </div>
       )}
     </div>

@@ -12,12 +12,24 @@
  * the 1st *and* on every Monday, which surprises people until they read it here).
  */
 
+// fork:zc-19 — 第几个周几（Quartz/DOS 的 `D#N` 记法）。人类频率编辑器要能表达
+// 「每月第二个周三」，而 5 字段 cron 里只有这一个写法；解析器必须认识它，
+// 否则编译出的表达式会被自己的校验拒掉。
+export interface CronWeekdayOrdinal {
+  /** 0 = Sunday … 6 = Saturday。 */
+  weekday: number;
+  /** 当月第几次（1–5）。 */
+  nth: number;
+}
+
 export interface CronExpression {
   minutes: number[];
   hours: number[];
   daysOfMonth: number[];
   months: number[];
   daysOfWeek: number[];
+  /** `D#N` 形式的星期约束；与 `daysOfWeek` 是并集关系。 */
+  dayOfWeekOrdinals: CronWeekdayOrdinal[];
   /** Whether the day fields were `*` — needed for the Vixie OR rule. */
   dayOfMonthRestricted: boolean;
   dayOfWeekRestricted: boolean;
@@ -33,13 +45,35 @@ const FIELD_LIMITS: Array<{ name: string; min: number; max: number }> = [
   { name: "day of week", min: 0, max: 7 },
 ];
 
-function parseField(raw: string, index: number): number[] | string {
+interface ParsedField {
+  values: number[];
+  // fork:zc-19 — `D#N` tokens are kept separate so the matcher can require the
+  // Nth occurrence of that weekday inside the month.
+  ordinals?: CronWeekdayOrdinal[];
+}
+
+function parseField(raw: string, index: number): ParsedField | string {
   const { name, min, max } = FIELD_LIMITS[index];
   const values = new Set<number>();
+  const ordinals: CronWeekdayOrdinal[] = [];
 
   for (const partRaw of raw.split(",")) {
     const part = partRaw.trim();
     if (!part) continue;
+
+    // fork:zc-19 — `D#N` is only meaningful for day-of-week.
+    if (index === 4 && part.includes("#")) {
+      const [dayText, nthText, ...rest] = part.split("#");
+      if (rest.length > 0 || !/^\d+$/.test(dayText) || !/^\d+$/.test(nthText)) {
+        return `invalid weekday occurrence in ${name}: "${part}"`;
+      }
+      const day = Number(dayText);
+      const nth = Number(nthText);
+      if (day < 0 || day > 7) return `${name} must be between 0 and 6: "${part}"`;
+      if (nth < 1 || nth > 5) return `${name} occurrence must be between 1 and 5: "${part}"`;
+      ordinals.push({ weekday: day % 7, nth });
+      continue;
+    }
 
     let step = 1;
     let body = part;
@@ -80,8 +114,11 @@ function parseField(raw: string, index: number): number[] | string {
     }
   }
 
-  if (values.size === 0) return `empty ${name}`;
-  return [...values].sort((a, b) => a - b);
+  if (values.size === 0 && ordinals.length === 0) return `empty ${name}`;
+  return {
+    values: [...values].sort((a, b) => a - b),
+    ...(ordinals.length > 0 ? { ordinals } : {}),
+  };
 }
 
 /** Parse, or return the reason it cannot be used (shown verbatim in the UI). */
@@ -89,7 +126,7 @@ export function parseCronExpression(expression: string): CronExpression | string
   const fields = expression.trim().split(/\s+/).filter(Boolean);
   if (fields.length !== 5) return "An expression needs exactly 5 fields: minute hour day month weekday";
 
-  const parsed: number[][] = [];
+  const parsed: ParsedField[] = [];
   for (let index = 0; index < 5; index += 1) {
     const result = parseField(fields[index]!, index);
     if (typeof result === "string") return result;
@@ -97,11 +134,12 @@ export function parseCronExpression(expression: string): CronExpression | string
   }
 
   return {
-    minutes: parsed[0]!,
-    hours: parsed[1]!,
-    daysOfMonth: parsed[2]!,
-    months: parsed[3]!,
-    daysOfWeek: parsed[4]!,
+    minutes: parsed[0]!.values,
+    hours: parsed[1]!.values,
+    daysOfMonth: parsed[2]!.values,
+    months: parsed[3]!.values,
+    daysOfWeek: parsed[4]!.values,
+    dayOfWeekOrdinals: parsed[4]!.ordinals ?? [],
     dayOfMonthRestricted: fields[2] !== "*",
     dayOfWeekRestricted: fields[4] !== "*",
     source: fields.join(" "),
@@ -112,11 +150,20 @@ export function isCronExpression(value: unknown): value is CronExpression {
   return Boolean(value) && typeof value === "object" && Array.isArray((value as CronExpression).minutes);
 }
 
+// fork:zc-19 — `D#N` matches when the date is the Nth occurrence of that weekday
+// in the month: days 1–7 are the 1st, 8–14 the 2nd, ….
+export function weekdayOrdinalOfMonth(day: number): number {
+  return Math.floor((day - 1) / 7) + 1;
+}
+
 /** Does a wall-clock date match the day fields? */
 export function cronMatchesDay(expression: CronExpression, year: number, month: number, day: number, weekday: number): boolean {
   if (!expression.months.includes(month)) return false;
   const dayOfMonthHit = expression.daysOfMonth.includes(day);
-  const dayOfWeekHit = expression.daysOfWeek.includes(weekday);
+  const ordinalHit = (expression.dayOfWeekOrdinals ?? []).some(
+    (entry) => entry.weekday === weekday && entry.nth === weekdayOrdinalOfMonth(day),
+  );
+  const dayOfWeekHit = expression.daysOfWeek.includes(weekday) || ordinalHit;
   if (expression.dayOfMonthRestricted && expression.dayOfWeekRestricted) return dayOfMonthHit || dayOfWeekHit;
   if (expression.dayOfMonthRestricted) return dayOfMonthHit;
   if (expression.dayOfWeekRestricted) return dayOfWeekHit;

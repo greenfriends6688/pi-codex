@@ -22,6 +22,8 @@
  */
 
 import { buildAtInsertText } from "./file-fuzzy";
+// fork:zc-08 — 复用服务端查看器的同一套 MIME/扩展名判定，避免两处漂移。
+import { documentPreviewKind, getAudioMime, getImageMime, getVideoMime, isEditableTextPath } from "./file-types";
 
 /** 与上传路由的每文件上限一致。 */
 export const MAX_ATTACHED_FILE_BYTES = 25 * 1024 * 1024;
@@ -171,4 +173,120 @@ export function attachmentNotice(outcome: AttachmentOutcome): AttachmentNotice {
   if ((outcome.skipped?.length ?? 0) > 0) return "skipped";
   if (outcome.referenced.length > 0 || (outcome.images ?? 0) > 0) return "references";
   return "none";
+}
+
+/* -------------------------------------------------------------------------- */
+/* fork:zc-08 — 附件 chip 的预览类型判定                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * composer 里一个附件 chip 点开后该用哪种预览。
+ * `none` 表示没有内建预览（二进制/未知类型）——UI 显示降级文案，不尝试渲染乱码。
+ */
+export type AttachmentPreviewKind = "image" | "pdf" | "docx" | "audio" | "video" | "text" | "none";
+
+/** 文本附件只预览前 N 行（大日志/大 csv 不能拖死弹窗）。 */
+export const TEXT_PREVIEW_MAX_LINES = 200;
+
+export interface AttachmentPreviewFacts {
+  name: string;
+  /** `File.type` 或服务端 MIME；浏览器对不少类型给空串，所以要能回退到扩展名。 */
+  mimeType?: string;
+}
+
+/** 已知的「文本型」application/* MIME（扩展名判定兜底之前先用 MIME 判）。 */
+const TEXT_MIME_TYPES = new Set([
+  "application/json",
+  "application/ld+json",
+  "application/x-ndjson",
+  "application/xml",
+  "application/xhtml+xml",
+  "application/x-yaml",
+  "application/yaml",
+  "application/toml",
+  "application/javascript",
+  "application/x-javascript",
+  "application/typescript",
+  "application/sql",
+  "application/graphql",
+  "application/x-sh",
+  "application/x-httpd-php",
+  "application/rtf",
+]);
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+/** 明确二进制的泛用 MIME；配合「无扩展名」时不能因为 `isEditableTextPath` 的宽容而当作文本。 */
+const BINARY_MIME_TYPES = new Set([
+  "application/octet-stream",
+  "application/zip",
+  "application/gzip",
+  "application/x-7z-compressed",
+  "application/x-rar-compressed",
+  "application/x-tar",
+  "application/wasm",
+  "application/x-msdownload",
+]);
+
+/**
+ * `isEditableTextPath` 没有列入的二进制/容器格式（设计稿、相机 RAW、旧 Office）。
+ * 不把它们当文本预览：芯片显示「暂不支持」比弹出一屏乱码诚实。
+ */
+const BINARY_EXTENSIONS = new Set([
+  "psd", "ai", "sketch", "fig", "xd", "indd", "eps",
+  "heic", "heif", "raw", "cr2", "nef", "arw", "dng",
+  "doc", "xls", "ppt", "xlsx", "pptx", "numbers", "pages", "key",
+]);
+
+/**
+ * 判定顺序：MIME 优先（浏览器知道自己拖进来的是什么），空/未知时回退到扩展名
+ * （与 `lib/file-types.ts` 完全一致，服务端 `?type=read` 会照这个 MIME 流字节）。
+ *
+ * 注意边界：
+ * - `image/svg+xml` 按图片处理（`<img>` 能渲染，查看器也把它当图片读）；
+ * - 超时的图片仍可能因 `/api/files` 的 10MB 限制而报错，这是预览器的运行时错误；
+ * - 未知扩展名走 `isEditableTextPath` 的「当作 UTF-8 文本」约定，与服务端查看器一致。
+ */
+export function attachmentPreviewKind(facts: AttachmentPreviewFacts): AttachmentPreviewKind {
+  const mime = (facts.mimeType ?? "").split(";")[0].trim().toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime === "application/pdf") return "pdf";
+  if (mime === DOCX_MIME) return "docx";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("text/") || TEXT_MIME_TYPES.has(mime) || mime.endsWith("+json") || mime.endsWith("+xml")) {
+    return "text";
+  }
+  // 明确二进制但没有扩展名（浏览器把无类型拖拽物报成 octet-stream）：不要猜成文本。
+  const base = (facts.name ?? "").replace(/\\/g, "/").split("/").pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  const hasExtension = dot > 0 && dot < base.length - 1;
+  if (BINARY_MIME_TYPES.has(mime) && !hasExtension) return "none";
+
+  const name = facts.name ?? "";
+  if (hasExtension && BINARY_EXTENSIONS.has(base.slice(dot + 1).toLowerCase())) return "none";
+  if (getImageMime(name)) return "image";
+  const document = documentPreviewKind(name);
+  if (document) return document;
+  if (getAudioMime(name)) return "audio";
+  if (getVideoMime(name)) return "video";
+  if (isEditableTextPath(name)) return "text";
+  return "none";
+}
+
+export interface PreviewTextSlice {
+  lines: string[];
+  truncated: boolean;
+}
+
+/**
+ * 取文本预览的前 N 行（统一 CRLF/CR，且不把结尾换行算成额外一行）。
+ * `truncated` 供 UI 显示「仅显示前 N 行」，避免用户以为文件就这么短。
+ */
+export function firstPreviewLines(text: string, maxLines: number = TEXT_PREVIEW_MAX_LINES): PreviewTextSlice {
+  const normalized = text.replace(/\r\n?/g, "\n");
+  const all = normalized.split("\n");
+  if (all.length > 1 && all[all.length - 1] === "") all.pop();
+  const lines = all.slice(0, Math.max(0, maxLines));
+  return { lines, truncated: all.length > lines.length };
 }

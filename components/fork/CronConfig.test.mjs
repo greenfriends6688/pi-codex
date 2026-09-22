@@ -28,3 +28,35 @@ test("a failed model list is reported instead of silently empty", () => {
   assert.match(source, /\{modelsError && \(/);
   assert.match(source, /t\("cron\.modelListError", \{ error: modelsError \}\)/);
 });
+
+/*
+ * fork:zc-19 — the human-readable frequency editor must compile to the existing
+ * 5-field cron (lib/cron-rule.ts); the raw expression remains an escape hatch.
+ */
+test("the frequency editor compiles readable rules to cron", () => {
+  assert.match(source, /import \{ compileCronRule, parseClockTime, type CronRule \} from "@\/lib\/cron-rule"/);
+  assert.match(source, /const scheduleForCreate = \(\): CronSchedule \| null => \{/);
+  assert.match(source, /const result = compiledResult;/);
+  assert.match(source, /kind: "cron",\s*\n\s*times: \[\],\s*\n\s*expression: result\.expression,/);
+  assert.match(source, /t\("cron\.frequency"\)/);
+  assert.match(source, /t\("cron\.freq\.monthly"\)/);
+  assert.match(source, /t\("cron\.monthlyByWeekday"\)/);
+  assert.match(source, /t\("cron\.endDate"\)/);
+  assert.match(source, /t\("cron\.compiled"\)/);
+});
+
+/*
+ * fork:zc-14 — the per-task history region: 8 rows per page, start/end, status,
+ * output excerpt, open-session and delete-a-row.
+ */
+test("the run history region pages 8 rows and links to the run session", () => {
+  assert.match(source, /const HISTORY_PAGE_SIZE = 8;/);
+  assert.match(source, /function TaskHistory\(\{ task, onOpenSession, onDeleteRun \}/);
+  assert.match(source, /runs\.slice\(\(currentPage - 1\) \* HISTORY_PAGE_SIZE, currentPage \* HISTORY_PAGE_SIZE\)/);
+  assert.match(source, /t\("cron\.history\.pageOf", \{ current: currentPage, total: totalPages \}\)/);
+  assert.match(source, /t\("cron\.openRun"\)/);
+  assert.match(source, /t\("cron\.history\.deleteRun"\)/);
+  assert.match(source, /run\.outputExcerpt \?\? ""/);
+  assert.match(source, /run\.finishedAt \? new Date\(run\.finishedAt\) : null/);
+  assert.match(source, /\/api\/cron\?id=\$\{encodeURIComponent\(taskId\)\}&runId=/);
+});

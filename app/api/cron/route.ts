@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import {
+  deleteCronRun,
   deleteCronTask,
   findCronTask,
   listCronTasks,
@@ -9,7 +10,7 @@ import {
   upsertCronTask,
   type CronTask,
 } from "@/lib/cron-store";
-import { runCronTask } from "@/lib/cron-runner";
+import { launchCronTask } from "@/lib/cron-runner";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,8 @@ export const dynamic = "force-dynamic";
 //
 // The scheduler itself lives in the server process (lib/cron-runner.ts); this route
 // only owns the file. "Run now" deliberately goes through the same `runCronTask`
-// so a manual run and a scheduled run cannot drift apart.
+// path as a scheduled run (launched in the background, not awaited here), so a
+// manual run and a scheduled run cannot drift apart. fork:zc-19
 
 function guard(req: Request): NextResponse | null {
   if (!isApiRequestAllowed(req)) {
@@ -70,8 +72,10 @@ export async function PATCH(req: Request) {
   if (!existing) return NextResponse.json({ error: "Task not found" }, { status: 404 });
 
   if (body.action === "run") {
-    const result = await runCronTask(existing);
-    return NextResponse.json(result, { status: result.status === "ok" ? 200 : 500 });
+    // fork:zc-19 — launching (not awaiting) keeps the request short; the run's
+    // outcome is recorded in the task history. A concurrent run is a 409.
+    const result = launchCronTask(existing);
+    return NextResponse.json(result, { status: result.status === "duplicate" ? 409 : 200 });
   }
 
   // fork:fix-cron-lifecycle — 用户显式重新启用时视为一次"重启"：
@@ -83,6 +87,9 @@ export async function PATCH(req: Request) {
     ? {
         pausedReason: undefined,
         consecutiveFailures: 0,
+        // fork:zc-19 — re-enabling cancels any pending backoff retry as well.
+        retryAt: undefined,
+        retryAttempt: undefined,
         ...(existing.completedAt ? { completedAt: undefined } : {}),
         ...(existing.completedAt ? { runCount: 0 } : {}),
       }
@@ -109,7 +116,16 @@ export async function DELETE(req: Request) {
   if (!isApiRequestAllowed(req)) {
     return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
   }
-  const id = new URL(req.url).searchParams.get("id") ?? "";
+  const params = new URL(req.url).searchParams;
+  // fork:zc-14 — `runId` deletes one run row; without it the whole task goes.
+  const runId = params.get("runId") ?? "";
+  if (runId) {
+    const taskId = params.get("id") ?? "";
+    if (!taskId) return NextResponse.json({ error: "id is required" }, { status: 400 });
+    if (!deleteCronRun(taskId, runId)) return NextResponse.json({ error: "Run not found" }, { status: 404 });
+    return NextResponse.json({ success: true });
+  }
+  const id = params.get("id") ?? "";
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
   if (!deleteCronTask(id)) return NextResponse.json({ error: "Task not found" }, { status: 404 });
   return NextResponse.json({ success: true });

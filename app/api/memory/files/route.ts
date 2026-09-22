@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { allowFileRoot } from "@/lib/file-access";
+import { isExistingPathWithinRoots, isPathWithinRoots } from "@/lib/path-security";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
 import { writePrivateFileAtomicSync } from "@/lib/atomic-file";
 import { MEMORY_DIR_NAME, PI_MEMORY_DAILY_DIR, PI_MEMORY_FILES, PI_MEMORY_WRITABLE } from "@/lib/pi-memory";
+// fork:zc-20 — read-only catalog scan for the memory panel's directory view.
+import {
+  normalizeMemoryRelativePath,
+  scanMemoryCatalog,
+  type MemoryCatalogIo,
+} from "@/lib/memory-catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +24,7 @@ export const dynamic = "force-dynamic";
 // yet, which is the state a new install is in and the reason the panel used to look
 // empty.
 //
-//   GET  /api/memory/files                 -> { dir, files: MemoryFileInfo[] }
+//   GET  /api/memory/files                 -> { dir, files, catalog }
 //   GET  /api/memory/files?path=MEMORY.md  -> { content }
 //   PUT  /api/memory/files { path, content } -> write one whitelisted file
 //
@@ -85,6 +92,64 @@ function listMemoryFiles(root: string): MemoryFileInfo[] {
   });
 }
 
+/**
+ * fork:zc-20 — node adapter for the pure catalog scanner. `realpathSync` on both
+ * the root and each candidate keeps a symlink inside `memory/` from pulling in
+ * files outside it; unreadable paths return null and are skipped.
+ */
+function memoryCatalogIo(root: string): MemoryCatalogIo {
+  const realRoot = (() => {
+    try {
+      return realpathSync(root);
+    } catch {
+      return null;
+    }
+  })();
+
+  const resolveWithin = (relativePath: string): string | null => {
+    if (!realRoot) return null;
+    const absolute = relativePath ? join(root, ...relativePath.split("/")) : root;
+    try {
+      const real = realpathSync(absolute);
+      return isPathWithinRoots(real, new Set([realRoot])) ? absolute : null;
+    } catch {
+      return null;
+    }
+  };
+
+  return {
+    list(relativeDir) {
+      const absolute = resolveWithin(relativeDir);
+      if (!absolute) return null;
+      try {
+        return readdirSync(absolute);
+      } catch {
+        return null;
+      }
+    },
+    isDirectory(relativeDir) {
+      const absolute = resolveWithin(relativeDir);
+      if (!absolute) return false;
+      try {
+        return statSync(absolute).isDirectory();
+      } catch {
+        return false;
+      }
+    },
+    statFile(relativePath) {
+      const absolute = resolveWithin(relativePath);
+      if (!absolute) return null;
+      try {
+        const stats = statSync(absolute);
+        if (!stats.isFile()) return null;
+        return { size: stats.size, mtimeMs: stats.mtimeMs, mtime: stats.mtime.toISOString() };
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
 export async function GET(req: Request) {
   if (!isApiRequestAllowed(req)) {
     return NextResponse.json({ error: "Untrusted API request" }, { status: 403 });
@@ -94,9 +159,24 @@ export async function GET(req: Request) {
   const requested = new URL(req.url).searchParams.get("path");
 
   if (requested) {
-    const absolute = memoryFilePath(requested);
-    if (!absolute) return NextResponse.json({ error: "Path is outside the memory directory" }, { status: 403 });
-    if (!existsSync(absolute)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    // fork:zc-20 — the old whitelist could only read the three writable names,
+    // so recovery/ snapshots appeared in the directory listing but could not be
+    // previewed. Reads now accept any `.md` inside the memory root; the write
+    // whitelist below is untouched on purpose (storage layout stays pi-memory's).
+    const relativePath = normalizeMemoryRelativePath(requested);
+    const catalogPath = relativePath ? join(root, ...relativePath.split("/")) : null;
+    // fork:zc-20 — 先做「词汇层包含 + 存在性」两步，才能把状态码说对：
+    // `isExistingPathWithinRoots` 自身就要求路径存在，把它当唯一闸口会让一个**不存在的**
+    // 文件也报 403「在记忆目录之外」（下面那句 404 就成了死代码）。
+    // 顺序：不在根内 → 403；在根内但不存在 → 404；存在则再用真实路径验一次符号链接逃逸。
+    if (!catalogPath || !isPathWithinRoots(catalogPath, new Set([root]))) {
+      return NextResponse.json({ error: "Path is outside the memory directory" }, { status: 403 });
+    }
+    if (!existsSync(catalogPath)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    if (!isExistingPathWithinRoots(catalogPath, new Set([root]))) {
+      return NextResponse.json({ error: "Path is outside the memory directory" }, { status: 403 });
+    }
+    const absolute = catalogPath;
     // fork:fix-memory-ui — 面板要拿 mtime 作为冲突基线：agent 和用户可能同时改这个文件，
     // 保存时带上读时的 mtime，服务器不一致就拒（409），不能盲写覆盖。
     return NextResponse.json({ content: readFileSync(absolute, "utf8"), mtime: statSync(absolute).mtime.toISOString() });
@@ -105,7 +185,14 @@ export async function GET(req: Request) {
   // Let the main file viewer open these paths (they live outside every session cwd,
   // so without this the viewer would refuse them as unprotected).
   allowFileRoot(root);
-  return NextResponse.json({ dir: root, files: listMemoryFiles(root) });
+  // fork:zc-20 — `files` keeps the old shape (known files, including the ones
+  // that do not exist yet, so the panel can still create them); `catalog` is the
+  // read-only directory view over root + daily/ + recovery/.
+  return NextResponse.json({
+    dir: root,
+    files: listMemoryFiles(root),
+    catalog: scanMemoryCatalog(memoryCatalogIo(root)),
+  });
 }
 
 export async function PUT(req: Request) {

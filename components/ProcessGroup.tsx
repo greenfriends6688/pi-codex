@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { MarkdownBody } from "./MarkdownBody";
 import { ToolCallBlock, getMessageImages, getMessageText, imageSource } from "./MessageView";
 import { ImagePreview } from "./ImagePreview";
@@ -28,6 +28,11 @@ import {
 } from "@/lib/process-step-expansion";
 import { isApplyPatchToolName, isEditToolName, isWriteToolName } from "@/lib/tool-names";
 import { extractApplyPatchPaths, getApplyPatchInputText } from "@/lib/apply-patch";
+import {
+  STREAM_ENTER_CLEANUP_MS,
+  streamEnterDelay,
+  streamEnterMemory,
+} from "@/lib/stream-enter-memory";
 
 /**
  * Grouped "process" renderer.
@@ -56,6 +61,13 @@ type ReasonBlock = Extract<ProcessContentBlock, { type: "thinking" }>;
 
 interface Step {
   id: string;
+  /**
+   * fork:zm-02 — stable per-turn ordinal used for the stagger delay. Assigned
+   * when the step is first pushed (steps are append-only within a turn), so it
+   * never shifts when older messages are prepended to the render window — which
+   * is exactly why the delay must not read the render array's index.
+   */
+  sequence: number;
   /** The verb shown first: "Edit", "Run", "Thinking", a tool name on failure. */
   label: string;
   icon: IconName;
@@ -219,7 +231,7 @@ function toolDetail(block: ToolBlock, tone: StepTone | undefined): string | unde
 }
 
 /** Build one step from a run of tool calls that share a tone. */
-function toolStep(blocks: ToolBlock[], t: (key: string) => string): Step {
+function toolStep(blocks: ToolBlock[], t: (key: string) => string, sequence: number): Step {
   const first = blocks[0];
   const id = blocks.length === 1 ? first.id : `group:${first.id}`;
   const failed = blocks.some((b) => b.status === "error");
@@ -245,6 +257,7 @@ function toolStep(blocks: ToolBlock[], t: (key: string) => string): Step {
 
   return {
     id,
+    sequence,
     label: tone ? t(TONE_LABEL_KEY[tone]) : first.toolName,
     icon: failed ? "warning" : resolvedIcon,
     tone,
@@ -271,7 +284,7 @@ export function buildProcessSteps(blocks: ProcessContentBlock[], t: (key: string
 
   const flush = () => {
     if (buffer.length === 0) return;
-    steps.push(toolStep(buffer, t));
+    steps.push(toolStep(buffer, t, steps.length));
     buffer = [];
   };
 
@@ -304,6 +317,7 @@ export function buildProcessSteps(blocks: ProcessContentBlock[], t: (key: string
       }
       steps.push({
         id: block.id,
+        sequence: steps.length,
         label: t(block.type === "thinking" ? "process.stepReasoning" : "process.stepNote"),
         icon: block.type === "thinking" ? "brain" : "checklist",
         targets: [],
@@ -321,6 +335,7 @@ export function buildProcessSteps(blocks: ProcessContentBlock[], t: (key: string
 
     steps.push({
       id: block.id,
+      sequence: steps.length,
       label: t(block.type === "image" ? "process.stepImage" : "process.stepCustom"),
       icon: block.type === "image" ? "image" : "toolbox",
       targets: [],
@@ -546,10 +561,13 @@ function ToolBody({
   blocks,
   toolResults,
   onOpenSession,
+  revealToolCallId,
 }: {
   blocks: ProcessContentBlock[];
   toolResults?: Map<string, ToolResultMessage>;
   onOpenSession?: (sessionId: string) => void;
+  /** fork:zc-02 — 被查找/搜索命中的那个工具调用，强制展开它的结果正文。 */
+  revealToolCallId?: string;
 }) {
   return (
     <div className="process-step-body process-step-tools">
@@ -579,6 +597,10 @@ function ToolBody({
             result={block.result ?? toolResults?.get(block.toolCallId)}
             duration={block.duration}
             onOpenSession={onOpenSession}
+            // fork:zc-02 — 分组（timeline）路径下 ToolCallBlock 自带一层折叠，
+            // ProcessGroup 的 reveal 只打开外层 step；命中在工具结果里时必须让这个
+            // 具体的卡也展开，否则结果正文根本不在 DOM 里（高亮拿不到 Range）。
+            reveal={Boolean(revealToolCallId) && block.toolCallId === revealToolCallId}
           />
         );
       })}
@@ -590,10 +612,12 @@ function StepBody({
   step,
   toolResults,
   onOpenSession,
+  revealToolCallId,
 }: {
   step: Step;
   toolResults?: Map<string, ToolResultMessage>;
   onOpenSession?: (sessionId: string) => void;
+  revealToolCallId?: string;
 }) {
   if (step.blocks.length === 0) return null;
   const first = step.blocks[0];
@@ -615,7 +639,103 @@ function StepBody({
       </div>
     );
   }
-  return <ToolBody blocks={step.blocks} toolResults={toolResults} onOpenSession={onOpenSession} />;
+  return <ToolBody blocks={step.blocks} toolResults={toolResults} onOpenSession={onOpenSession} revealToolCallId={revealToolCallId} />;
+}
+
+// --- Streaming entrance (fork:zm-02) ------------------------------------------
+
+/**
+ * fork:zm-02 — true only when the user explicitly asked for motion.
+ *
+ * SSR and jsdom never see `matchMedia`, so the entrance stays inert there and
+ * unit tests never assert mid-animation attributes. The CSS block carries its
+ * own `prefers-reduced-motion` branch as the second line of defence.
+ */
+function useForkMotionEnabled(): boolean {
+  const [enabled, setEnabled] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(prefers-reduced-motion: no-preference)");
+    const update = () => setEnabled(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+  return enabled;
+}
+
+/**
+ * fork:zm-02 — resolves which step ids are allowed to play the entrance.
+ *
+ * The decision has to happen **during render**: a marker added one effect later
+ * would let the row paint once at full opacity and then visibly restart from 0.
+ * Fresh ids are therefore collected from `knownRef` while rendering (a pure read
+ * of the shared memory), and the effect only does the bookkeeping: baseline on
+ * the first commit, record + schedule marker cleanup afterwards.
+ *
+ * The first commit is a baseline: every id already on screen is recorded in the
+ * shared memory without animating, so switching sessions (or remounting the
+ * paged window) never replays the whole screen.
+ *
+ * Deliberately no effect cleanup for the cleanup timer: the module memory
+ * survives the component, React StrictMode would otherwise cancel the timer on
+ * its simulated double-invoke, and a stray `setState` after unmount is a no-op.
+ */
+function useStreamEnterIds(idsKey: string, enabled: boolean): ReadonlySet<string> {
+  const [cleanupPending, setCleanupPending] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const knownRef = useRef<Set<string>>(new Set());
+  const mountedRef = useRef(false);
+
+  const ids = useMemo(() => (idsKey.length === 0 ? [] : idsKey.split("\n")), [idsKey]);
+
+  // Render-phase read: ids that appeared since the last commit and have never
+  // played anywhere in this tab. `shouldPlay` does not mutate the memory.
+  const enteringNow: string[] = [];
+  if (mountedRef.current && enabled) {
+    for (const id of ids) {
+      if (knownRef.current.has(id)) continue;
+      if (streamEnterMemory.shouldPlay(id, true)) enteringNow.push(id);
+    }
+  }
+
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      for (const id of ids) {
+        knownRef.current.add(id);
+        streamEnterMemory.record(id);
+      }
+      return;
+    }
+
+    const fresh: string[] = [];
+    for (const id of ids) {
+      if (knownRef.current.has(id)) continue;
+      knownRef.current.add(id);
+      if (enabled && streamEnterMemory.shouldPlay(id, true)) fresh.push(id);
+    }
+    if (fresh.length === 0) return;
+
+    for (const id of fresh) streamEnterMemory.record(id);
+    setCleanupPending((current) => {
+      const next = new Set(current);
+      for (const id of fresh) next.add(id);
+      return next;
+    });
+    window.setTimeout(() => {
+      setCleanupPending((current) => {
+        if (!fresh.some((id) => current.has(id))) return current;
+        const next = new Set(current);
+        for (const id of fresh) next.delete(id);
+        return next;
+      });
+    }, STREAM_ENTER_CLEANUP_MS);
+  }, [enabled, ids]);
+
+  if (enteringNow.length === 0) return cleanupPending;
+  const next = new Set(cleanupPending);
+  for (const id of enteringNow) next.add(id);
+  return next;
 }
 
 // --- Component --------------------------------------------------------------
@@ -628,6 +748,8 @@ export interface ProcessGroupProps {
   onOpenSession?: (sessionId: string) => void;
   /** Force the detail bodies open (e.g. a search hit landed inside the group). */
   reveal?: boolean;
+  /** fork:zc-02 — 命中所在的工具调用 id，透传到 ToolBody。 */
+  revealToolCallId?: string;
   className?: string;
 }
 
@@ -638,10 +760,19 @@ export function ProcessGroup({
   onOpenFile,
   onOpenSession,
   reveal = false,
+  revealToolCallId,
   className,
 }: ProcessGroupProps) {
   const { t } = useI18n();
   const steps = useMemo(() => buildProcessSteps(blocks, t), [blocks, t]);
+
+  // fork:zm-02 — new steps fade in one after another while the turn streams.
+  // `step.sequence` (not the map index) is the stagger slot; the shared memory
+  // guarantees each step id only ever plays the entrance once.
+  const motionEnabled = useForkMotionEnabled();
+  const streamAnimate = isStreaming && motionEnabled;
+  const stepIdsKey = useMemo(() => steps.map((step) => step.id).join("\n"), [steps]);
+  const enteringIds = useStreamEnterIds(stepIdsKey, streamAnimate);
 
   // fork:step-expansion — 哪几类步骤默认展开由设置决定（推理 / 命令 / 工具调用），
   // 改设置时广播事件，已经挂载的时间线立刻跟着变。
@@ -764,17 +895,24 @@ export function ProcessGroup({
       aria-label={t("process.groupLabel")}
       data-step-count={steps.length}
     >
-        <ol className="process-steps">
+        <ol className="process-steps" data-fork-stream-animate={streamAnimate ? "true" : undefined}>
           {steps.map((step, index) => {
             const id = step.id;
             const isOpen = isStepOpen(id);
             const last = index === steps.length - 1;
+            const entering = enteringIds.has(id);
             return (
               <li
                 key={id}
                 // fork:zn-10 — marks the streaming-open step so fork-ui.css can
                 // shimmer its verb (Zeno .shimmer); static rows never animate.
                 data-live={streamingOpen === id || undefined}
+                // fork:zm-02 — only freshly appended steps carry the entrance
+                // marker; the memory decides, not the render position.
+                data-fork-enter={entering ? "true" : undefined}
+                style={entering
+                  ? ({ "--fork-enter-delay": streamEnterDelay(step.sequence) } as CSSProperties)
+                  : undefined}
                 className={[
                   "process-step",
                   isOpen ? " is-open" : "",
@@ -811,6 +949,7 @@ export function ProcessGroup({
                       style={{ maxHeight: 320, overflowY: "auto", overflowX: "hidden" }}
                     >
                       <StepBody
+                        revealToolCallId={revealToolCallId}
                         step={step}
                         toolResults={toolResults}
                         onOpenSession={onOpenSession}

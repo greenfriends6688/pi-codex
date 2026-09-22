@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { cronDueState } from "./cron-schedule";
+import { computeNextRun, cronDueState, type CronTask } from "./cron-schedule";
 import {
   applyRunResult,
-  shouldNotifyRun,
+  claimIsStale,
   isTaskExhausted,
   resolveRunTimeoutMs,
   resolveSessionMode,
   sessionDayKey,
+  shouldNotifyRun,
   shouldReuseSession,
 } from "./cron-lifecycle";
 import {
@@ -14,9 +15,22 @@ import {
   getCronConfigPath,
   patchCronTask,
   readCronFile,
-  toCronTaskView,
-  type CronTask,
+  updateCronRun,
+  type CronRunRecord,
 } from "./cron-store";
+import {
+  classifyCronFailure,
+  CRON_MAX_ATTEMPTS,
+  retryPatchFor,
+} from "./cron-failure";
+import {
+  finishRunRecord,
+  skipRunRecord,
+  startRunRecord,
+  summarizeRunOutput,
+  type CronClock,
+  type CronRunStart,
+} from "./cron-history";
 
 /**
  * fork:cron — the scheduler.
@@ -32,13 +46,26 @@ import {
  *   - A missed occurrence is skipped, not replayed (see CRON_MISSED_WINDOW_MS);
  *     the server may have been asleep for hours and replaying old prompts then is
  *     worse than silence.
+ *
+ * fork:zc-19 hardening (same file, no second scheduler):
+ *   - a missed run records a `skipped` history entry with the reason and, for a
+ *     one-shot, finalises the task instead of re-arming it;
+ *   - a task runs at most once at a time, and a claim with no heartbeat for more
+ *     than 10 minutes is reclaimed after a crash;
+ *   - retryable failures back off 30s·2^(n-1) (cap 15 min, 5 attempts) instead of
+ *     waiting for the next scheduled occurrence.
  */
 
 export const CRON_TICK_MS = 30_000;
 
+/** fork:zc-19 — how often a running task refreshes its claim. */
+export const CRON_HEARTBEAT_MS = 60_000;
+
 declare global {
   var __piCronTimer: ReturnType<typeof setInterval> | undefined;
   var __piCronRunning: Set<string> | undefined;
+  /** fork:zc-21 — session ids currently executing a scheduled run (recursion guard). */
+  var __piCronActiveSessionIds: Set<string> | undefined;
 }
 
 function runningTasks(): Set<string> {
@@ -46,19 +73,115 @@ function runningTasks(): Set<string> {
   return globalThis.__piCronRunning;
 }
 
+function activeScheduledSessions(): Set<string> {
+  if (!globalThis.__piCronActiveSessionIds) globalThis.__piCronActiveSessionIds = new Set();
+  return globalThis.__piCronActiveSessionIds;
+}
+
+/**
+ * fork:zc-21 — mark the session a scheduled run is executing in. `cron-extension`
+ * consults this so a run cannot create or modify more scheduled tasks.
+ * Exported for tests and for the extension's default provider.
+ */
+export function markScheduledCronSession(sessionId: string, active: boolean): void {
+  const sessions = activeScheduledSessions();
+  if (active) sessions.add(sessionId);
+  else sessions.delete(sessionId);
+}
+
+export function isScheduledCronRunSession(sessionId: string): boolean {
+  return activeScheduledSessions().has(sessionId);
+}
+
 export interface CronRunResult {
   taskId: string;
   sessionId?: string;
-  status: "ok" | "error";
+  status: "ok" | "error" | "duplicate";
+  error?: string;
+  /** fork:zc-19 — set when the failure was scheduled for a backoff retry. */
+  retryAt?: string;
+}
+
+export interface CronRunOptions {
+  trigger?: CronRunStart["trigger"];
+  /** 1 for the first try; a retry tick passes `retryAttempt + 1`. */
+  attempt?: number;
+  /** Injected clock (tests and deterministic ticks). */
+  now?: CronClock;
+  /**
+   * Injected clock for heartbeats. Defaults to the real wall clock on purpose:
+   * a tick's clock can be frozen, and a heartbeat frozen with it would make a
+   * long-running task look like a crashed claim.
+   */
+  heartbeatNow?: CronClock;
+}
+
+/** The synchronous answer to "start this task now" (the run continues in the background). */
+export interface CronLaunchResult {
+  taskId: string;
+  status: "ok" | "duplicate";
   error?: string;
 }
 
-/** Run one task now. Exported so the API's "run now" uses the same path. */
-export async function runCronTask(task: CronTask): Promise<CronRunResult> {
-  const running = runningTasks();
-  if (running.has(task.id)) return { taskId: task.id, status: "error", error: "already running" };
-  running.add(task.id);
+/** Both single-flight checks in one place: in-memory and the persisted claim. */
+function duplicateReason(task: CronTask, file: string, clock: CronClock): string | null {
+  if (runningTasks().has(task.id)) return "already running";
+  const initial = findTask(task.id, file) ?? task;
+  // fork:zc-19 — a persisted `running` claim that is still fresh means another
+  // holder (this process after a restart, or a crashed one under 10 minutes) is
+  // alive; a stale one is reclaimed by cronTick/runCronTask and may restart.
+  if (initial.lastStatus === "running" && !claimIsStale(initial, clock())) return "already running";
+  return null;
+}
 
+/**
+ * Start a task without waiting for the agent run to finish.
+ *
+ * `runCronTask` awaits settlement (retry classification, history end time,
+ * output excerpt), so a caller that must stay responsive — the 30s tick and the
+ * HTTP "run now" route — must not await it directly. The synchronous prefix of
+ * `runCronTask` still registers the in-memory claim before this returns, so two
+ * consecutive launches cannot both start.
+ */
+export function launchCronTask(task: CronTask, options: CronRunOptions = {}): CronLaunchResult {
+  const clock: CronClock = options.now ?? (() => new Date());
+  const file = getCronConfigPath();
+  const duplicate = duplicateReason(task, file, clock);
+  if (duplicate) return { taskId: task.id, status: "duplicate", error: duplicate };
+  void runCronTask(task, options).catch((error) => {
+    console.error(
+      `[pi-web] cron task "${task.name}" runner crashed:`,
+      error instanceof Error ? error.message : error,
+    );
+  });
+  return { taskId: task.id, status: "ok" };
+}
+
+/** Run one task now and wait for the agent run to settle. */
+export async function runCronTask(task: CronTask, options: CronRunOptions = {}): Promise<CronRunResult> {
+  const clock: CronClock = options.now ?? (() => new Date());
+  const heartbeatClock: CronClock = options.heartbeatNow ?? (() => new Date());
+  const file = getCronConfigPath();
+  const running = runningTasks();
+  const duplicate = duplicateReason(task, file, clock);
+  if (duplicate) return { taskId: task.id, status: "duplicate", error: duplicate };
+
+  running.add(task.id);
+  const trigger = options.trigger ?? "schedule";
+  const attempt = Math.max(1, Math.floor(options.attempt ?? 1));
+  const runId = randomUUID();
+  const startedAt = clock();
+  // A stale claim is being taken over (direct "Run now" before the next tick):
+  // settle the abandoned history row first so it does not read "running" forever.
+  const claimed = findTask(task.id, file) ?? task;
+  if (claimed.lastStatus === "running" && claimIsStale(claimed, clock())) {
+    recoverStaleClaim(claimed, file, startedAt);
+  }
+  const startRecord = startRunRecord({ id: runId, trigger, attempt, at: startedAt }, clock);
+  appendCronHistory(task.id, startRecord, file);
+
+  let sessionId: string | undefined;
+  let heartbeat: ReturnType<typeof setInterval> | undefined;
   try {
     // Dynamic imports keep the scheduler out of the module graph of every request:
     // rpc-manager pulls in the whole agent runtime.
@@ -66,9 +189,10 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
     const { allowFileRoot } = await import("./file-access");
     const { ensureChatWorkspace } = await import("./chat-workspace");
 
+    const current = findTask(task.id, file) ?? task;
     // Empty cwd = "default working directory" (the chat workspace), which is what the
     // task form's blank option means.
-    const cwd = task.cwd || ensureChatWorkspace();
+    const cwd = current.cwd || ensureChatWorkspace();
 
     // Same allow-list bookkeeping as /api/agent/new: a session in a brand-new cwd
     // must make that cwd readable for the file routes.
@@ -78,80 +202,230 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
     //
     // 复用判定放在建会话之前，且只依赖任务自身记录的 `reusableSessionId`
     // 与那个会话的上下文占用（从会话进程里问，不做额外的文件扫描）。
-    const mode = resolveSessionMode(task);
-    const reuseCandidate = mode === "new" ? { reuse: false as const } : await evaluateReuse(task, mode);
-    const startedAt = new Date();
+    const mode = resolveSessionMode(current);
+    const reuseCandidate = mode === "new" ? { reuse: false as const } : await evaluateReuse(current, mode, clock());
     const { session, realSessionId } = reuseCandidate.reuse && reuseCandidate.sessionId
       ? await startRpcSession(reuseCandidate.sessionId, "", cwd, {
-          ...(task.model ? { initialModel: task.model } : {}),
-          ...(task.thinking ? { thinkingLevel: task.thinking as never } : {}),
+          ...(current.model ? { initialModel: current.model } : {}),
+          ...(current.thinking ? { thinkingLevel: current.thinking as never } : {}),
         })
       : await startRpcSession(`__cron__${randomUUID()}`, "", cwd, {
-          ...(task.model ? { initialModel: task.model } : {}),
-          ...(task.thinking ? { thinkingLevel: task.thinking as never } : {}),
+          ...(current.model ? { initialModel: current.model } : {}),
+          ...(current.thinking ? { thinkingLevel: current.thinking as never } : {}),
         });
+    sessionId = realSessionId;
+    // fork:zc-21 — while this run is in flight, cron write tools are refused.
+    markScheduledCronSession(realSessionId, true);
 
     patchCronTask(task.id, {
-      lastRunAt: new Date().toISOString(),
+      lastRunAt: startedAt.toISOString(),
       lastStatus: "running",
       lastSessionId: realSessionId,
       lastError: undefined,
-    });
+      // fork:zc-19 — claim + heartbeat; starting the attempt clears the pending retry.
+      heartbeatAt: startedAt.toISOString(),
+      retryAt: undefined,
+      retryAttempt: attempt,
+    }, file);
+
+    // fork:zc-19 — heartbeat so a long legitimate run is never mistaken for a
+    // crashed claim (and a crashed one is reclaimed after CRON_CLAIM_STALE_MS).
+    heartbeat = setInterval(() => {
+      try {
+        patchCronTask(task.id, { heartbeatAt: heartbeatClock().toISOString() }, file);
+      } catch (error) {
+        console.warn(`[pi-web] cron heartbeat failed for "${current.name}":`, error instanceof Error ? error.message : error);
+      }
+    }, CRON_HEARTBEAT_MS);
+    heartbeat.unref?.();
 
     // 无人值守的任务不能无限占着会话：超时后按错误收尾（会累计失败计数，
     // 连续多次即自动暂停，见 lib/cron-lifecycle.ts）。
-    const timeoutMs = resolveRunTimeoutMs(task);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        session.send({ type: "prompt", message: task.prompt }),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error(`运行超时（${Math.round(timeoutMs / 60000)} 分钟）`)), timeoutMs);
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+    const timeoutMs = resolveRunTimeoutMs(current);
+    const result = await runPromptToSettlement(session, current.prompt, timeoutMs, clock);
+    if (result.error) throw new Error(result.error);
 
-    const outcome = applyRunResult(task, { status: "ok", previousFailures: task.consecutiveFailures ?? 0 });
+    const outcome = applyRunResult(current, { status: "ok", previousFailures: current.consecutiveFailures ?? 0 });
+    finishCronRun(
+      task.id,
+      runId,
+      finishRunRecord(startRecord, {
+        status: "ok",
+        outputExcerpt: summarizeRunOutput(result.output),
+        sessionId: realSessionId,
+      }, clock),
+      file,
+    );
     patchCronTask(task.id, {
       runCount: outcome.runCount,
       lastStatus: "ok",
       lastError: undefined,
       consecutiveFailures: 0,
+      retryAt: undefined,
+      retryAttempt: undefined,
+      heartbeatAt: undefined,
       reusableSessionId: realSessionId,
-      reusableSessionDayKey: sessionDayKey(startedAt, task.schedule.timezone),
+      reusableSessionDayKey: sessionDayKey(startedAt, current.schedule.timezone),
       ...(outcome.enabled === false ? { enabled: false } : {}),
       ...(outcome.completedAt ? { completedAt: outcome.completedAt } : {}),
-    });
-    appendCronHistory(task.id, { at: new Date().toISOString(), status: "ok", sessionId: realSessionId });
-    await notifyRunFinished(task, "ok", realSessionId);
-    return { taskId: task.id, sessionId: realSessionId, status: "ok" };
+    }, file);
+    await notifyRunFinished(current, "ok", realSessionId);
+    return { taskId: current.id, sessionId: realSessionId, status: "ok" };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    const current = findTask(task.id, file) ?? task;
+    // fork:zc-19 — retryable failures back off instead of failing the run outright.
+    const failure = classifyCronFailure(error);
+    const retryPatch = retryPatchFor(failure, attempt, clock());
+    const retrying = retryPatch.retryAt !== undefined;
+
+    if (retrying) {
+      patchCronTask(task.id, {
+        lastStatus: "error",
+        lastError: message,
+        heartbeatAt: undefined,
+        ...retryPatch,
+      }, file);
+      finishCronRun(
+        task.id,
+        runId,
+        finishRunRecord(startRecord, { status: "error", error: message, sessionId }, clock),
+        file,
+      );
+      console.warn(
+        `[pi-web] cron task "${current.name}" failed (attempt ${attempt}/${CRON_MAX_ATTEMPTS}, ${failure.code}); retrying at ${retryPatch.retryAt}: ${message}`,
+      );
+      return { taskId: current.id, status: "error", error: message, retryAt: retryPatch.retryAt };
+    }
+
     // fork:fix-cron-lifecycle — 失败不再只是记一笔：连续失败到阈值会自动暂停，
     // 并把原因写在任务上（用户可见、可手动恢复；自动动作不删任务、不清历史）。
-    const outcome = applyRunResult(task, {
+    const outcome = applyRunResult(current, {
       status: "error",
       error: message,
-      previousFailures: task.consecutiveFailures ?? 0,
+      previousFailures: current.consecutiveFailures ?? 0,
     });
+    finishCronRun(
+      task.id,
+      runId,
+      finishRunRecord(startRecord, { status: "error", error: message, sessionId }, clock),
+      file,
+    );
     patchCronTask(task.id, {
-      lastRunAt: new Date().toISOString(),
       lastStatus: "error",
       lastError: message,
       runCount: outcome.runCount,
       consecutiveFailures: outcome.consecutiveFailures,
+      retryAt: undefined,
+      retryAttempt: undefined,
+      heartbeatAt: undefined,
       ...(outcome.enabled === false ? { enabled: false } : {}),
       ...(outcome.pausedReason ? { pausedReason: outcome.pausedReason } : {}),
-    });
-    appendCronHistory(task.id, { at: new Date().toISOString(), status: "error", error: message });
-    console.error(`[pi-web] cron task "${task.name}" failed:`, message);
-    await notifyRunFinished(task, "error", task.lastSessionId);
-    return { taskId: task.id, status: "error", error: message };
+    }, file);
+    console.error(`[pi-web] cron task "${current.name}" failed (${failure.kind}/${failure.code}):`, message);
+    await notifyRunFinished(current, "error", sessionId ?? current.lastSessionId);
+    return { taskId: current.id, status: "error", error: message };
   } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    if (sessionId) markScheduledCronSession(sessionId, false);
     running.delete(task.id);
   }
+}
+
+function findTask(id: string, file: string): CronTask | null {
+  return readCronFile(file).tasks.find((task) => task.id === id) ?? null;
+}
+
+/** Persist a finished record; falls back to an append when the start row is gone. */
+function finishCronRun(taskId: string, runId: string, record: CronRunRecord, file: string): void {
+  if (!updateCronRun(taskId, runId, record, file)) appendCronHistory(taskId, record, file);
+}
+
+/**
+ * fork:zc-19 — settle a claim whose heartbeat stopped (crashed process). The
+ * history row becomes an error and the task turns schedulable again. Used by the
+ * tick and by a direct "Run now" that arrives before the next tick.
+ */
+function recoverStaleClaim(task: CronTask, file: string, now: Date): void {
+  const message = "运行中断：认领超过 10 分钟没有心跳，已回收";
+  const staleRun = task.history?.find((run) => run.status === "running");
+  if (staleRun?.id) {
+    finishCronRun(
+      task.id,
+      staleRun.id,
+      finishRunRecord(staleRun, { status: "error", error: message, finishedAt: now }, () => now),
+      file,
+    );
+  } else {
+    appendCronHistory(task.id, skipRunRecord({ at: now, trigger: "schedule" }, "claim_expired", () => now), file);
+  }
+  patchCronTask(task.id, { lastStatus: "error", lastError: message, heartbeatAt: undefined }, file);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * fork:zc-14 — `session.send({type:"prompt"})` only acknowledges preflight; the
+ * agent run continues in the background. The scheduler needs the real end, both
+ * for the history row (duration + output) and for retry decisions, so this waits
+ * until the wrapper reports idle, aborting at the task's timeout, and captures
+ * the final assistant text as the output excerpt.
+ */
+async function runPromptToSettlement(
+  session: { isRunning: () => boolean; send: (command: Record<string, unknown>) => Promise<unknown>; onEvent: (listener: (event: { type: string; [key: string]: unknown }) => void) => () => void; inner: { sessionManager: { getBranch: () => unknown[] } } },
+  message: string,
+  timeoutMs: number,
+  clock: CronClock,
+): Promise<{ error?: string; output?: string }> {
+  let promptError: string | undefined;
+  const unsubscribe = session.onEvent((event) => {
+    if (event.type === "prompt_error" && typeof event.errorMessage === "string" && event.errorMessage) {
+      promptError = event.errorMessage;
+    }
+  });
+  const deadline = clock().getTime() + timeoutMs;
+  try {
+    await session.send({ type: "prompt", message });
+    while (session.isRunning()) {
+      if (clock().getTime() >= deadline) {
+        try {
+          await session.send({ type: "abort" });
+        } catch {
+          // The run already ended between the check and the abort; nothing to stop.
+        }
+        return { error: `运行超时（${Math.round(timeoutMs / 60000)} 分钟）` };
+      }
+      await delay(500);
+    }
+    if (promptError) return { error: promptError };
+    return { output: lastAssistantText(session) };
+  } finally {
+    unsubscribe();
+  }
+}
+
+function lastAssistantText(session: { inner: { sessionManager: { getBranch: () => unknown[] } } }): string | undefined {
+  try {
+    const branch = session.inner.sessionManager.getBranch();
+    for (let index = branch.length - 1; index >= 0; index -= 1) {
+      const entry = branch[index] as { type?: string; message?: { role?: string; content?: unknown } } | null;
+      if (!entry || entry.type !== "message" || entry.message?.role !== "assistant") continue;
+      const content = entry.message.content;
+      if (typeof content === "string") return content;
+      if (Array.isArray(content)) {
+        const text = content
+          .map((block) => (block && typeof block === "object" && (block as { type?: string }).type === "text" ? String((block as { text?: string }).text ?? "") : ""))
+          .filter(Boolean)
+          .join("\n");
+        return text || undefined;
+      }
+    }
+  } catch {
+    // Reading back the output is best effort; the run itself already succeeded.
+  }
+  return undefined;
 }
 
 /**
@@ -188,6 +462,7 @@ async function notifyRunFinished(task: CronTask, status: "ok" | "error", session
 async function evaluateReuse(
   task: CronTask,
   mode: ReturnType<typeof resolveSessionMode>,
+  now: Date,
 ): Promise<{ reuse: boolean; sessionId?: string }> {
   const candidate = task.reusableSessionId;
   if (!candidate) return { reuse: false };
@@ -205,7 +480,7 @@ async function evaluateReuse(
   } catch {
     // 会话进程已回收：保留复用意图，startRpcSession 会从文件恢复。
   }
-  const decision = shouldReuseSession(mode, new Date(), {
+  const decision = shouldReuseSession(mode, now, {
     reusableSessionId: candidate,
     reusableSessionDayKey: task.reusableSessionDayKey,
     contextRatio,
@@ -216,19 +491,87 @@ async function evaluateReuse(
 /** One pass over the file. Exported for tests and for an explicit "check now". */
 export async function cronTick(now = new Date()): Promise<CronRunResult[]> {
   const results: CronRunResult[] = [];
-  for (const task of readCronFile(getCronConfigPath()).tasks) {
-    if (!task.enabled) continue;
+  const file = getCronConfigPath();
+  for (const listed of readCronFile(file).tasks) {
+    if (!listed.enabled) continue;
     // fork:fix-cron-lifecycle — 达到 maxRuns 或已标记完成的任务不再调度。
-    if (isTaskExhausted(task)) continue;
+    if (isTaskExhausted(listed)) continue;
+
+    // fork:zc-19 — stale claim recovery. A crash leaves `lastStatus: "running"`
+    // with a heartbeat that stops; once it is older than 10 minutes the run is
+    // declared interrupted and the task becomes schedulable again.
+    if (listed.lastStatus === "running" && claimIsStale(listed, now)) {
+      recoverStaleClaim(listed, file, now);
+    }
+    const task = findTask(listed.id, file) ?? listed;
+
+    // fork:zc-19 — a pending retry pre-empts the normal schedule; the task does
+    // not fire twice for one logical run.
+    if (task.retryAt) {
+      const retryAt = Date.parse(task.retryAt);
+      const attempts = task.retryAttempt ?? 0;
+      if (Number.isFinite(retryAt) && retryAt <= now.getTime() && attempts < CRON_MAX_ATTEMPTS) {
+        results.push(launchCronTask(task, { trigger: "retry", attempt: attempts + 1, now: () => now }));
+        continue;
+      }
+      if (!Number.isFinite(retryAt) || attempts >= CRON_MAX_ATTEMPTS) {
+        // Corrupt/exhausted retry state: clear it and let the normal schedule continue.
+        patchCronTask(task.id, { retryAt: undefined, retryAttempt: undefined }, file);
+      } else {
+        continue; // retry is still in the future
+      }
+    }
+
     const anchor = task.lastRunAt ? new Date(task.lastRunAt) : new Date(task.createdAt);
-    const state = cronDueState(task.schedule, Number.isNaN(anchor.getTime()) ? now : anchor, now);
+    const safeAnchor = Number.isNaN(anchor.getTime()) ? now : anchor;
+    const state = cronDueState(task.schedule, safeAnchor, now);
+
+    // fork:zc-19 — nothing can ever fire again: the end date passed, or a
+    // one-shot's time is gone (including tasks left stuck by an older build).
+    // Stop cleanly instead of leaving an enabled task that can never run.
+    const endDatePassed = Boolean(task.schedule.endDate) && !task.completedAt;
+    const onceExpired = task.schedule.kind === "once" && !task.completedAt;
+    if (!state.nextRunAt && !state.due && !state.missed && (endDatePassed || onceExpired)) {
+      appendCronHistory(
+        task.id,
+        skipRunRecord(
+          { at: now, trigger: "schedule" },
+          endDatePassed ? "end_date_passed" : "computer_asleep_or_app_not_running",
+          () => now,
+        ),
+        file,
+      );
+      patchCronTask(task.id, {
+        enabled: false,
+        completedAt: now.toISOString(),
+        lastStatus: "skipped",
+        lastError: undefined,
+      }, file);
+      continue;
+    }
+
     if (state.missed) {
-      // Advance past the occurrence we skipped so it does not keep looking due.
-      patchCronTask(task.id, { lastRunAt: now.toISOString(), lastError: "skipped (server was not running)" });
+      // fork:zc-19 — missed while the app was closed/asleep: record WHY instead
+      // of only bumping lastRunAt, then move a recurring task to its next future
+      // slot and finalise a one-shot.
+      const missedAt = computeNextRun(task.schedule, safeAnchor) ?? now;
+      appendCronHistory(
+        task.id,
+        skipRunRecord({ at: missedAt, trigger: "schedule" }, "computer_asleep_or_app_not_running", () => now),
+        file,
+      );
+      patchCronTask(task.id, {
+        lastRunAt: now.toISOString(),
+        lastStatus: "skipped",
+        lastError: undefined,
+        ...(task.schedule.kind === "once"
+          ? { enabled: false, completedAt: now.toISOString() }
+          : {}),
+      }, file);
       continue;
     }
     if (!state.due) continue;
-    results.push(await runCronTask(task));
+    results.push(launchCronTask(task, { trigger: "schedule", now: () => now }));
   }
   return results;
 }
@@ -250,5 +593,3 @@ export function stopCronScheduler(): void {
   clearInterval(globalThis.__piCronTimer);
   globalThis.__piCronTimer = undefined;
 }
-
-export { toCronTaskView };

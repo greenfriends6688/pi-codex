@@ -37,6 +37,8 @@ export interface CronSchedule {
   timezone?: string;
   /** Runs are confined to this window; a hit outside it is deferred to the window start. */
   idleWindow?: CronIdleWindow;
+  /** fork:zc-19 — last calendar day a recurring task may fire ("YYYY-MM-DD", inclusive). */
+  endDate?: string;
 }
 
 export const CRON_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -115,6 +117,26 @@ function instantFor(parts: { year: number; month: number; day: number; hour: num
  * (≤ 366 tests), and only matching days expand into a 1440-minute scan.
  */
 export function computeNextRun(schedule: CronSchedule, from: Date): Date | null {
+  const next = computeNextRunUnbounded(schedule, from);
+  if (!next || !schedule.endDate) return next;
+  // fork:zc-19 — end date is inclusive: 23:59 of that wall-clock day is the last
+  // allowed minute. A schedule whose next hit falls after it has no future run.
+  const endExclusive = endOfCronDate(schedule.endDate, resolveTimezone(schedule.timezone));
+  if (endExclusive && next.getTime() > endExclusive.getTime()) return null;
+  return next;
+}
+
+/** Inclusive end-of-day instant for `endDate` in `timeZone`. */
+function endOfCronDate(endDate: string, timeZone: string | undefined): Date | null {
+  const date = parseCronDate(endDate);
+  if (!date) return null;
+  return zonedTimeToInstant(
+    { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(), hour: 23, minute: 59 },
+    timeZone,
+  );
+}
+
+function computeNextRunUnbounded(schedule: CronSchedule, from: Date): Date | null {
   const zone = resolveTimezone(schedule.timezone);
   const window = normalizeIdleWindow(schedule.idleWindow);
 
@@ -267,7 +289,16 @@ export function cronDueState(schedule: CronSchedule, anchor: Date, now: Date, wi
 // the UI able to talk about a task without pulling `node:fs` into the browser.
 // ---------------------------------------------------------------------------
 
-export type CronRunStatus = "running" | "ok" | "error";
+export type CronRunStatus = "running" | "ok" | "error" | "skipped";
+
+/** fork:zc-14 — what started a run. */
+export type CronRunTrigger = "schedule" | "manual" | "retry";
+
+/** fork:zc-19 — why a run never happened. */
+export type CronSkipReason =
+  | "computer_asleep_or_app_not_running"
+  | "claim_expired"
+  | "end_date_passed";
 
 export interface CronTask {
   id: string;
@@ -317,18 +348,42 @@ export interface CronTask {
   reusableSessionDayKey?: string;
   /** 完成通知策略；未设置按 "error"（只在失败时通知）。 */
   notify?: "never" | "always" | "success" | "error";
+  // ---------------------------------------------------------------------
+  // fork:zc-19 — 单飞/心跳/退避重试字段（全部可选，旧任务文件无需迁移）
+  // ---------------------------------------------------------------------
+  /** 运行中任务的心跳时间；超过 10 分钟没有心跳视为认领已过期。 */
+  heartbeatAt?: string;
+  /** 可重试失败的下一跳时间；设置期间不再按正常计划触发。 */
+  retryAt?: string;
+  /** 已经进行的重试次数（不含首次运行）。 */
+  retryAttempt?: number;
 }
 
 /** One entry of the run log, so the page can show "what happened" without the session. */
 export interface CronRunRecord {
+  /** fork:zc-14 — stable id so a running entry can be finished and a row deleted. */
+  id?: string;
+  /** Run start (ISO). Legacy field name kept so version-1 files stay readable. */
   at: string;
-  status: "ok" | "error";
+  /** Run end (ISO); absent while a run is still in flight. */
+  finishedAt?: string;
+  status: CronRunStatus;
+  /** What started the run (scheduled tick, "Run now", or a backoff retry). */
+  trigger?: CronRunTrigger;
   sessionId?: string;
   error?: string;
+  /** fork:zc-19 — reason a run was skipped instead of executed. */
+  skipReason?: CronSkipReason;
+  /** fork:zc-14 — process exit code when one exists. */
+  exitCode?: number | null;
+  /** fork:zc-14 — first lines of the final assistant output. */
+  outputExcerpt?: string;
+  /** fork:zc-19 — 1 for the first try, higher for backoff retries. */
+  attempt?: number;
 }
 
-/** Keeps the file small; the reference's history browser is a bigger feature. */
-export const CRON_HISTORY_LIMIT = 20;
+/** Keeps the file small while still giving the history browser something to page through. */
+export const CRON_HISTORY_LIMIT = 50;
 
 export interface CronTaskView extends CronTask {
   /** Next occurrence, for display; null when the schedule is exhausted. */
