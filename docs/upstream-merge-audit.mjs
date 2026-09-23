@@ -39,6 +39,7 @@ const BASELINE_FILE = "docs/upstream-merge-baseline.json";
 /** Files that legitimately differ from upstream without a marker. */
 const REVIEWED_NO_MARKER = new Set([
   "package-lock.json", // dependency resolution, not logic
+  "package.json", // fork identity: version/homepage/scripts + electron-builder; no runtime branch
   "README.md", "README.zh-CN.md", "README.ja.md", "README.ru.md",
   "LICENSE", "CONTRIBUTING.md", "SECURITY.md",
 ]);
