@@ -87,6 +87,7 @@ export const enLocale: LocalePlugin = {
     "settings.skinNew": "New skin",
     "settings.skinNewTitle": "New skin",
     "settings.skinEditTitle": "Edit skin",
+    "settings.skinInlineHint": "Editing below — changes apply to this skin only.",
     "settings.skinImport": "Import",
     "settings.skinExport": "Export",
     "settings.skinEdit": "Edit",

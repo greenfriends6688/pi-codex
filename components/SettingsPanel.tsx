@@ -507,6 +507,25 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
             }}
           />
 
+          {/* fork:zn-19-inline — 编辑区就在卡片条下面展开（Zeno 的外观页形态），
+              不再是第二层弹窗：选哪套皮肤，往下滚一点就能改它。 */}
+          {editing && (
+            <ThemeSkinStudio
+              skin={editing.skin}
+              isNew={editing.isNew}
+              onCancel={() => setEditing(null)}
+              onSave={(skin) => {
+                upsertSkin(skin);
+                setActive(skin.id);
+                setEditing(null);
+              }}
+              onDelete={(id) => {
+                removeSkin(id);
+                setEditing(null);
+              }}
+            />
+          )}
+
           {/* fork:zn-19-merge — 壁纸原本是**另一个**独立区块（上面「主题皮肤」、下面「壁纸」），
               两处都能配图、都能调遮罩/透明度，用户得先猜哪个在生效。Zeno 的做法是只有一处：
               皮肤工作室里连壁纸一起编辑。这里按同样的思路把壁纸并进同一张卡：
@@ -911,22 +930,6 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
           {logoutError && <p role="alert" className="settings-general-error">{logoutError}</p>}
         </section>
       )}
-      {editing ? (
-        <ThemeSkinStudio
-          skin={editing.skin}
-          isNew={editing.isNew}
-          onCancel={() => setEditing(null)}
-          onSave={(skin) => {
-            upsertSkin(skin);
-            setActive(skin.id);
-            setEditing(null);
-          }}
-          onDelete={(id) => {
-            removeSkin(id);
-            setEditing(null);
-          }}
-        />
-      ) : null}
     </div>
   );
 }

@@ -87,6 +87,7 @@ export const zhCNLocale: LocalePlugin = {
     "settings.skinNew": "新建主题",
     "settings.skinNewTitle": "新建主题",
     "settings.skinEditTitle": "编辑主题",
+    "settings.skinInlineHint": "在下方编辑，改动只作用于这套皮肤。",
     "settings.skinImport": "导入",
     "settings.skinExport": "导出",
     "settings.skinEdit": "编辑",

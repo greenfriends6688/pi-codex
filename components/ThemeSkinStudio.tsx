@@ -14,11 +14,14 @@
  *
  * 保存是**整套替换**而不是逐项 patch：皮肤是一个 18 个字段的整体，逐项合并会让
  * 「取消」和「恢复默认」都要各自维护一份逆操作。
+ *
+ * fork:zn-19-inline — 它是**内联编辑区**（卡片条下方展开），不是弹窗：Zeno 的外观页
+ * 也是这个形态，一处编辑、没有第二层窗口。所以根元素是 `<section>` 而不是 dialog，
+ * 也不用焦点陷阱。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
-import { useDialogA11y } from "@/hooks/useDialogA11y";
 import {
   SKIN_RANGES,
   resolveCssColorToHex,
@@ -76,10 +79,21 @@ export function ThemeSkinStudio({
   const [tab, setTab] = useState<"settings" | "css">("settings");
   const [previewMode, setPreviewMode] = useState<SkinMode>(skin.mode);
   const [message, setMessage] = useState("");
-  const { dialogRef, dialogProps } = useDialogA11y({ open: true, onClose: onCancel });
+  // fork:zn-19-inline — 工作室从弹窗改成**内联**（Zeno 的外观页就是这样：选哪套皮肤，
+  // 编辑区就在卡片条下面展开）。所以不再用 useDialogA11y：它的焦点陷阱与 `inert` 兄弟
+  // 屏蔽对「嵌在页面里的一块编辑区」是错的（会把设置面板其余部分全禁掉）。
+  const rootRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => { setDraft(skin); }, [skin]);
   useEffect(() => { setPreviewMode(skin.mode); }, [skin.mode]);
+
+  // fork:zn-19-inline — 编辑器在卡片条下面展开，点击「编辑」时它多半在视口外；
+  // 打开后滚进来并把焦点放到名称上，省掉「点了没反应」的错觉。
+  const nameRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    rootRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    nameRef.current?.focus({ preventScroll: true });
+  }, [skin.id, isNew]);
 
   const patch = (next: Partial<ThemeSkin>) => setDraft((current) => ({ ...current, ...next }));
 
@@ -131,16 +145,22 @@ export function ThemeSkinStudio({
   }, [draft]);
 
   return (
-    <div
-      ref={dialogRef}
-      {...dialogProps}
-      className="fork-skin-dialog-backdrop"
-      onClick={(event) => { if (event.target === event.currentTarget) onCancel(); }}
+    <section
+      ref={rootRef}
+      className="fork-skin-studio"
+      aria-label={isNew ? t("settings.skinNewTitle") : t("settings.skinEditTitle")}
+      // Esc 取消编辑：焦点在编辑区里才触发，不劫持整页的 Esc。
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        onCancel();
+      }}
     >
-      <div className="fork-skin-dialog" role="dialog" aria-modal="true" aria-label={t("settings.skinEditTitle")}>
+      <div className="fork-skin-studio-inner">
         <header className="fork-skin-dialog-header">
           <strong>{isNew ? t("settings.skinNewTitle") : t("settings.skinEditTitle")}</strong>
-          <button type="button" className="fork-skin-dialog-close" aria-label={t("i18n.close")} onClick={onCancel}>×</button>
+          {/* 内联形态不再放 ×：底部已有「取消」，两个关闭入口只会让人犹豫。 */}
+          <span className="fork-skin-studio-hint">{t("settings.skinInlineHint")}</span>
         </header>
 
         <div role="tablist" className="fork-skin-dialog-tabs">
@@ -270,6 +290,7 @@ export function ThemeSkinStudio({
               <label className="fork-skin-field">
                 <span>{t("settings.skinName")}</span>
                 <input
+                  ref={nameRef}
                   type="text"
                   className="fork-skin-text-input"
                   maxLength={60}
@@ -358,6 +379,6 @@ export function ThemeSkinStudio({
           </div>
         </footer>
       </div>
-    </div>
+    </section>
   );
 }
