@@ -55,8 +55,13 @@
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  /* fork:ui-minimap-polish — 面板本来就跟着指针自动滚到最近的一回合，滚动条只会
+     在 320px 宽的窄栏里再切掉一条 10px 的灰边，显得脏。藏掉。 */
+  scrollbar-width: none;
+}
+
+.list::-webkit-scrollbar {
+  display: none;
 }
 
 .pin:focus-visible {
@@ -116,8 +121,8 @@
 }
 
 .turn[data-located="true"] {
-  background: color-mix(in srgb, var(--text) 4%, var(--bg));
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--text-muted) 70%, transparent);
+  background: color-mix(in srgb, var(--text) 6%, var(--bg));
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .number {
@@ -141,7 +146,7 @@
 }
 
 .turn[data-located="true"] .number {
-  color: var(--text-muted);
+  color: var(--accent);
 }
 
 /* fork:upstream-0.9.2-minimap-tools — tool-call count for the whole turn. Sits
@@ -171,8 +176,8 @@
 .user {
   display: block;
   width: calc(100% + 34px);
-  min-height: 32px;
-  max-height: 86px;
+  min-height: 34px;
+  max-height: 58px;
   margin: 0 0 0 -34px;
   padding: 7px 10px 7px 40px;
   border: 0;
@@ -196,8 +201,8 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
-  line-clamp: 4;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .user:hover {
@@ -207,6 +212,8 @@
 .assistant {
   position: relative;
   display: block;
+  max-height: 74px;
+  overflow: hidden;
   padding: 0;
   border-top: 1px solid color-mix(in srgb, var(--border) 52%, transparent);
 }
