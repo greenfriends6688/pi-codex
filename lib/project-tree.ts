@@ -99,6 +99,8 @@ function previewForEntry(entry: ProjectableEntry): BranchPreview | undefined {
   if (entry.type !== "message" || !isRecord(entry.message) || typeof entry.message.role !== "string") {
     return undefined;
   }
+  // fork:upstream-0.9.2-pi087-transcript — 转写 system 消息（Pi >= 0.86）装的是 prompt 文本，不是回合。
+  if (entry.message.role === "system") return undefined;
 
   const content = entry.message.content;
   let text = "";

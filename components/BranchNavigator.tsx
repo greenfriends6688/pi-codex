@@ -45,8 +45,9 @@ export function buildActivePath(nodes: SessionTreeNode[], targetId: string | nul
   return new Set();
 }
 
+// fork:upstream-0.9.2-pi087-transcript — 转写 system 消息装的是 prompt，不是一个回合，不能给分支命名。
 function isMessageEntry(entry: SessionEntry): boolean {
-  return entry.type === "message" && "message" in entry;
+  return entry.type === "message" && "message" in entry && entry.message.role !== "system";
 }
 
 // Compress a visible linear chain into the first branching/leaf node.

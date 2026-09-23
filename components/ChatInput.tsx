@@ -386,6 +386,8 @@ type SlashCommandSource = SlashCommandPaletteItem["source"];
 
 const BUILTIN_SLASH_COMMANDS: BuiltinSlashCommand[] = [
   { name: "compact", description: "chat.commandCompact", source: "builtin" },
+  // fork:upstream-0.9.2-auto-compact — 处理分支早就有了，调色板里没列出来，等于用户看不到。
+  { name: "auto-compact", description: "chat.commandAutoCompact", source: "builtin" },
   { name: "reload", description: "chat.commandReload", source: "builtin" },
   { name: "name", description: "chat.commandName", source: "builtin" },
   { name: "session", description: "chat.commandSession", source: "builtin", availableWhileStreaming: true },

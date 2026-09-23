@@ -28,6 +28,7 @@ import type { SessionStatsInfo } from "@/lib/pi-types";
 import { mergeSessionStats, type SessionFileStats } from "@/lib/session-stats";
 import { userMessageKey } from "@/lib/prompt-recovery";
 import { AgentEventConnection } from "@/lib/agent-event-connection";
+import { isSystemMessageEvent } from "@/lib/agent-event-wire";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { updateExtensionWidgets } from "@/lib/extension-widgets";
 import {
@@ -1479,6 +1480,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // (e.g. SSE data buffered while the tab was frozen, flushed after
         // reconcile) — they would resurrect a ghost streaming bubble.
         if (!agentRunningRef.current) break;
+        // fork:upstream-0.9.2-pi087-transcript — 转写 system 消息（prompt + 工具装载）已由服务端
+        // 过滤；万一漏到客户端也不能进聊天记录。
+        if (isSystemMessageEvent(event)) break;
         if (event.type === "message_start") {
           const msg = event.message as AgentMessage | undefined;
           if (msg?.role === "user") break;
@@ -1514,6 +1518,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         // loadSession already loaded this message from the session file —
         // appending it again would duplicate it.
         if (!agentRunningRef.current) break;
+        if (isSystemMessageEvent(event)) break;
         const completed = event.message as AgentMessage | undefined;
         if (completed && completed.role === "user") {
           // Delivered steering/follow-up messages surface here as user
@@ -2026,7 +2031,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
 
         case "auto-compact": {
           if (!sid) return complete({ handled: true, error: "No active session" });
-          const nextEnabled = !autoCompactionEnabled;
+          // fork:upstream-0.9.2-auto-compact — 读 live wrapper（闲会话会因此启动），
+          // 否则第一次切换会跟着 React 默认值 true 走，而忽略 settings.json 的真实值。
+          const liveState = await sendAgentCommand<AgentStateResponse>(sid, { type: "get_state" });
+          const nextEnabled = !(liveState?.autoCompactionEnabled ?? true);
           await sendAgentCommand(sid, {
             type: "set_auto_compaction",
             enabled: nextEnabled,
@@ -2104,7 +2112,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     } finally {
       if (commandName === "compact") setIsCompacting(false);
     }
-  }, [activeLeafId, addNotice, autoCompactionEnabled, ensureNewSession, isCompacting, loadModels, loadSession, loadSlashCommands, loadTools, promoteNewSession, onSessionForked, onSessionStatsPanelOpen]);
+  }, [activeLeafId, addNotice, ensureNewSession, isCompacting, loadModels, loadSession, loadSlashCommands, loadTools, promoteNewSession, onSessionForked, onSessionStatsPanelOpen]);
 
   // Let AgentSession.prompt decide atomically whether to queue against the
   // current run or start a new turn if it settled while the request was in

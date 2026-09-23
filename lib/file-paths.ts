@@ -6,11 +6,14 @@ export function normalizeFilePathSlashes(filePath: string): string {
 }
 
 export function encodeFilePathForApi(filePath: string): string {
-  return normalizeFilePathSlashes(filePath)
-    .split("/")
-    .filter(Boolean)
-    .map(encodeURIComponent)
-    .join("/");
+  // fork:upstream-0.9.2-unc-roots — 字面的 "//" 前缀会被 URL 路由先规范化掉，
+  // 所以 UNC 根必须待在第一个分段里："//host" 编成 "%2F%2Fhost"，解回来仍是单段。
+  const normalized = normalizeFilePathSlashes(filePath);
+  const segments = normalized.split("/").filter(Boolean);
+  if (normalized.startsWith("//") && segments.length > 0) {
+    segments[0] = `//${segments[0]}`;
+  }
+  return segments.map(encodeURIComponent).join("/");
 }
 
 export function getFileName(filePath: string): string {

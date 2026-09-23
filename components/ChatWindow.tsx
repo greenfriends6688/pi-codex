@@ -6,7 +6,7 @@ import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecuti
 import { normalizeCustomPanelLines } from "@/lib/ansi";
 import { splitDialogTitle, splitDialogTitleCode } from "@/lib/dialog-title";
 import { asBracketedPaste, toTerminalKeyData } from "@/lib/terminal-input";
-import { countToolCallBlocks, getAssistantErrorMessage, getAssistantTruncationNotice, getDisplayableAssistantBlocks, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
+import { countToolCallBlocks, getAssistantErrorMessage, getDisplayableAssistantBlocks, isAssistantTruncated, isMessageGroupAnchor, splitFinalAssistantBlocks } from "@/lib/message-display";
 import { extractTurnWrittenFiles, type WrittenFile } from "@/lib/turn-written-files";
 import { useMemoryInvitation } from "@/components/fork/useMemoryInvitation";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
@@ -2263,7 +2263,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
 
                 const finalAssistant = messages[finalAssistantIdx] as AssistantMessage;
                 const finalSplit = splitFinalAssistantBlocks(finalAssistant);
-                const finalAnswerMessage = finalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant) || getAssistantTruncationNotice(finalAssistant)
+                const finalAnswerMessage = finalSplit.answerBlocks.length > 0 || getAssistantErrorMessage(finalAssistant) || isAssistantTruncated(finalAssistant)
                   ? withAssistantBlocks(finalAssistant, finalSplit.answerBlocks)
                   : null;
 
@@ -3083,6 +3083,9 @@ function ExtensionDialog({
                     textAlign: "left",
                     fontSize: TEXT.md,
                     overflowWrap: "anywhere",
+                    // fork:upstream-0.9.2-ext-select — 等于滚动容器的内边距，
+                    // 键盘选中项就不会被吸附到边缘而截掉 focus ring。
+                    scrollMargin: 14,
                   }}
                 >
                   <div inert>

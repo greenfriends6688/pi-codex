@@ -12,7 +12,7 @@ import { ThinkingIcon } from "./ThinkingIcon";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
-import { getAssistantErrorMessage, getAssistantTruncationNotice, getThinkingPreview, isEmptyThinkingBlock } from "@/lib/message-display";
+import { getAssistantErrorMessage, getThinkingPreview, isEmptyThinkingBlock, isAssistantTruncated } from "@/lib/message-display";
 import { parseUnifiedPatch, type SplitDiffCell, type SplitDiffFile } from "@/lib/patch";
 // fork:zc-07 — 词级行内 diff：并排 diff 里只标记真正变化的字/词。
 import { buildIntralineSegments, diffIntraline, type IntralineSpan } from "@/lib/diff-intraline";
@@ -736,7 +736,8 @@ function AssistantMessageView({
   // #830 surfaces a response cut off by the output limit. The PR also declared a
   // `hovered` flag next to it for its hover-gated action row; this fork shows
   // those rows unconditionally, so that half stays dropped (delta.md §皮肤改动点).
-  const truncationNotice = getAssistantTruncationNotice(message, { isStreaming });
+  // fork:upstream-0.9.2-truncation-i18n — 判定留成纯函数，文案走 i18n（原本是硬编码英文）。
+  const truncated = isAssistantTruncated(message, { isStreaming });
   const [copied, setCopied] = useState(false);
   const streamStartRef = useRef<number | null>(null);
   const [tps, setTps] = useState<number | null>(null);
@@ -853,7 +854,7 @@ function AssistantMessageView({
     return () => clearInterval(id);
   }, [isStreaming]);
 
-  if (blocks.length === 0 && !isStreaming && !providerError && !truncationNotice) return null;
+  if (blocks.length === 0 && !isStreaming && !providerError && !truncated) return null;
 
   return (
     <div
@@ -943,7 +944,7 @@ function AssistantMessageView({
         </div>
       )}
 
-      {truncationNotice && (
+      {truncated && (
         <div
           role="alert"
           style={{
@@ -960,7 +961,7 @@ function AssistantMessageView({
             overflowWrap: "anywhere",
           }}
         >
-          {truncationNotice}
+          {t("chat.truncatedByOutputLimit")}
         </div>
       )}
 

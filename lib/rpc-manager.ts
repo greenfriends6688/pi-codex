@@ -2321,7 +2321,9 @@ export async function startRpcSession(
     const defaultProvider = services.settingsManager.getDefaultProvider();
     const defaultModelId = services.settingsManager.getDefaultModel();
     const branch = sessionManager.getBranch();
-    const hasExistingMessages = branch.some((entry) => entry.type === "message");
+    // fork:upstream-0.9.2-pi087-transcript — system 消息装的是 prompt 和工具装载明细，不算对话；
+    // 只有 system 的分支仍然算「新会话」，要走首次模型选择。
+    const hasExistingMessages = branch.some((entry) => entry.type === "message" && entry.message.role !== "system");
     const savedModel = hasExistingMessages
       ? getLatestModelChange(branch as unknown as SessionEntry[])
       : null;
