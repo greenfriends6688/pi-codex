@@ -7,7 +7,7 @@ import { dispatchSessionRowContextMenu } from "@/lib/session-row-context-menu";
 import { skillExpansionToCommand } from "@/lib/slash-display";
 import { chatProjectOf, getProjectActivity, getRecentProjects, sessionsForProject, withoutChatProject } from "@/lib/project-groups";
 import type { RecentProject } from "@/lib/project-groups";
-import { SESSION_TAG_TONES, applySessionFlags, archivedSessions, useSessionFlags, type SessionTag } from "@/lib/session-flags";
+import { SESSION_TAG_TONES, applySessionFlags, useSessionFlags, type SessionTag } from "@/lib/session-flags";
 // fork:zc-11 — 用户自定义项目分组 + 拖拽排序（localStorage 展示层偏好）。
 import { useSessionGroups } from "@/lib/session-groups";
 import { filterHiddenProjects, projectDisplayName, useProjectPrefs } from "@/lib/project-prefs";
@@ -16,7 +16,6 @@ import { loadCollapsedTimeGroups, saveCollapsedTimeGroups, type CollapsedTimeGro
 import { desktopTrafficLightInset } from "@/lib/desktop-shell";
 import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
-import { getFileName } from "@/lib/file-paths";
 import { useI18n } from "@/hooks/useI18n";
 import { readStoredSidebarPane, writeStoredSidebarPane, type SidebarPane } from "@/lib/sidebar-pane";
 import { DirectoryPicker } from "./DirectoryPicker";
@@ -54,64 +53,6 @@ declare global {
   }
 }
 
-function ToolbarIconButton({
-  onClick,
-  title,
-  disabled,
-  skipHover,
-  color,
-  background = "none",
-  marginRight,
-  ariaPressed,
-  children,
-}: {
-  onClick: () => void;
-  title: string;
-  disabled?: boolean;
-  skipHover?: boolean;
-  color: string;
-  background?: string;
-  marginRight?: number;
-  ariaPressed?: boolean;
-  children: ReactNode;
-}) {
-  const enter = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (disabled || skipHover) return;
-    e.currentTarget.style.color = "var(--text-muted)";
-    e.currentTarget.style.background = "var(--bg-hover)";
-  };
-  const leave = (e: React.MouseEvent<HTMLButtonElement>) => {
-    if (disabled || skipHover) return;
-    e.currentTarget.style.color = color;
-    e.currentTarget.style.background = background;
-  };
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      aria-label={title}
-      aria-pressed={ariaPressed}
-      style={{
-        position: "relative",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        width: 26, height: 26, padding: 0, marginRight,
-        background,
-        border: "none",
-        color,
-        cursor: disabled ? "default" : "pointer",
-        borderRadius: 5,
-        flexShrink: 0,
-        opacity: disabled ? 0.6 : 1,
-        transition: "color 0.3s, background 0.3s",
-      }}
-      onMouseEnter={enter}
-      onMouseLeave={leave}
-    >
-      {children}
-    </button>
-  );
-}
 
 function sessionListUrl(summary: boolean, force: boolean): string {
   if (summary) return "/api/sessions?summary=1";
@@ -470,6 +411,7 @@ function ProjectRow({
   onToggle,
   activity,
   onClick,
+  onNewSession,
   onOpenFolder,
   onRename,
   onRemove,
@@ -486,7 +428,9 @@ function ProjectRow({
   onToggle?: () => void;
   activity?: { running: number; unread: number };
   onClick: () => void;
-  /** fork:ui-project-actions — 项目行右侧「⋯」里的三个动作（照 workbuddy）。 */
+  /** fork:ui-project-actions — 项目行右侧的两个入口（照 workbuddy）：+ 在该项目里开新会话，
+      ⋯ 里是三个项目动作。 */
+  onNewSession?: () => void;
   onOpenFolder?: () => void;
   onRename?: () => void;
   onRemove?: () => void;
@@ -625,6 +569,45 @@ function ProjectRow({
         <span style={{ fontSize: TEXT.sm, color: "var(--text-dim)", flexShrink: 0, minWidth: 14, textAlign: "right" }}>{count}</span>
       )}
       {showProjectActivity(activity, t)}
+      {/* fork:ui-project-actions — hover 才出现的「+」：直接在这个项目里开新会话（workbuddy 的 ⊕）。 */}
+      {onNewSession && (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={t("sidebar.newSessionInProject")}
+          title={t("sidebar.newSessionInProject")}
+          onClick={(event) => {
+            event.stopPropagation();
+            onNewSession();
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            event.stopPropagation();
+            onNewSession();
+          }}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 20,
+            height: 20,
+            borderRadius: "var(--radius-md)",
+            color: "var(--text-muted)",
+            opacity: hovered ? 1 : 0,
+            cursor: "pointer",
+            flexShrink: 0,
+            transition: "opacity 0.12s, color 0.12s",
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = "var(--accent)"; }}
+          onMouseLeave={(event) => { event.currentTarget.style.color = "var(--text-muted)"; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v8M8 12h8" />
+          </svg>
+        </span>
+      )}
       {/* fork:ui-project-actions — hover 才出现的「⋯」：打开文件夹 / 重命名 / 从列表中移除。 */}
       {(onOpenFolder || onRename || onRemove) && (
         <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
@@ -773,17 +756,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     });
   }, []);
   // 归档区默认折叠；每个项目独立记忆展开状态（取消归档的右键菜单入口）。
-  const [expandedArchivedProjects, setExpandedArchivedProjects] = useState<Set<string>>(new Set());
   // fork:zc-11 — 项目分组/顺序的 localStorage store（状态 + 纯操作封装）。
   const sessionGroups = useSessionGroups();
-  const toggleArchivedSection = useCallback((projectKey: string) => {
-    setExpandedArchivedProjects((prev) => {
-      const next = new Set(prev);
-      if (next.has(projectKey)) next.delete(projectKey);
-      else next.add(projectKey);
-      return next;
-    });
-  }, []);
   const sessionListRef = useRef<HTMLDivElement>(null);
   const [sessionListOffsetTop, setSessionListOffsetTop] = useState(0);
   // Worktree switcher state
@@ -2263,6 +2237,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   renaming={renamingProjectKey === project.key}
                   onRenameCommit={(name) => { setProjectAlias(project.root, name); setRenamingProjectKey(null); }}
                   onRenameCancel={() => setRenamingProjectKey(null)}
+                  onNewSession={() => startSessionIn(project.root)}
                   onRename={() => setRenamingProjectKey(project.key)}
                   onRemove={() => {
                     hideProject(project.root);
@@ -2307,28 +2282,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   (() => {
                     const projectSessions = orderedProjectSessions(project.key);
                     const families = listSessionFamilies(projectSessions);
-                    // fork:ui-archive-fix — 归档列表必须从**未过滤**的列表取：
-                    // `orderedProjectSessions` 已经把归档行丢掉了，再过滤一次永远是空的，
-                    // 于是「归档」= 会话直接失踪（列表里没有、已归档区也不出现）。
-                    const archivedFamilies = listSessionFamilies(
-                      archivedSessions(sortedProjectSessions(project.key), sessionFlags),
-                    );
+                    // fork:ui-archive-history — 归档的会话不再在项目下开折叠区，
+                    // 统一去 设置 → 归档历史 里看（用户要求）。
                     const projectEntries = groupByTimeBucket(families, bucketOfFamily, collapsedGroups);
-                    const archivedSection = (
-                      <ArchivedSessionsSection
-                        families={archivedFamilies}
-                        expanded={expandedArchivedProjects.has(project.key)}
-                        onToggle={() => toggleArchivedSection(project.key)}
-                        selectedSessionId={selectedSessionId}
-                        runningSessionIds={runningSessionIds}
-                        unreadSessionIds={unreadSessionIds}
-                        sessionFlags={sessionFlags}
-                        onSelectSession={handleSelectSessionFromList}
-                        onRenamed={loadSessions}
-                        onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
-                      />
-                    );
-                    if (families.length === 0 && archivedFamilies.length === 0) {
+                    if (families.length === 0) {
                       return (
                         <div style={{ padding: "6px 0 6px 34px", color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("sidebar.noTasks")}</div>
                       );
@@ -2350,7 +2307,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                               })}
                             </div>
                           )}
-                          {archivedSection}
                         </div>
                       );
                     }
@@ -2361,7 +2317,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                             {entry.type === "item" ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
                           </div>
                         ))}
-                        {archivedSection}
                       </div>
                     );
                   })()}
@@ -2421,7 +2376,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             const isSelectedChat = chatProject.key === selectedProject?.key;
             const isChatExpanded = expandedProjects.has(chatProject.key);
             const chatFamilies = listSessionFamilies(orderedProjectSessions(chatProject.key));
-            const chatArchivedFamilies = listSessionFamilies(archivedSessions(sessionsForProject(allSessions, chatProject.key), sessionFlags));
             // 聊天列表复用同一套时间分组与折叠状态；窗口单独计算，避免与项目
             // 列表的 entries 长度耦合，index 永远落在 chatEntries 范围内。
             const chatEntries = groupByTimeBucket(chatFamilies, bucketOfFamily, collapsedGroups);
@@ -2430,20 +2384,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               Math.max(0, listScrollTop - sessionListOffsetTop),
               listViewportH,
               chatEntries.findIndex((entry) => entry.type === "item" && entry.item.root.id === focusedSessionId),
-            );
-            const chatArchivedSection = (
-              <ArchivedSessionsSection
-                families={chatArchivedFamilies}
-                expanded={expandedArchivedProjects.has(chatProject.key)}
-                onToggle={() => toggleArchivedSection(chatProject.key)}
-                selectedSessionId={selectedSessionId}
-                runningSessionIds={runningSessionIds}
-                unreadSessionIds={unreadSessionIds}
-                sessionFlags={sessionFlags}
-                onSelectSession={handleSelectSessionFromList}
-                onRenamed={loadSessions}
-                onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
-              />
             );
             const toggleChatExpanded = () => {
               setExpandedProjects((prev) => {
@@ -2479,7 +2419,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     setCustomPathError(null);
                     }}
                 />
-                {isChatExpanded && (chatFamilies.length === 0 && chatArchivedFamilies.length === 0 ? (
+                {isChatExpanded && (chatFamilies.length === 0 ? (
                   <div style={{ padding: "6px 0 6px 24px", color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("sidebar.noTasks")}</div>
                 ) : isSelectedChat ? (
                   <div ref={sessionListRef} style={{ minHeight: chatEntries.length > 0 ? chatEntries.length * SESSION_LIST_ITEM_HEIGHT : 34 }}>
@@ -2497,8 +2437,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         })}
                       </div>
                     )}
-                    {chatArchivedSection}
-                  </div>
+                          </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                     {chatEntries.map((entry) => (
@@ -2506,8 +2445,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                         {entry.type === "item" ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
                       </div>
                     ))}
-                    {chatArchivedSection}
-                  </div>
+                        </div>
                 ))}
               </div>
             );
@@ -2703,107 +2641,6 @@ function TimeGroupHeader({ bucket, count, collapsed, onToggle }: {
         {t(timeBucketKey(bucket), { count })}
       </span>
     </button>
-  );
-}
-
-/**
- * Collapsed-by-default recovery list for one project's archived sessions.
- *
- * Archived rows are hidden from the main list by `applySessionFlags`, so this
- * section is the only place a row can be right-clicked back to unarchived.
- * Rows reuse `SessionItem` unchanged (the row dispatches the context-menu
- * event), and stay non-virtualized because an expanded archive is bounded by
- * how many sessions the user chose to hide.
- */
-function ArchivedSessionsSection({
-  families,
-  expanded,
-  onToggle,
-  selectedSessionId,
-  runningSessionIds,
-  unreadSessionIds,
-  sessionFlags,
-  onSelectSession,
-  onRenamed,
-  onDeleted,
-}: {
-  families: SessionFamily[];
-  expanded: boolean;
-  onToggle: () => void;
-  selectedSessionId: string | null;
-  runningSessionIds: Set<string>;
-  unreadSessionIds: Set<string>;
-  sessionFlags: { tags: Record<string, SessionTag> };
-  onSelectSession: (session: SessionInfo) => void;
-  onRenamed: () => void;
-  onDeleted: (id: string) => void;
-}) {
-  const { t } = useI18n();
-  const [hovered, setHovered] = useState(false);
-  if (families.length === 0) return null;
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={expanded}
-        aria-label={t("sidebar.archivedCount", { count: families.length })}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        style={{
-          width: "100%",
-          height: 28,
-          boxSizing: "border-box",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          padding: "0 9px",
-          marginTop: 2,
-          background: hovered ? "var(--bg-hover)" : "transparent",
-          border: "none",
-          borderRadius: "var(--radius-md)",
-          color: "var(--text-dim)",
-          cursor: "pointer",
-          textAlign: "left",
-          fontSize: TEXT.sm,
-          transition: "background 0.12s",
-        }}
-      >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          style={{ flexShrink: 0, transform: expanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 0.15s" }}
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {t("sidebar.archived")}
-        </span>
-        <span style={{ flexShrink: 0, minWidth: 14, textAlign: "right" }}>{families.length}</span>
-      </button>
-      {expanded && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          {families.map((family) => {
-            const familySessions = [family.root, ...family.subagents];
-            const displaySession = family.latestModified === family.root.modified ? family.root : { ...family.root, modified: family.latestModified };
-            return (
-              <div key={family.root.id}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <SessionItem session={displaySession} isSelected={familySessions.some((session) => session.id === selectedSessionId)} isRunning={familySessions.some((session) => runningSessionIds.has(session.id))} isUnread={familySessions.some((session) => unreadSessionIds.has(session.id))} tag={sessionFlags.tags[family.root.id]} onClick={() => onSelectSession(family.root)} onRenamed={onRenamed} onDeleted={onDeleted} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
   );
 }
 

@@ -64,8 +64,7 @@ test("closes the mobile action layer on outside click, Escape, layout changes, a
 
 test("keeps the mobile action layer open after using an expanded action", () => {
   const toggleTopPanel = source.match(/const toggleTopPanel = useCallback\([\s\S]*?\n  \}, \[isMobile, isNarrowMobile\]\);/)?.[0];
-  // fork:ui-history-panel — 完整历史改成开顶栏面板（原来是 window.open 导出页）。
-  const historyHandler = source.match(/onClick=\{\(\) => \{[\s\S]*?toggleTopPanel\("history"[\s\S]*?\n          \}\}/)?.[0];
+  const historyHandler = source.match(/onClick=\{\(\) => \{[\s\S]*?handleViewFullHistory\(\);[\s\S]*?\n          \}\}/)?.[0];
   const autoNameHandler = source.match(/onClick=\{\(\) => \{[\s\S]*?void handleAutoName\(\);[\s\S]*?\n              \}\}/)?.[0];
 
   for (const handler of [toggleTopPanel, historyHandler, autoNameHandler]) {
@@ -77,9 +76,7 @@ test("keeps the mobile action layer open after using an expanded action", () => 
   assert.match(source, /toggleTopPanel\("branches", true\)/);
   assert.match(source, /handleSystemInfoToggle\("system", mobile\)/);
   assert.match(source, /handleSystemInfoToggle\("tools", mobile\)/);
-  assert.match(source, /toggleTopPanel\("history", mobile && isNarrowMobile\)/);
-  // 不再新开标签页：这条路径必须彻底消失。
-  assert.doesNotMatch(source, /handleViewFullHistory|export\?inline=1/);
+  assert.match(source, /handleViewFullHistory/);
   // fork:ui-stats-inline — 统计不再占顶栏按钮，因此也没有“点开后保持工具条展开”的需求。
   assert.doesNotMatch(source, /toggleTopPanel\("session"\)/);
 });

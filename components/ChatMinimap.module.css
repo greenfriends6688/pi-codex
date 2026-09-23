@@ -176,8 +176,8 @@
 .user {
   display: block;
   width: calc(100% + 34px);
-  min-height: 34px;
-  max-height: 58px;
+  min-height: 32px;
+  max-height: 86px;
   margin: 0 0 0 -34px;
   padding: 7px 10px 7px 40px;
   border: 0;
@@ -201,8 +201,8 @@
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
 }
 
 .user:hover {
@@ -212,8 +212,6 @@
 .assistant {
   position: relative;
   display: block;
-  max-height: 74px;
-  overflow: hidden;
   padding: 0;
   border-top: 1px solid color-mix(in srgb, var(--border) 52%, transparent);
 }

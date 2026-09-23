@@ -1498,20 +1498,27 @@ html[data-rail-translucent="true"] .sidebar-container {
  * 预览盒子里的颜色全部由 `ThemeSkinStudio` 内联给（走 `--preview-*` 变量），
  * 不写 `<html>` —— 编辑中的皮肤不能当场改掉整个应用，否则「取消」没法回滚。
  * ------------------------------------------------------------------------- */
-/* fork:zn-19-inline — 工作室是**内联编辑区**（卡片条下方展开），不再是弹窗：
-   没有遮罩、没有浮层定位。宽度跟设置主列走。 */
-.fork-skin-studio {
-  display: block;
-  margin-top: 4px;
+/* 工作室是弹窗：遮罩 + 居中浮层。 */
+.fork-skin-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+}
+
+.fork-skin-dialog {
+  display: flex;
+  width: min(1100px, calc(100vw - 2rem));
+  max-height: min(820px, calc(100vh - 2rem));
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-elev);
-  overflow: hidden;
-}
-
-.fork-skin-studio-inner {
-  display: flex;
-  flex-direction: column;
+  box-shadow: var(--shadow-xl);
 }
 
 .fork-skin-dialog-header {
@@ -1524,11 +1531,16 @@ html[data-rail-translucent="true"] .sidebar-container {
   font-size: var(--text-xl);
 }
 
-.fork-skin-studio-hint {
-  color: var(--text-dim);
-  font-size: var(--text-xs);
-  font-weight: 400;
+.fork-skin-dialog-close {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
 }
+
+.fork-skin-dialog-close:hover { color: var(--text); }
 
 .fork-skin-dialog-tabs {
   display: flex;
@@ -1562,14 +1574,11 @@ html[data-rail-translucent="true"] .sidebar-container {
   display: grid;
   min-height: 0;
   flex: 1 1 auto;
-  /* 内联宽度 = 设置主列（约 800px）。弹窗时代的 340+440 下限在这里会溢出，
-     所以下限交给媒体查询去兜（窄了改上下堆叠），这里只按比例分。 */
-  grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+  grid-template-columns: minmax(340px, 0.9fr) minmax(440px, 1.1fr);
 }
 
-/* 内联形态没有固定高度：两列都不再各自滚动，交给设置面板自己的滚动条。 */
-.fork-skin-studio .fork-skin-dialog-preview-column,
-.fork-skin-studio /* fork:ui-project-actions — 项目行「⋯」菜单（打开文件夹 / 重命名 / 从列表中移除）。 */
+/* fork:ui-project-actions — 项目行「⋯」菜单（打开文件夹 / 重命名 / 从列表中移除）。
+   注意：这段必须自成一条规则，别插进别的选择器列表里（曾经插坏过两条规则）。 */
 .fork-project-menu-item {
   display: flex;
   align-items: center;
@@ -2040,7 +2049,7 @@ html[data-theme-skin="true"] .fork-settings-card,
 html[data-theme-skin="true"] .context-menu,
 html[data-theme-skin="true"] .config-panel-surface,
 html[data-theme-skin="true"] .settings-dialog-surface,
-html[data-theme-skin="true"] .fork-skin-studio {
+html[data-theme-skin="true"] .fork-skin-dialog {
   -webkit-backdrop-filter: blur(var(--skin-blur, 0px)) saturate(120%);
   backdrop-filter: blur(var(--skin-blur, 0px)) saturate(120%);
 }
