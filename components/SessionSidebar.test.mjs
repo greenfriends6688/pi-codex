@@ -149,7 +149,8 @@ test("renders projects as primary rows with the selected project's tasks nested 
   // The fork renders the selected project's tasks through an explicit branch
   // (the upstream inline `isSelectedProject && (` form was restructured).
   assert.match(source, /if \(project\.key === selectedProject\?\.key\) \{[\s\S]*?ref=\{sessionListRef\}/);
-  assert.match(source, /t\("sidebar\.addProject"\)/);
+  // fork:ui-project-actions — 「添加项目」按钮已按用户要求移除（改用项目行的 ⋯ / 打开文件夹）。
+  assert.doesNotMatch(source, /t\("sidebar\.addProject"\)/);
   assert.doesNotMatch(source, /showMoreProjects/);
   assert.doesNotMatch(source, /showFewerProjects/);
   assert.doesNotMatch(source, /PROJECTS_COLLAPSED_LIMIT/);

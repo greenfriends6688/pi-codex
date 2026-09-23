@@ -21,6 +21,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useDialogA11y } from "@/hooks/useDialogA11y";
 import { useI18n } from "@/hooks/useI18n";
 import {
@@ -157,7 +158,10 @@ export function ThemeSkinStudio({
     } as React.CSSProperties;
   }, [draft, previewMode]);
 
-  return (
+  // fork:ui-skin-modal-portal — **必须挂到 body**：设置面板那层有 `overflow: hidden`，
+  // 而皮肤接管时它又带 `backdrop-filter` —— 后者会让 `position: fixed` 相对面板定位，
+  // 于是弹窗上下两端被面板裁掉（标题和保存按钮都露不全）。portal 出去就与面板无关了。
+  const modal = (
     <div
       ref={dialogRef}
       {...dialogProps}
@@ -408,4 +412,6 @@ export function ThemeSkinStudio({
       </div>
     </div>
   );
+
+  return typeof document === "undefined" ? modal : createPortal(modal, document.body);
 }

@@ -53,7 +53,7 @@ async function api(path, init = {}) {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "pinkslab-release",
+      "User-Agent": "pi-agent-release",
       ...(init.headers ?? {}),
     },
   });
@@ -64,12 +64,15 @@ async function api(path, init = {}) {
 }
 
 /* 1. 打包：`git archive` 只收 tracked 文件，node_modules / .next / 参考项目自动排除。
-      比手写 exclude 列表可靠 —— 后者漏一个就是把 66M 的「设计风格」打进发布包。 */
+      比手写 exclude 列表可靠 —— 后者漏一个就是把 66M 的「设计风格」打进发布包。
+
+      fork:release-exclude-docs — 按用户要求**不把 docs/ 打进发布包**：那里是内部规划、
+      对比与借鉴台账，不适合随发行版分发。`git archive` 支持 pathspec，用 `:(exclude)` 排除。 */
 function buildZip() {
-  const out = join(tmpdir(), `pinkslab-source-${tag}.zip`);
-  execFileSync("git", ["archive", "--format=zip", "-9", "-o", out, tag], { stdio: "inherit" });
+  const out = join(tmpdir(), `pi-agent-source-${tag}.zip`);
+  execFileSync("git", ["archive", "--format=zip", "-9", "-o", out, tag, "--", ".", ":(exclude)docs"], { stdio: "inherit" });
   const size = statSync(out).size;
-  console.log(`  打包 ${basename(out)}  ${(size / 1024 / 1024).toFixed(1)} MB`);
+  console.log(`  打包 ${basename(out)}  ${(size / 1024 / 1024).toFixed(1)} MB（已排除 docs/）`);
   return out;
 }
 
@@ -77,7 +80,7 @@ function buildZip() {
 function releaseNotes() {
   const file = args["notes-file"] ?? `docs/release-notes-${version}.md`;
   if (existsSync(file)) return readFileSync(file, "utf8");
-  return `# Pinkslab ${tag}\n\n（没有 ${file}，这里是占位正文）`;
+  return `# Pi Agent ${tag}\n\n（没有 ${file}，这里是占位正文）`;
 }
 
 async function main() {
@@ -105,7 +108,7 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         tag_name: tag,
-        name: `Pinkslab ${tag}`,
+        name: `Pi Agent ${tag}`,
         body,
         draft: false,
         prerelease: version.includes("-"),
@@ -135,7 +138,7 @@ async function main() {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/zip",
         "Content-Length": String(data.length),
-        "User-Agent": "pinkslab-release",
+        "User-Agent": "pi-agent-release",
       },
       body: data,
     },

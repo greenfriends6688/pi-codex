@@ -2336,41 +2336,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           />
           {/* fork:ui-project-actions — 「添加项目」从项目栏标题的 + 按钮搬到这里：
               标题行只留展开/折叠，项目自己的动作（打开文件夹/重命名/移除）挂在每个项目行上。 */}
-          <button
-            type="button"
-            onClick={() => void handleAddProjectClick()}
-            disabled={nativePicking || customPathValidating}
-            title={t("sidebar.addProject")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              width: "100%",
-              padding: "6px 10px",
-              marginTop: 2,
-              background: "transparent",
-              border: "none",
-              borderRadius: "var(--radius-md)",
-              color: "var(--text-dim)",
-              cursor: nativePicking ? "wait" : "pointer",
-              fontSize: TEXT.sm,
-              textAlign: "left",
-              opacity: nativePicking ? 0.6 : 1,
-            }}
-            onMouseEnter={(event) => {
-              event.currentTarget.style.background = "var(--bg-hover)";
-              event.currentTarget.style.color = "var(--text)";
-            }}
-            onMouseLeave={(event) => {
-              event.currentTarget.style.background = "transparent";
-              event.currentTarget.style.color = "var(--text-dim)";
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            {t("sidebar.addProject")}
-          </button>
           </>
           )}
 

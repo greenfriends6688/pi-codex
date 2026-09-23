@@ -34,7 +34,6 @@ import { TEXT } from "@/lib/typography";
 import { useI18n } from "@/hooks/useI18n";
 import { animateFlip, diffFlip, type ElementRect, type FlipSnapshot } from "@/lib/flip-animate";
 import {
-  MAX_SESSION_GROUPS,
   groupProjects,
   type SessionGroup,
   type SessionGroupsStore,
@@ -100,8 +99,6 @@ export function GroupedProjectList<T extends { key: string }>({
   const [dropKey, setDropKey] = useState<string | null>(null);
   const [dropGroupId, setDropGroupId] = useState<string | null>(null);
   const [ungroupDropActive, setUngroupDropActive] = useState(false);
-  const [creating, setCreating] = useState(false);
-  const [newGroupName, setNewGroupName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
 
@@ -209,17 +206,6 @@ export function GroupedProjectList<T extends { key: string }>({
     store.moveProject({ projectKey: source, beforeKey: null, groupId: null });
   };
 
-  const commitNewGroup = () => {
-    const name = newGroupName.trim();
-    if (!name) {
-      setCreating(false);
-      return;
-    }
-    if (store.createGroup(name)) {
-      setCreating(false);
-      setNewGroupName("");
-    }
-  };
 
   const commitRename = (id: string) => {
     store.renameGroup(id, renameValue);
@@ -315,99 +301,6 @@ export function GroupedProjectList<T extends { key: string }>({
           </div>
         )}
 
-        {store.state.groups.length < MAX_SESSION_GROUPS && (
-          creating ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 4, height: ROW_HEIGHT, padding: "0 6px" }}>
-              <input
-                autoFocus
-                value={newGroupName}
-                onChange={(event) => setNewGroupName(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") commitNewGroup();
-                  if (event.key === "Escape") {
-                    setCreating(false);
-                    setNewGroupName("");
-                  }
-                }}
-                placeholder={t("sidebar.groupNamePlaceholder")}
-                aria-label={t("sidebar.groupNamePlaceholder")}
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  height: 24,
-                  padding: "0 8px",
-                  background: "var(--bg)",
-                  border: "1px solid var(--accent)",
-                  borderRadius: "var(--radius-sm)",
-                  color: "var(--text)",
-                  fontSize: TEXT.sm,
-                  outline: "none",
-                }}
-              />
-              <button
-                type="button"
-                onClick={commitNewGroup}
-                title={t("sidebar.createGroup")}
-                aria-label={t("sidebar.createGroup")}
-                style={iconButtonStyle}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setCreating(false);
-                  setNewGroupName("");
-                }}
-                title={t("sidebar.cancel")}
-                aria-label={t("sidebar.cancel")}
-                style={iconButtonStyle}
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                  <path d="M6 6l12 12M18 6 6 18" />
-                </svg>
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setNewGroupName("");
-                setCreating(true);
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                height: ROW_HEIGHT,
-                padding: "0 8px",
-                marginTop: 2,
-                background: "transparent",
-                border: "none",
-                borderRadius: "var(--radius-md)",
-                color: "var(--text-dim)",
-                cursor: "pointer",
-                fontSize: TEXT.sm,
-                textAlign: "left",
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.background = "var(--bg-hover)";
-                event.currentTarget.style.color = "var(--text)";
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.background = "transparent";
-                event.currentTarget.style.color = "var(--text-dim)";
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              {t("sidebar.newGroup")}
-            </button>
-          )
-        )}
       </div>
     </ProjectDragContext.Provider>
   );
