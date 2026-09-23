@@ -134,7 +134,7 @@ function buildPiSessionsRuntimeConfig(packageRoot: string): PiSessionsRuntimeCon
       !existsSync(typeboxEntry) ||
       !existsSync(typeboxValueEntry)
     ) {
-      throw new Error("Pi Web runtime dependencies are incomplete");
+      throw new Error("Pi Agent runtime dependencies are incomplete");
     }
 
     return {

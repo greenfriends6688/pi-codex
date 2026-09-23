@@ -22,7 +22,6 @@ import { ExtensionStatusBar } from "./ExtensionStatusBar";
 import { SessionStatsBar } from "./SessionStatsBar";
 import { NewSessionHome } from "./fork/NewSessionHome";
 import { ProjectChip, type NewSessionTargets } from "./fork/ProjectChip";
-import { ComposerTipLine } from "./fork/ComposerTipLine";
 // fork:zc-02 — in-conversation find bar (⌘F): bar component + pure search index.
 import { ConversationFindBar } from "./fork/ConversationFindBar";
 import {
@@ -1829,7 +1828,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
     <div className="fork-protrusion-bar" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, minWidth: 0 }}>
       <ProjectChip targets={newSessionTargets} />
       {/* fork:zc-17 — 空状态引导出现时，它自带轮播提示行；这里收掉一份避免同一句说两遍。 */}
-      {!newSessionTargets.error && !showEmptyStateGuide && <ComposerTipLine />}
+
       {newSessionTargets.error && (
         <span role="alert" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: TEXT.xs, color: "var(--danger)" }}>
           {newSessionTargets.error}

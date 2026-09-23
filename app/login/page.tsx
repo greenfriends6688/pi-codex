@@ -52,7 +52,7 @@ function LoginForm() {
         <header className="web-login-brand">
           <Image src="/icons/apple-touch-icon.png" width={52} height={52} alt="" priority />
           <div>
-            <h1>Pinkslab</h1>
+            <h1>Pi Agent</h1>
             <p>{t("auth.prompt")}</p>
           </div>
         </header>

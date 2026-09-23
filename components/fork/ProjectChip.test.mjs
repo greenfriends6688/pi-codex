@@ -47,36 +47,38 @@ test("resolveActiveTarget matches a project, the chat workspace, or neither", ()
   assert.equal(unknown.activeChat, false);
 });
 
-test("active project is checked once and never repeated as a switch action", () => {
+test("the active project stays in place with a check mark instead of being hoisted", () => {
   const { value } = targets();
   const entries = buildTargetItems(value, resolveActiveTarget(value), t);
 
-  const checked = entries.filter((entry) => entry.type !== "separator" && entry.checked);
-  assert.equal(checked.length, 1);
-  assert.equal(checked[0].label, "pi-web");
-  assert.equal(checked[0].onSelect, undefined);
-
-  // The other project stays selectable, with the full path as its title.
-  const other = entries.find((entry) => entry.type !== "separator" && entry.label === "招标改");
-  assert.equal(other.title, "/Users/me/招标改");
+  // fork:ui-projectchip-fix — 原来把当前项抽到顶上（不可点），用户点完就看不到「选了哪个」。
+  // 现在所有项目留在原位，当前项打勾并禁用，其它项照常可切。
+  const projectRows = entries.filter((entry) => entry.type !== "separator" && ["pi-web", "招标改"].includes(entry.label));
+  assert.deepEqual(projectRows.map((entry) => entry.label), ["pi-web", "招标改"]);
+  assert.equal(projectRows[0].checked, true);
+  assert.equal(projectRows[0].disabled, true);
+  assert.equal(projectRows[1].checked, undefined);
+  assert.equal(typeof projectRows[1].onSelect, "function");
+  assert.equal(projectRows[1].title, "/Users/me/招标改");
+  // 标题只出现一次（不重复成动作）。
   assert.equal(labels(entries).filter((label) => label === "pi-web").length, 1);
 });
 
-test("menu offers open folder / new blank project / not in a project", () => {
+test("menu offers open folder / not in a project, and no blank-project entry", () => {
   const { value, calls } = targets();
   const entries = buildTargetItems(value, resolveActiveTarget(value), t);
 
   assert.ok(labels(entries).includes("home.openFolder"));
-  assert.ok(labels(entries).includes("home.newBlankProject"));
   assert.ok(labels(entries).includes("sidebar.newTaskNoProject"));
   assert.ok(entries.some((entry) => entry.type === "separator"));
+  // fork:ui-projectchip-fix — 「新建空白项目」已按用户要求移除。
+  assert.ok(!labels(entries).includes("home.newBlankProject"));
 
   for (const entry of entries) {
     if (entry.type === "separator") continue;
     if (entry.label === "home.openFolder") entry.onSelect();
-    if (entry.label === "home.newBlankProject") entry.onSelect();
   }
-  assert.deepEqual(calls.map((call) => call.kind), ["folder", "blank"]);
+  assert.deepEqual(calls.map((call) => call.kind), ["folder"]);
 });
 
 test("chat workspace row disappears once it is the active target", () => {

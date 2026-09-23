@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Pi Agent">
+  <title>Pi Agent</title>
+  <defs>
+    <linearGradient id="pa-body" x1="120" y1="470" x2="420" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f6bff"/>
+      <stop offset="0.55" stop-color="#5b6bff"/>
+      <stop offset="1" stop-color="#a06bff"/>
+    </linearGradient>
+    <linearGradient id="pa-plate" x1="180" y1="120" x2="340" y2="250" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1c2440"/>
+      <stop offset="1" stop-color="#141a2e"/>
+    </linearGradient>
+    <linearGradient id="pa-eye" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7fe3ff"/>
+      <stop offset="1" stop-color="#35b9f5"/>
+    </linearGradient>
+  </defs>
+
+  <!-- π 形状的身体/双腿：横梁 + 两条腿，右腿收尾带钩 -->
+  <path fill="url(#pa-body)" d="M150 232h212c18 0 32 14 32 32s-14 32-32 32h-24v120c0 16 8 26 22 26 12 0 20-6 26-16 8-13 25-17 37-9 12 8 16 25 8 38-16 26-42 40-74 40-52 0-84-33-84-84V296h-30v134c0 18-14 32-32 32s-32-14-32-32V296h-28c-18 0-32-14-32-32s14-32 32-32Z"/>
+
+  <!-- 两侧「耳朵」 -->
+  <rect x="72" y="150" width="46" height="96" rx="23" fill="url(#pa-body)"/>
+  <rect x="394" y="150" width="46" height="96" rx="23" fill="url(#pa-body)"/>
+
+  <!-- 头盔外壳（白色外壳 + 极淡描边，白底上也读得出轮廓） -->
+  <path fill="#ffffff" stroke="#e2e6f2" stroke-width="6" d="M256 44c-74 0-134 60-134 134v34c0 20 16 36 36 36h196c20 0 36-16 36-36v-34c0-74-60-134-134-134Zm0 34c55 0 100 45 100 100v36H156v-36c0-55 45-100 100-100Z"/>
+
+  <!-- 面罩 -->
+  <rect x="150" y="112" width="212" height="132" rx="58" fill="url(#pa-plate)"/>
+
+  <!-- 眼睛 -->
+  <rect x="196" y="152" width="34" height="58" rx="17" fill="url(#pa-eye)"/>
+  <rect x="282" y="152" width="34" height="58" rx="17" fill="url(#pa-eye)"/>
+</svg>

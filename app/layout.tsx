@@ -54,12 +54,17 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Pinkslab",
-  description: "Pinkslab — local coding agent workbench",
-  applicationName: "Pinkslab",
+  title: "Pi Agent",
+  description: "Pi Agent — local coding agent workbench",
+  applicationName: "Pi Agent",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: [
+      // fork:brand-logo — 浏览器标签页优先用 SVG（清晰），PNG 留给旧浏览器与 PWA。
+      {
+        url: "/pi-agent-logo.svg",
+        type: "image/svg+xml",
+      },
       {
         url: "/icons/icon-192.png",
         sizes: "192x192",
@@ -77,7 +82,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Pinkslab",
+    title: "Pi Agent",
   },
   formatDetection: {
     telephone: false,

@@ -43,7 +43,6 @@ export interface NewSessionTargets {
   onPickProject: (project: NewSessionProject) => void;
   onPickChat: () => void;
   onOpenFolder: () => void;
-  onNewBlank: () => void;
 }
 
 type Translate = (key: string, params?: Record<string, string | number>) => string;
@@ -81,9 +80,6 @@ function OpenFolderIcon(): ReactNode {
   return <svg {...iconProps}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v1" /><path d="M3 10h18l-2 8a2 2 0 0 1-2 1.6H5.6A2 2 0 0 1 3.6 18Z" /></svg>;
 }
 
-function BlankProjectIcon(): ReactNode {
-  return <svg {...iconProps}><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /><path d="M12 10v6M9 13h6" /></svg>;
-}
 
 function ChatIcon(): ReactNode {
   return <svg {...iconProps}><path d="M21 12a8 8 0 0 1-8 8H8l-5 3 1.4-4.6A8 8 0 1 1 21 12Z" /></svg>;
@@ -103,28 +99,35 @@ export function buildTargetItems(
   active: { activeProject: NewSessionProject | null; activeChat: boolean },
   t: Translate,
 ): ContextMenuEntry[] {
+  // fork:ui-projectchip-fix — 列表**不再把当前项抽到顶上**：抽走之后点过的那一行会消失，
+  // 用户看不到「我选了哪个」（原来的 checked 行还不是可点的动作）。现在所有项目都留在原位，
+  // 当前项打勾并禁用，点其它行就切过去。
   const items: ContextMenuEntry[] = [];
-  if (active.activeProject) {
-    items.push({ label: active.activeProject.name, title: active.activeProject.root, checked: true });
-  } else if (active.activeChat) {
-    items.push({ label: t("sidebar.newTaskNoProject"), title: targets.chatPath ?? undefined, checked: true });
-  } else if (targets.activeCwd) {
+
+  if (!active.activeProject && active.activeChat) {
+    items.push({
+      label: t("sidebar.newTaskNoProject"),
+      title: targets.chatPath ?? undefined,
+      checked: true,
+    });
+  } else if (!active.activeProject && targets.activeCwd) {
     items.push({ label: getFileName(targets.activeCwd), title: targets.activeCwd, checked: true });
   }
 
   for (const project of targets.projects) {
-    if (active.activeProject?.key === project.key) continue;
+    const isActive = active.activeProject?.key === project.key;
     items.push({
       label: project.name,
       title: project.root,
       icon: <FolderIcon />,
+      ...(isActive ? { checked: true, disabled: true } : {}),
       onSelect: () => targets.onPickProject(project),
     });
   }
 
   items.push({ type: "separator" });
+  // 「打开文件夹」= 系统默认的文件夹选择器（见 lib/pick-directory.ts）。
   items.push({ label: t("home.openFolder"), icon: <OpenFolderIcon />, onSelect: () => targets.onOpenFolder() });
-  items.push({ label: t("home.newBlankProject"), icon: <BlankProjectIcon />, onSelect: () => targets.onNewBlank() });
   if (!active.activeChat) {
     items.push({
       label: t("sidebar.newTaskNoProject"),

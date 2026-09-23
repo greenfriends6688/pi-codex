@@ -24,7 +24,6 @@ import { useI18n } from "@/hooks/useI18n";
 import { TEXT } from "@/lib/typography";
 import type { RecentProject } from "@/lib/recent-projects";
 import type { NewSessionTargets } from "./ProjectChip";
-import { ComposerTipLine } from "./ComposerTipLine";
 
 /** 从会话链接或裸 id 里取出会话 id；解析不出来返回 null（纯函数，便于复用/测试）。 */
 export function parseSessionReference(input: string): string | null {
@@ -298,7 +297,6 @@ export function EmptyStateGuide({
 
       {/* 能力提示轮播：与 composer 上方共用同一实现，避免两边各写一套「不重复上一条」逻辑。 */}
       <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-        <ComposerTipLine />
       </div>
     </section>
   );

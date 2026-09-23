@@ -184,8 +184,16 @@ export function ContextMenuProvider({ children }: { children: ReactNode }) {
       }
     };
     const onUserScroll = (event: Event) => {
-      // A wheel/touch event on any scroll container is real user intent.
-      if (event.type === "wheel" || event.type === "touchmove") closeMenu();
+      // fork:ui-projectchip-fix — 只有**真的滚动**才关菜单。触控板与 Magic Mouse
+      // 在指针移动时会喷出 deltaY=0/±1 的 wheel 事件，原来一律 closeMenu()，
+      // 表现就是「鼠标一动浮窗就没了」。阈值取 8px：小于它的当成抖动。
+      if (event.type === "touchmove") {
+        closeMenu();
+        return;
+      }
+      const wheel = event as WheelEvent;
+      const delta = Math.abs(wheel.deltaX) + Math.abs(wheel.deltaY);
+      if (delta >= 8) closeMenu();
     };
     const onBlur = () => closeMenu();
     const onResize = () => closeMenu();

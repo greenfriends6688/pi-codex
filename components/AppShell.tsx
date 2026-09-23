@@ -55,6 +55,7 @@ import { newTerminalTab, restoreTerminalTabs, TERMINAL_TABS_KEY, type TerminalTa
 import { BrowserPanel } from "./BrowserPanel";
 import { browserTabLabel, BROWSER_TABS_KEY, newBrowserTab, restoreBrowserTabs, type BrowserTab } from "./browser-tab-state";
 import { useTheme } from "@/hooks/useTheme";
+import { pickDirectory } from "@/lib/pick-directory";
 import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile, useIsNarrowMobile } from "@/hooks/useIsMobile";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
@@ -1696,20 +1697,6 @@ export function AppShell() {
     }
   }, [startSessionIn]);
 
-  const createBlankProjectForNewSession = useCallback(async () => {
-    try {
-      const res = await fetch("/api/default-cwd", { method: "POST" });
-      const data = await res.json().catch(() => ({})) as { cwd?: string; error?: string };
-      if (!res.ok || !data.cwd) {
-        setHomeTargetError(data.error ?? `HTTP ${res.status}`);
-        return;
-      }
-      const failure = await startSessionAtPath(data.cwd);
-      setHomeTargetError(failure);
-    } catch (error) {
-      setHomeTargetError(error instanceof Error ? error.message : String(error));
-    }
-  }, [startSessionAtPath]);
 
   const newSessionTargets = useMemo<NewSessionTargets | null>(() => {
     if (selectedSession !== null) return null;
@@ -1737,16 +1724,20 @@ export function AppShell() {
       },
       onOpenFolder: () => {
         setHomeTargetError(null);
-        setHomeFolderPickerOpen(true);
-      },
-      onNewBlank: () => {
-        setHomeTargetError(null);
-        void createBlankProjectForNewSession();
+        // fork:ui-pick-directory — 优先系统原生文件夹选择器；桌面版直接拿到绝对路径并
+        // 切到那个目录。拿不到（浏览器/远程）才回退到手输路径的弹窗。
+        void (async () => {
+          const cwd = await pickDirectory();
+          if (cwd) {
+            startSessionIn(cwd, cwd);
+            return;
+          }
+          setHomeFolderPickerOpen(true);
+        })();
       },
     };
   }, [
     chatWorkspaceTarget,
-    createBlankProjectForNewSession,
     effectiveNewSessionCwd,
     homeTargetError,
     refreshChatWorkspaceTarget,
@@ -1805,7 +1796,7 @@ export function AppShell() {
 
   const activeFileTab = fileTabs.find((tab) => tab.id === activeFileTabId) ?? null;
   const activeCwdName = activeCwd ? getFileName(activeCwd) || activeCwd : null;
-  const windowTitle = activeCwdName ? `${activeCwdName} - Pinkslab` : "Pinkslab";
+  const windowTitle = activeCwdName ? `${activeCwdName} - Pi Agent` : "Pi Agent";
   const topBarSessionTitle = selectedSession
     ? (selectedSession.name?.trim()
       || selectedSession.firstMessage?.trim().replace(/\s+/g, " ").slice(0, 80)

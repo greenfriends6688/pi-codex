@@ -299,7 +299,7 @@ function PiWebTitle() {
   const [scrambling, setScrambling] = useState(false);
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Pinkslab";
+  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "Pi Agent";
   const display = useScramble(target, scrambling);
 
   const triggerScramble = useCallback((toVersion: boolean) => {
@@ -1669,7 +1669,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             paddingLeft: desktopTrafficLightInset(),
           }}
         >
-          <PiWebTitle />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+            {/* fork:brand-logo — 品牌图标（public/pi-agent-logo.svg）。 */}
+            {/* eslint-disable-next-line @next/next/no-img-element -- static asset, not optimizer-routable */}
+            <img src="/pi-agent-logo.svg" alt="" width={22} height={22} draggable={false} style={{ flexShrink: 0 }} />
+            <PiWebTitle />
+          </div>
           {/* fork:zn-22 — 搜索与折叠打包成一组靠右。
               之前两个按钮是 `space-between` 的独立子元素，搜索被顶到了正中间，
               跟右边的折叠按钮隔着一大片空 —— 行内只有「品牌 + 两个动作」时，

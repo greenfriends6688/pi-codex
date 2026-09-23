@@ -1,7 +1,7 @@
 {
   "name": "@agegr/pi-web",
   "version": "0.1.5-beta.3",
-  "description": "Web UI for the pi coding agent",
+  "description": "Pi Agent — local coding agent workbench",
   "homepage": "https://github.com/greenfriends6688/pinkslab#readme",
   "repository": {
     "type": "git",
@@ -122,11 +122,11 @@
     "tailwindcss": "^4.2.2",
     "typescript": "^5"
   },
-  "productName": "Pinkslab",
+  "productName": "Pi Agent",
   "main": "electron/main.js",
   "build": {
     "appId": "com.greenfriends6688.pinkslab",
-    "productName": "Pinkslab",
+    "productName": "Pi Agent",
     "asar": false,
     "npmRebuild": false,
     "files": [
@@ -227,9 +227,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Pinkslab",
+      "shortcutName": "Pi Agent",
       "artifactName": "${productName}-Setup-${version}.${ext}",
-      "uninstallDisplayName": "Pinkslab ${version}"
+      "uninstallDisplayName": "Pi Agent ${version}"
     },
     "portable": {
       "artifactName": "${productName}-Portable-${version}.${ext}"
