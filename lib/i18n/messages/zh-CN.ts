@@ -294,6 +294,8 @@ export const zhCNLocale: LocalePlugin = {
     "theme.pine": "主题：松夜",
     "theme.auto": "主题：跟随系统",
     "history.full": "完整历史",
+    "history.truncated": "仅显示最近 {count} 条，完整转写请用导出页。",
+    "history.empty": "这个会话还没有消息。",
     "history.unsaved": "会话保存后才能查看完整历史",
     "history.label": "完整历史",
     "title.generating": "正在生成...",

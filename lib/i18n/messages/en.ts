@@ -294,6 +294,8 @@ export const enLocale: LocalePlugin = {
     "theme.pine": "Theme: Pine",
     "theme.auto": "Theme: System",
     "history.full": "Full history",
+    "history.truncated": "Showing the most recent {count} entries; open the export page for the complete transcript.",
+    "history.empty": "This session has no messages yet.",
     "history.unsaved": "Full history is available after the session is saved",
     "history.label": "Full history",
     "title.generating": "Generating...",

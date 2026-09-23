@@ -1569,7 +1569,34 @@ html[data-rail-translucent="true"] .sidebar-container {
 
 /* 内联形态没有固定高度：两列都不再各自滚动，交给设置面板自己的滚动条。 */
 .fork-skin-studio .fork-skin-dialog-preview-column,
-.fork-skin-studio /* fork:ui-archive-history — 归档历史（设置 → 归档）的分组与行。 */
+.fork-skin-studio /* fork:ui-history-panel — 顶栏的「完整历史」面板：与系统提示词/工具面板同高同底色，
+   内部按聊天区的排版渲染完整转写。 */
+.session-history-panel {
+  display: flex;
+  height: min(600px, 75dvh);
+  min-height: 220px;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.session-history-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+.session-history-note {
+  padding: 10px 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-style: italic;
+}
+
+.session-history-note.is-error { color: var(--danger); }
+
+/* fork:ui-archive-history — 归档历史（设置 → 归档）的分组与行。 */
 .settings-archived-group {
   display: flex;
   flex-direction: column;

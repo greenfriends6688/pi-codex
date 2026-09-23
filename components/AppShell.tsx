@@ -48,6 +48,7 @@ import { ProjectTrustDialog } from "./ProjectTrustDialog";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { BranchNavigator, hasSessionBranches } from "./BranchNavigator";
 import { SystemPromptPanel } from "./SystemPromptPanel";
+import { SessionHistoryPanel } from "./SessionHistoryPanel";
 import { ToolDefinitionsPanel } from "./ToolDefinitionsPanel";
 import { AgentSessionPanel } from "./AgentSessionPanel";
 import { TerminalPanel } from "./TerminalPanel";
@@ -415,7 +416,7 @@ export function AppShell() {
   }, []);
 
   // Single active panel — only one dropdown open at a time
-  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "sessions" | null>(null);
+  const [activeTopPanel, setActiveTopPanel] = useState<"agents" | "branches" | "system" | "tools" | "sessions" | "history" | null>(null);
   const TOP_BAR_SESSIONS_MENU_WIDTH = 300;
   const [topPanelPos, setTopPanelPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
@@ -432,7 +433,7 @@ export function AppShell() {
   }, [hasSubagentSessions]);
 
   const toggleTopPanel = useCallback((
-    panel: "agents" | "branches" | "system" | "tools" | "sessions",
+    panel: "agents" | "branches" | "system" | "tools" | "sessions" | "history",
     keepMobileToolbarOpen = false,
   ) => {
     if (isMobile) setSidebarOpen(false);
@@ -1587,15 +1588,6 @@ export function AppShell() {
     handleOpenFile(tab.filePath, tab.label);
   }, [handleOpenFile, openGitGraphTab]);
 
-  const handleViewFullHistory = useCallback(() => {
-    if (!selectedSession) return;
-    window.open(
-      `/api/sessions/${encodeURIComponent(selectedSession.id)}/export?inline=1`,
-      "_blank",
-      "noopener,noreferrer",
-    );
-  }, [selectedSession]);
-
   // Show chat area if a session is selected, or if we have a cwd to start a new session in
   const effectiveNewSessionCwd = newSessionCwd ?? (selectedSession === null && activeCwd ? activeCwd : null);
   const newSessionDraftKey = selectedSession === null && effectiveNewSessionCwd
@@ -1931,9 +1923,12 @@ export function AppShell() {
         <button
           type="button"
           onClick={() => {
-            handleViewFullHistory();
+            // fork:ui-history-panel — 不再 `window.open` 到导出页：与工具/系统提示词一致，
+            // 在应用内以顶栏面板展开，读历史不用离开当前会话。
+            toggleTopPanel("history", mobile && isNarrowMobile);
             if (mobile && isNarrowMobile) setMobileToolbarMoreOpen(true);
           }}
+          aria-pressed={activeTopPanel === "history"}
           disabled={!selectedSession}
           title={selectedSession ? translate("history.full") : translate("history.unsaved")}
           aria-label={translate("history.full")}
@@ -2829,6 +2824,14 @@ export function AppShell() {
                   loading={systemInfoLoading}
                   prompt={systemPrompt}
                   translate={translate}
+                />
+              )}
+              {activeTopPanel === "history" && selectedSession && (
+                <SessionHistoryPanel
+                  sessionId={selectedSession.id}
+                  cwd={selectedSession.cwd}
+                  onOpenFile={(filePath, page) => handleOpenFile(filePath, filePath.split(/[/\\]/).pop() ?? filePath, page !== undefined ? { page } : undefined)}
+                  onOpenSession={handleOpenSession}
                 />
               )}
               {activeTopPanel === "tools" && (

@@ -294,6 +294,8 @@ export const zhTWLocale: LocalePlugin = {
     "theme.pine": "主題：松夜",
     "theme.auto": "主題：跟隨系統",
     "history.full": "完整紀錄",
+    "history.truncated": "僅顯示最近 {count} 筆，完整轉寫請用匯出頁。",
+    "history.empty": "這個對話還沒有訊息。",
     "history.unsaved": "工作階段儲存後才能查看完整紀錄",
     "history.label": "完整紀錄",
     "title.generating": "正在產生...",
