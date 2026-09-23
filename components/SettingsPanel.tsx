@@ -47,6 +47,7 @@ import { AgentsConfig } from "./AgentsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { ConfigButton, ConfigSwitch, SettingsBlock, SettingsRow, SettingsSelect, SettingsSlider } from "./SettingsUi";
 import { WallpaperSettings } from "./WallpaperSettings";
+import { THEME_SKIN_DEFAULT_ID } from "@/lib/theme-skins";
 import { useBorderDepth } from "@/hooks/useBorderDepth";
 import { useUiDensity } from "@/hooks/useUiDensity";
 // fork:zn-15 — 外观页的四项（Zeno appearance）。
@@ -235,6 +236,8 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
      由设置页决定谁被改。
      `editing` 为 `{ skin, isNew }`，null 表示对话框关着。 */
   const { skins, activeId, setActive, upsertSkin, removeSkin } = useThemeSkins();
+  // fork:zn-19-merge — 壁纸子区块要知道「现在是不是皮肤在接管」，以及编辑的是哪一套。
+  const activeSkin = skins.find((item) => item.id === activeId) ?? null;
   const [editing, setEditing] = useState<{ skin: ThemeSkin; isNew: boolean } | null>(null);
   const { fontStack, fontSize: uiFontSize, setFontStack, setFontSize: setUiFontSize } = useUiFont();
   const [stepExpansion, setStepExpansion] = useState<StepExpansion>(loadStepExpansion);
@@ -503,6 +506,20 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
               URL.revokeObjectURL(url);
             }}
           />
+
+          {/* fork:zn-19-merge — 壁纸原本是**另一个**独立区块（上面「主题皮肤」、下面「壁纸」），
+              两处都能配图、都能调遮罩/透明度，用户得先猜哪个在生效。Zeno 的做法是只有一处：
+              皮肤工作室里连壁纸一起编辑。这里按同样的思路把壁纸并进同一张卡：
+              没有自定义皮肤时它就是「默认外观」的壁纸；有皮肤时交给皮肤（见 WallpaperSettings）。 */}
+          <section className="fork-settings-block is-spaced">
+            <h3 className="fork-settings-block-label">{t("settings.wallpaperDefaultTitle")}</h3>
+            <WallpaperSettings
+              skinActive={activeSkin ? activeSkin.id !== THEME_SKIN_DEFAULT_ID : false}
+              {...(activeSkin && activeSkin.id !== THEME_SKIN_DEFAULT_ID
+                ? { onEditSkin: () => setEditing({ skin: activeSkin, isNew: false }) }
+                : {})}
+            />
+          </section>
         </section>
       </section>
 
@@ -661,11 +678,6 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
             last
           />
         </SettingsBlock>
-      </section>
-
-      <section className="settings-general-section">
-        <h3 className="settings-general-heading">{t("settings.wallpaper")}</h3>
-        <WallpaperSettings />
       </section>
 
       <section className="settings-general-section">

@@ -1018,6 +1018,12 @@ html.keyboard-open .extension-status-shelf {
   gap: 8px;
 }
 
+/* fork:zn-19-merge — 同一张卡里的第二个子区块（主题皮肤 / 壁纸）。
+   SettingsPanel 不许写内联 style（components/SettingsPanel.test.mjs 钉着），所以间距走类。 */
+.fork-settings-block.is-spaced {
+  margin-top: 12px;
+}
+
 /* Zeno `.settings-section-label`：与导轨分组标签同一套字（group-label）。 */
 .fork-settings-block-label {
   margin: 0;

@@ -5,6 +5,7 @@ import { loadExplorerOpen, saveExplorerOpen } from "@/lib/file-explorer-state";
 import { useI18n } from "@/hooks/useI18n";
 import { DismissButton } from "./DismissButton";
 import { FileExplorer, type FileExplorerHandle } from "./FileExplorer";
+import { FileManagerIcon } from "./FileIcons";
 import { TEXT } from "@/lib/typography";
 
 interface FileManagerAvailability {
@@ -254,9 +255,8 @@ export function ExplorerPanel({
             : fileManagerLabel}
           color="var(--text-dim)"
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 8a2 2 0 0 1 2-2h3.4l1.9 1.9H19a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-          </svg>
+          {/* fork:ui-file-manager-icon — 按平台出图：访达 / 资源管理器 / 通用轮廓。 */}
+          <FileManagerIcon platform={fileManager?.platform} size={14} />
         </ToolbarIconButton>
         {onOpenTerminal && (          <ToolbarIconButton
             onClick={() => onOpenTerminal(cwd)}

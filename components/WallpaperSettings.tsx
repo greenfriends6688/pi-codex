@@ -4,12 +4,12 @@ import { useRef, useState, type ChangeEvent } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useWallpaper } from "@/hooks/useWallpaper";
 import { ConfigButton } from "./SettingsUi";
-import {
-  BUILTIN_WALLPAPERS,
-  activeThemePalette,
-  builtinPaintingFor,
-  paintingPath,
-} from "@/lib/wallpaper-builtin";
+import { activeThemePalette, builtinPaintingFor } from "@/lib/wallpaper-builtin";
+import { BuiltinWallpaperPicker } from "./BuiltinWallpaperPicker";
+import { isBuiltinWallpaperId } from "@/lib/wallpaper-builtin";
+
+/** `builtinPaintingFor` 保证返回内置 id，这里只是把它收窄回字面量类型。 */
+const asBuiltinId = (value: string) => (isBuiltinWallpaperId(value) ? value : null);
 import {
   WALLPAPER_SCRIM_MAX,
   WALLPAPER_SCRIM_MIN,
@@ -29,7 +29,18 @@ import {
  * dense surfaces (the composer, the code blocks) unreadable. Each area therefore
  * opts into `none` (solid), `trans` (translucent) or `blur` (frosted).
  */
-export function WallpaperSettings() {
+export function WallpaperSettings({
+  skinActive = false,
+  onEditSkin,
+}: {
+  /**
+   * fork:zn-19-merge — 有自定义皮肤生效时，壁纸与各面透明度由**皮肤**决定
+   * （`html[data-theme-skin="true"]` 那一组 CSS 会接管，全局的 per-area 模式被显式排除）。
+   * 这时再摆一排滑块就是「看着能调、其实无效」的死控件，所以改成说明 + 去编辑皮肤。
+   */
+  skinActive?: boolean;
+  onEditSkin?: () => void;
+} = {}) {
   const { t } = useI18n();
   const {
     enabled,
@@ -101,6 +112,21 @@ export function WallpaperSettings() {
     </div>
   );
 
+  if (skinActive) {
+    return (
+      <div className="settings-wallpaper">
+        <p className="settings-pi-theme-description">{t("settings.wallpaperSkinOwned")}</p>
+        {onEditSkin && (
+          <div className="settings-wallpaper-actions">
+            <ConfigButton variant="secondary" onClick={onEditSkin}>
+              {t("settings.wallpaperSkinOwnedEdit")}
+            </ConfigButton>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="settings-wallpaper">
       <p className="settings-pi-theme-description">{t("settings.wallpaperDescription")}</p>
@@ -139,32 +165,14 @@ export function WallpaperSettings() {
         </div>
       </div>
 
-      {/* fork:ui-wallpaper — the built-in picker. The active thumbnail is the one
-          the layer would actually paint, so it honours the palette fallback when
-          the user has never picked (and no thumbnail is active over a custom
+      {/* fork:ui-wallpaper — the built-in picker (shared with the skin studio). The active
+          thumbnail is the one the layer would actually paint, so it honours the palette
+          fallback when the user has never picked (and no thumbnail is active over a custom
           image, which wins over all of them). */}
-      <div className="settings-wallpaper-builtins">
-        <span className="settings-wallpaper-builtin-label">{t("settings.wallpaperBuiltinPick")}</span>
-        <div className="settings-wallpaper-builtin-grid" role="group" aria-label={t("settings.wallpaperBuiltinPick")}>
-          {BUILTIN_WALLPAPERS.map((item) => {
-            const active = !url && builtinPaintingFor(activeThemePalette(), builtin) === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                className="settings-wallpaper-builtin"
-                data-active={active ? "true" : undefined}
-                aria-pressed={active}
-                onClick={() => setBuiltin(item.id)}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element -- static asset, not optimizer-routable */}
-                <img src={paintingPath(item.id)} alt="" draggable={false} />
-                <span>{t(item.labelKey)}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      <BuiltinWallpaperPicker
+        activeId={!url ? asBuiltinId(builtinPaintingFor(activeThemePalette(), builtin)) : null}
+        onPick={setBuiltin}
+      />
 
       {enabled && !url && <p className="settings-pi-theme-note">{t("settings.wallpaperBuiltinNote")}</p>}
 

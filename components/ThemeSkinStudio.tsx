@@ -29,6 +29,8 @@ import {
   type ThemeSkin,
 } from "@/lib/theme-skins";
 import { ConfigButton, SettingsSlider } from "./SettingsUi";
+import { BuiltinWallpaperPicker, builtinIdForWallpaperUrl } from "./BuiltinWallpaperPicker";
+import { paintingPath } from "@/lib/wallpaper-builtin";
 
 const SLIDER_ORDER: Array<{ key: keyof typeof SKIN_RANGES; labelKey: string; unit: string }> = [
   { key: "focusX", labelKey: "settings.skinFocusX", unit: "%" },
@@ -254,6 +256,14 @@ export function ThemeSkinStudio({
                   </select>
                 </label>
               </div>
+
+              {/* fork:zn-19-merge — 内置画作也能在这里直接挑：原来只有设置里的「壁纸」
+                  区块能选，进工作室配皮肤时挑不到，得退出去再进来。 */}
+              <BuiltinWallpaperPicker
+                labelKey="settings.skinBuiltinWallpaper"
+                activeId={builtinIdForWallpaperUrl(draft.wallpaper)}
+                onPick={(id) => patch({ wallpaper: paintingPath(id) })}
+              />
             </div>
 
             <div className="fork-skin-dialog-controls">

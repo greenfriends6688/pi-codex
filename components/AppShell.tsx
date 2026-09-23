@@ -2076,8 +2076,13 @@ export function AppShell() {
             style={{
               position: "relative",
               display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              width: TOP_BAR_ICON_BUTTON_SIZE,
-              height: TOP_BAR_ICON_BUTTON_SIZE, borderRadius: "var(--radius-md)", margin: 0, padding: 0,
+              // fork:ui-agent-icon — 原来是固定 28px 宽，里面要放「图标 + 6px 间距 + ≥15px 徽标」，
+              // flex 只能把图标压扁：实测 svg 渲染成 7×16，看上去就是「这个图标特别小」。
+              // 改成按内容撑开（高度不变，与同排按钮等高），并把图标设为不可收缩。
+              width: "auto",
+              minWidth: TOP_BAR_ICON_BUTTON_SIZE,
+              height: TOP_BAR_ICON_BUTTON_SIZE, borderRadius: "var(--radius-md)", margin: 0,
+              padding: "0 6px",
               background: activeTopPanel === "agents" ? "var(--bg-selected)" : "none",
               border: "none",
 
@@ -2087,8 +2092,11 @@ export function AppShell() {
             }}
             data-mobile-toolbar-action={mobile ? "agents" : undefined}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <rect x="5" y="7" width="14" height="11" rx="2" /><path d="M9 11h.01M15 11h.01M9 15h6M12 7V4M10 4h4" />
+            {/* fork:ui-agent-icon — 字形画满 viewBox（17×17 墨量，原来只占 58%），
+                并显式 `flexShrink: 0`：它旁边挂着子代理数量徽标，容器一窄就会被压扁。 */}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
+              <rect x="3.5" y="5.5" width="17" height="14" rx="3.5" />
+              <path d="M8.5 10.5h.01M15.5 10.5h.01M9 15h6M12 5.5V3M9.5 2.5h5" />
             </svg>
 
             <span
