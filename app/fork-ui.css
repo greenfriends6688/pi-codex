@@ -1293,10 +1293,24 @@ html[data-rail-translucent="true"] .sidebar-container {
 }
 
 .fork-minimap-popover-role {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 4px;
   font-size: var(--text-xs);
   font-weight: 500;
   color: var(--text-muted);
+}
+
+/* fork:upstream-0.9.2-minimap-tools — 该回合的工具调用次数，跟在角色标签后面。 */
+.fork-minimap-popover-tools {
+  margin-left: auto;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--tool-bg);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .fork-minimap-popover-text {

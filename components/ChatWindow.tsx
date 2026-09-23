@@ -2046,7 +2046,10 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
             scrollContainerRef，既有 scroll 监听与 minimap 引用保持不变。 */}
         <ScrollFadeViewport
           viewportRef={scrollContainerRef}
-          className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-width:none]"
+          // fork:upstream-0.9.2-scrollbar — 消息列是唯一必须用长输出拖动的位置，
+          // 所以显示自己的滚动条而不是藏起来（minimap 只标回合）；
+          // stable gutter 让短会话长出屏幕时居中列不会横向跳动。
+          className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto pt-4 [scrollbar-gutter:stable]"
           style={{ visibility: pendingScrollRestore ? "hidden" : undefined }}
         >
           <div style={{ minWidth: 0, padding: `0 ${CHAT_COLUMN_PADDING_CSS}` }}>

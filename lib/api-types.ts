@@ -147,6 +147,8 @@ export interface PluginPackageInfo {
   packageName?: string;
   version?: string;
   configuredVersion?: string;
+  // fork:upstream-0.9.2-plugins-description — #868 移植
+  description?: string;
   counts: PluginResourceCounts;
   resources: PluginResourceInfo[];
   status: "loaded" | "installed" | "missing" | "disabled";

@@ -146,7 +146,8 @@ function getConfiguredVersion(source: string): string | undefined {
   return undefined;
 }
 
-function readPackageMetadata(installedPath?: string): { packageName?: string; version?: string } {
+// fork:upstream-0.9.2-plugins-description — #868 移植：读取包描述
+function readPackageMetadata(installedPath?: string): { packageName?: string; version?: string; description?: string } {
   if (!installedPath) return {};
   try {
     const stats = statSync(installedPath);
@@ -157,10 +158,12 @@ function readPackageMetadata(installedPath?: string): { packageName?: string; ve
     const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
       name?: unknown;
       version?: unknown;
+      description?: unknown;
     };
     return {
       packageName: typeof parsed.name === "string" ? parsed.name : undefined,
       version: typeof parsed.version === "string" ? parsed.version : undefined,
+      description: typeof parsed.description === "string" ? parsed.description : undefined,
     };
   } catch {
     return {};
@@ -280,6 +283,7 @@ async function readPlugins(cwd: string): Promise<PluginsResponse> {
       packageName: packageMetadata.packageName,
       version: packageMetadata.version,
       configuredVersion: getConfiguredVersion(pkg.source),
+      description: packageMetadata.description,
       counts,
       resources,
       status: disabled ? "disabled" : resourceCount > 0 ? "loaded" : pkg.installedPath ? "installed" : "missing",

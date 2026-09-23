@@ -919,6 +919,7 @@ export const zhTWLocale: LocalePlugin = {
     "chat.imageNotSupportedBody": "目前選擇的模型（{model}）不支援圖片輸入，附加的圖片可能會被忽略。",
     "chat.tokensSaved": "已節省 {saved}",
     "chatMinimap.locateAssistant": "定位助理訊息",
+    "chatMinimap.toolCalls": "本回合工具呼叫：{count}",
     "chatMinimap.userMessage": "使用者訊息",
     "chatMinimap.assistantReply": "助手回覆",
     "chatMinimap.pinPreview": "固定導覽面板",

@@ -392,6 +392,29 @@ test("keeps the selected session warm while idle and renews its lease", () => {
   assert.match(appShellSource, /onRunningSessionIdsChange=\{handleRunningSessionIdsChange\}/);
 });
 
+test("opens the selected session's event stream even when Strict Mode re-runs effects", () => {
+  // Strict Mode re-runs effects in declaration order after a simulated unmount.
+  // The mount-only effect's cleanup flips sessionHookMountedRef to false and
+  // only restores it when it re-runs, which happens after the warm-session
+  // effect. That effect must therefore re-assert the ref itself or
+  // shouldMaintain() refuses to open the stream on mount and on every switch
+  // back to a running session.
+  const warmSource = source.slice(
+    source.indexOf("  // Keep the selected session warm even while its agent is idle."),
+    source.indexOf("    const renewLease = async () => {"),
+  );
+  assert.match(warmSource, /sessionHookMountedRef\.current = true;\s*maintainEventsConnected\(sid\);/);
+  assert.ok(
+    warmSource.indexOf("sessionHookMountedRef.current = true;")
+      < warmSource.indexOf("maintainEventsConnected(sid);"),
+  );
+  const mountSource = source.slice(
+    source.indexOf("  useEffect(() => {\n    sessionHookMountedRef.current = true;"),
+    source.indexOf("  useEffect(() => {\n    onSystemPromptChange?.(systemPrompt);"),
+  );
+  assert.match(mountSource, /return \(\) => \{\s*sessionHookMountedRef\.current = false;/);
+});
+
 test("keeps one reducer-owned assistant partial and consumes Pi JSON deltas", () => {
   const connectedSource = source.slice(
     source.indexOf('case "connected"'),
