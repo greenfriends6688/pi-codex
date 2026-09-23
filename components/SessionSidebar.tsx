@@ -1346,14 +1346,18 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
    * fork:ui-10 — one place that turns "all sessions" into "this project's rows in the
    * requested order", so the five list call sites cannot drift apart.
    */
-  const orderedProjectSessions = useCallback((projectKey: string) => {
+  /** 该项目的全部会话（含已归档），按最后修改时间倒序。 */
+  const sortedProjectSessions = useCallback((projectKey: string) => {
     const rows = sessionsForProject(allSessions, projectKey);
-    const sorted = [...rows].sort((a, b) => (
+    return [...rows].sort((a, b) => (
       // fork:ui — 排序开关已移除，固定按最后修改时间倒序。
       b.modified.localeCompare(a.modified)
     ));
-    return applySessionFlags(sorted, sessionFlags);
-  }, [allSessions, sessionFlags]);
+  }, [allSessions]);
+
+  const orderedProjectSessions = useCallback((projectKey: string) => (
+    applySessionFlags(sortedProjectSessions(projectKey), sessionFlags)
+  ), [sortedProjectSessions, sessionFlags]);
 
   const selectedProject = projectFor(selectedCwd);
   const projectChoices = useMemo(() => {
@@ -2257,7 +2261,12 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   (() => {
                     const projectSessions = orderedProjectSessions(project.key);
                     const families = listSessionFamilies(projectSessions);
-                    const archivedFamilies = listSessionFamilies(archivedSessions(projectSessions, sessionFlags));
+                    // fork:ui-archive-fix — 归档列表必须从**未过滤**的列表取：
+                    // `orderedProjectSessions` 已经把归档行丢掉了，再过滤一次永远是空的，
+                    // 于是「归档」= 会话直接失踪（列表里没有、已归档区也不出现）。
+                    const archivedFamilies = listSessionFamilies(
+                      archivedSessions(sortedProjectSessions(project.key), sessionFlags),
+                    );
                     const projectEntries = groupByTimeBucket(families, bucketOfFamily, collapsedGroups);
                     const archivedSection = (
                       <ArchivedSessionsSection

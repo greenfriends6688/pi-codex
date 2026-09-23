@@ -47,11 +47,18 @@ export function isSessionTag(value: unknown): value is SessionTag {
 export interface SessionFlags {
   pinned: string[];
   archived: string[];
+  /**
+   * fork:ui-archive-history — session id → 归档时间（ISO）。
+   *
+   * 「归档历史」页要按时间排序并显示「多久前归档」，光有一串 id 排不出来。老数据没有这个
+   * 字段，解析时按缺失处理（这些行按 id 顺序排在末尾）。
+   */
+  archivedAt: Record<string, string>;
   /** session id → tag. A session without a tag has no dot. */
   tags: Record<string, SessionTag>;
 }
 
-const EMPTY: SessionFlags = { pinned: [], archived: [], tags: {} };
+const EMPTY: SessionFlags = { pinned: [], archived: [], archivedAt: {}, tags: {} };
 
 const listeners = new Set<() => void>();
 let cache: SessionFlags | null = null;
@@ -74,11 +81,22 @@ export function parseSessionFlags(raw: string | null): SessionFlags {
     return {
       pinned: sanitizeIdList(record.pinned),
       archived: sanitizeIdList(record.archived),
+      archivedAt: sanitizeArchivedAt(record.archivedAt),
       tags: sanitizeTags(record.tags),
     };
   } catch {
     return { ...EMPTY, tags: {} };
   }
+}
+
+/** id → ISO 时间戳；坏值丢掉（历史页会按「未知时间」渲染）。 */
+function sanitizeArchivedAt(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, string> = {};
+  for (const [id, at] of Object.entries(value as Record<string, unknown>)) {
+    if (id && typeof at === "string" && at) out[id] = at;
+  }
+  return out;
 }
 
 /** Unknown tags and non-string ids are dropped rather than rendered as a "?" dot. */
@@ -142,7 +160,11 @@ export function togglePinned(id: string): void {
 
 export function toggleArchived(id: string): void {
   const current = ensure();
-  write({ ...current, archived: toggleIn(current.archived, id) });
+  const archived = toggleIn(current.archived, id);
+  const archivedAt = { ...current.archivedAt };
+  if (archived.includes(id)) archivedAt[id] = new Date().toISOString();
+  else delete archivedAt[id];
+  write({ ...current, archived, archivedAt });
 }
 
 /** Set or clear one session's tag (`null` clears it). */

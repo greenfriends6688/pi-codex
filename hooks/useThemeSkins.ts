@@ -6,12 +6,14 @@ import {
   THEME_SKINS_DEFAULT_STATE,
   THEME_SKINS_STORAGE_KEY,
   THEME_SKIN_DEFAULT_ID,
-  findActiveSkin,
   parseThemeSkinsState,
+  resolveSkinColors,
+  type SkinMode,
   type ThemeSkin,
   type ThemeSkinsState,
 } from "@/lib/theme-skins";
 import { applyWallpaperState, readWallpaperState } from "@/hooks/useWallpaper";
+import { allSkinCandidates, findActiveSkinIncludingBuiltins } from "@/lib/builtin-skins";
 
 /**
  * fork:zn-19 — 主题皮肤的状态 + 落地（DOM 副作用 + 持久化）。
@@ -145,7 +147,10 @@ function writeCustomCss(css: string): void {
  */
 function writeSkin(skin: ThemeSkin): void {
   const root = document.documentElement;
-  const { background, panel, accent, text } = skin;
+  // fork:zn-19-variant — 取哪套变体看**应用当前的明暗**（Zeno 的 auto 语义）：
+  // 皮肤没写该模式的覆盖时自动回落到共享基色，所以老皮肤行为不变。
+  const activeMode: SkinMode = root.dataset.theme === "dark" ? "dark" : "light";
+  const { background, panel, accent, text } = resolveSkinColors(skin, activeMode);
 
   if (background) root.style.setProperty("--bg", background);
   if (text) root.style.setProperty("--text", text);
@@ -192,7 +197,8 @@ function writeSkin(skin: ThemeSkin): void {
   root.style.setProperty("--skin-sidebar-alpha", `${skin.sidebarOpacity}%`);
 
   root.dataset.themeSkin = "true";
-  root.dataset.themeSkinMode = skin.mode;
+  // 记录**实际生效**的模式（不是皮肤自称的 mode）：CSS 要按模式分叉时才有意义。
+  root.dataset.themeSkinMode = activeMode;
   root.dataset.themeSkinWallpaperFit = skin.wallpaperFit;
 
   writeCustomCss(skin.customCss);
@@ -219,7 +225,7 @@ function writeSkin(skin: ThemeSkin): void {
 
 export function applyThemeSkinsState(next: ThemeSkinsState): void {
   if (typeof document === "undefined") return;
-  const skin = findActiveSkin(next);
+  const skin = findActiveSkinIncludingBuiltins(next);
   if (!skin) {
     clearSkin();
     return;
@@ -280,9 +286,10 @@ export function useThemeSkins() {
   }, []);
 
   return {
-    skins: current.skins,
+    // 卡片条要看得到内置皮肤（内置壁纸的落点）；同 id 时用户那份覆盖内置。
+    skins: allSkinCandidates(current),
     activeId: current.activeId,
-    activeSkin: findActiveSkin(current),
+    activeSkin: findActiveSkinIncludingBuiltins(current),
     setActive,
     upsertSkin,
     removeSkin,

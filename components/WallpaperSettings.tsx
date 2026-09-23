@@ -4,12 +4,6 @@ import { useRef, useState, type ChangeEvent } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useWallpaper } from "@/hooks/useWallpaper";
 import { ConfigButton } from "./SettingsUi";
-import { activeThemePalette, builtinPaintingFor } from "@/lib/wallpaper-builtin";
-import { BuiltinWallpaperPicker } from "./BuiltinWallpaperPicker";
-import { isBuiltinWallpaperId } from "@/lib/wallpaper-builtin";
-
-/** `builtinPaintingFor` 保证返回内置 id，这里只是把它收窄回字面量类型。 */
-const asBuiltinId = (value: string) => (isBuiltinWallpaperId(value) ? value : null);
 import {
   WALLPAPER_SCRIM_MAX,
   WALLPAPER_SCRIM_MIN,
@@ -45,7 +39,6 @@ export function WallpaperSettings({
   const {
     enabled,
     url,
-    builtin,
     scrim,
     inputMode,
     panelMode,
@@ -53,8 +46,6 @@ export function WallpaperSettings({
     usingBuiltin,
     choose,
     remove,
-    useBuiltin,
-    setBuiltin,
     setEnabled,
     setScrim,
     setInputMode,
@@ -145,11 +136,6 @@ export function WallpaperSettings({
           {busy ? t("settings.wallpaperBusy") : (url ? t("settings.wallpaperReplace") : t("settings.wallpaperChoose"))}
         </ConfigButton>
         {url && (
-          <ConfigButton variant="ghost" onClick={useBuiltin} title={t("settings.wallpaperUseBuiltin")}>
-            {t("settings.wallpaperUseBuiltin")}
-          </ConfigButton>
-        )}
-        {url && (
           <ConfigButton variant="ghost" onClick={remove}>
             {t("settings.wallpaperRemove")}
           </ConfigButton>
@@ -165,14 +151,9 @@ export function WallpaperSettings({
         </div>
       </div>
 
-      {/* fork:ui-wallpaper — the built-in picker (shared with the skin studio). The active
-          thumbnail is the one the layer would actually paint, so it honours the palette
-          fallback when the user has never picked (and no thumbnail is active over a custom
-          image, which wins over all of them). */}
-      <BuiltinWallpaperPicker
-        activeId={!url ? asBuiltinId(builtinPaintingFor(activeThemePalette(), builtin)) : null}
-        onPick={setBuiltin}
-      />
+      {/* fork:zn-19-builtin-skins — 内置画作不再是这里的一份预设，而是卡片条里的内置皮肤
+          （点一下就带壁纸生效、还能直接编辑）。这里只留「自己的图片」这条路径，避免
+          「皮肤 / 壁纸」又变成两处可配同一件事。 */}
 
       {enabled && !url && <p className="settings-pi-theme-note">{t("settings.wallpaperBuiltinNote")}</p>}
 

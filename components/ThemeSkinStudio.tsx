@@ -25,7 +25,9 @@ import { useI18n } from "@/hooks/useI18n";
 import {
   SKIN_RANGES,
   resolveCssColorToHex,
+  resolveSkinColors,
   SKIN_WALLPAPER_FIT_VALUES,
+  type SkinColorKey,
   createSkinDraft,
   type SkinMode,
   type SkinWallpaperFit,
@@ -34,6 +36,7 @@ import {
 import { ConfigButton, SettingsSlider } from "./SettingsUi";
 import { BuiltinWallpaperPicker, builtinIdForWallpaperUrl } from "./BuiltinWallpaperPicker";
 import { paintingPath } from "@/lib/wallpaper-builtin";
+import { SKIN_MODE_PALETTE } from "@/lib/theme-skins";
 
 const SLIDER_ORDER: Array<{ key: keyof typeof SKIN_RANGES; labelKey: string; unit: string }> = [
   { key: "focusX", labelKey: "settings.skinFocusX", unit: "%" },
@@ -97,6 +100,14 @@ export function ThemeSkinStudio({
 
   const patch = (next: Partial<ThemeSkin>) => setDraft((current) => ({ ...current, ...next }));
 
+  /** 写当前模式变体的一个颜色；空串 = 清掉覆盖，回到共享值。 */
+  const patchVariantColor = (key: SkinColorKey, value: string) => {
+    setDraft((current) => ({
+      ...current,
+      [previewMode]: { ...current[previewMode], [key]: value },
+    }));
+  };
+
   const pickWallpaper = () => {
     const input = document.createElement("input");
     input.type = "file";
@@ -125,11 +136,14 @@ export function ThemeSkinStudio({
      inline style，而不是写 `<html>` 变量 —— 否则「编辑中」的皮肤会当场改掉整个应用，
      用户按「取消」时来不及回滚。 */
   const previewStyle = useMemo(() => {
-    const { background, panel, accent, text } = draft;
-    const bg = background || "var(--bg)";
-    const pn = panel || "var(--bg-elev)";
-    const ac = accent || "var(--accent)";
-    const tx = text || "var(--text)";
+    // fork:zn-19-variant — 预览按**当前选中的模式**取色：变体 → 共享 → 该模式调色板。
+    // 之前这里直接用 draft 的共享基色，所以点「深色」预览纹丝不动（开关是死的）。
+    const palette = SKIN_MODE_PALETTE[previewMode];
+    const resolved = resolveSkinColors(draft, previewMode);
+    const bg = resolved.background || palette.background;
+    const pn = resolved.panel || palette.panel;
+    const ac = resolved.accent || palette.accent;
+    const tx = resolved.text || palette.text;
     return {
       background: bg,
       color: tx,
@@ -142,7 +156,7 @@ export function ThemeSkinStudio({
       "--preview-accent": ac,
       "--preview-text-muted": `color-mix(in srgb, ${tx} 62%, ${bg})`,
     } as React.CSSProperties;
-  }, [draft]);
+  }, [draft, previewMode]);
 
   return (
     <section
@@ -299,20 +313,40 @@ export function ThemeSkinStudio({
                 />
               </label>
 
+              {/* fork:zn-19-variant — 这四个色输入编辑的是**当前模式的变体**（Zeno 的
+                  `updateVariantColor`）。变体为空时显示继承来的共享值，右侧的 ↺ 可以
+                  清掉覆盖、退回共享。 */}
               <div className="fork-skin-color-grid">
-                {COLOR_FIELDS.map((field) => (
-                  <label key={String(field.key)} className="fork-skin-color-field">
-                    <span>{t(field.labelKey)}</span>
-                    <input
-                      type="color"
-                      value={toColorInputValue(
-                        String(draft[field.key] ?? ""),
-                        previewMode === "light" ? "#ffffff" : "#191919",
-                      )}
-                      onChange={(event) => patch({ [field.key]: event.target.value } as Partial<ThemeSkin>)}
-                    />
-                  </label>
-                ))}
+                {COLOR_FIELDS.map((field) => {
+                  const key = field.key as SkinColorKey;
+                  const variantValue = draft[previewMode][key];
+                  const effective = resolveSkinColors(draft, previewMode)[key];
+                  const inherited = !variantValue;
+                  return (
+                    <label key={String(field.key)} className="fork-skin-color-field">
+                      <span>{t(field.labelKey)}</span>
+                      <span className="fork-skin-color-controls">
+                        <input
+                          type="color"
+                          value={toColorInputValue(effective, SKIN_MODE_PALETTE[previewMode][key])}
+                          data-inherited={inherited ? "true" : undefined}
+                          onChange={(event) => patchVariantColor(key, event.target.value)}
+                        />
+                        {!inherited && (
+                          <button
+                            type="button"
+                            className="fork-skin-color-reset"
+                            title={t("settings.skinColorInherit")}
+                            aria-label={t("settings.skinColorInherit")}
+                            onClick={() => patchVariantColor(key, "")}
+                          >
+                            ↺
+                          </button>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })}
               </div>
 
               <div className="fork-skin-slider-grid">

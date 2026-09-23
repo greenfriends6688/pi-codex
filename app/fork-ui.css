@@ -1569,7 +1569,96 @@ html[data-rail-translucent="true"] .sidebar-container {
 
 /* 内联形态没有固定高度：两列都不再各自滚动，交给设置面板自己的滚动条。 */
 .fork-skin-studio .fork-skin-dialog-preview-column,
-.fork-skin-studio .fork-skin-dialog-controls {
+.fork-skin-studio /* fork:ui-archive-history — 归档历史（设置 → 归档）的分组与行。 */
+.settings-archived-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 6px;
+}
+
+.settings-archived-group-label {
+  padding: 4px 2px;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+}
+
+.settings-archived-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  padding: 2px 2px;
+}
+
+.settings-archived-row[data-missing="true"] .settings-archived-name {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
+.settings-archived-title {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-archived-title:disabled { cursor: default; }
+
+.settings-archived-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-archived-meta {
+  flex: none;
+  color: var(--text-dim);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.settings-archived-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+/* fork:zn-19-variant — 颜色行右侧的「继承/还原」小按钮。 */
+.fork-skin-color-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fork-skin-color-controls input[type="color"][data-inherited="true"] {
+  opacity: 0.55;
+}
+
+.fork-skin-color-reset {
+  border: none;
+  background: none;
+  padding: 0 2px;
+  color: var(--text-dim);
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fork-skin-color-reset:hover { color: var(--text); }
+
+.fork-skin-dialog-controls {
   overflow: visible;
 }
 

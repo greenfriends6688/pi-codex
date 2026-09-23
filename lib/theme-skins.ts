@@ -33,15 +33,40 @@ export type SkinMode = (typeof SKIN_MODE_VALUES)[number];
 export const SKIN_WALLPAPER_FIT_VALUES = ["cover", "contain", "tile"] as const;
 export type SkinWallpaperFit = (typeof SKIN_WALLPAPER_FIT_VALUES)[number];
 
-export interface ThemeSkin {
-  id: string;
-  name: string;
-  mode: SkinMode;
-  /** 四个基色。 */
+/**
+ * fork:zn-19-variant — 一套模式（浅色 / 深色）下的颜色覆盖。
+ *
+ * 空字符串 = 继承：先看该模式的变体，再回落到下面那四个**共享**基色，最后才是主题自己的 token。
+ * 这是 Zeno 的模型（`ThemeSkinConfig` 的 `light` / `dark` 字段）：皮肤可以只写一套色
+ * 到处通用，也可以给明暗各配一套。
+ */
+export interface SkinColorVariant {
   background: string;
   panel: string;
   accent: string;
   text: string;
+}
+
+export const SKIN_COLOR_KEYS = ["background", "panel", "accent", "text"] as const;
+export type SkinColorKey = (typeof SKIN_COLOR_KEYS)[number];
+
+export function emptySkinVariant(): SkinColorVariant {
+  return { background: "", panel: "", accent: "", text: "" };
+}
+
+export interface ThemeSkin {
+  id: string;
+  name: string;
+  /** 这套皮肤的**取向**：编辑器默认打开哪套变体（运行时按应用当前明暗取变体）。 */
+  mode: SkinMode;
+  /** 四个基色（两套变体的共享默认值）。 */
+  background: string;
+  panel: string;
+  accent: string;
+  text: string;
+  /** 浅色 / 深色下的覆盖；空字段回落共享值。 */
+  light: SkinColorVariant;
+  dark: SkinColorVariant;
   /** 壁纸焦点（百分比）——决定 `object-position`。 */
   focusX: number;
   focusY: number;
@@ -69,6 +94,19 @@ export interface ThemeSkin {
 
 export const THEME_SKIN_DEFAULT_ID = "default";
 
+/**
+ * fork:zn-19-variant — 两套模式的**兜底调色板**（镜像 `app/globals.css` 的 `--bg` /
+ * `--bg-panel` / `--accent` / `--text`）。
+ *
+ * 皮肤预览画的是一个「迷你外壳」，它必须能在**不是当前应用主题**的那套模式下渲染
+ * （否则点「深色」就预览不出深色）。主题 token 跟随应用明暗，用不了，所以这里放一份
+ * 具体值。Zeno 同样有 `paletteForMode()`。
+ */
+export const SKIN_MODE_PALETTE: Record<SkinMode, SkinColorVariant> = {
+  light: { background: "#ffffff", panel: "#f1f2f4", accent: "#2b7fff", text: "#171717" },
+  dark: { background: "#191919", panel: "#2d2d2d", accent: "#2b7fff", text: "#f7f8fa" },
+};
+
 /** 旋钮的取值范围，滑块与解析共用一份。 */
 export const SKIN_RANGES = {
   focusX: { min: 0, max: 100, step: 1 },
@@ -93,6 +131,8 @@ export const DEFAULT_THEME_SKIN: ThemeSkin = {
   panel: "",
   accent: "",
   text: "",
+  light: emptySkinVariant(),
+  dark: emptySkinVariant(),
   focusX: 50,
   focusY: 50,
   wallpaperScale: 100,
@@ -110,6 +150,33 @@ export const DEFAULT_THEME_SKIN: ThemeSkin = {
   wallpaperFit: "cover",
   customCss: "",
 };
+
+/**
+ * fork:zn-19-variant — 某个模式下**实际生效**的四个基色。
+ *
+ * 优先级：该模式的变体 → 共享基色 → 空串（运行时表示「不动主题 token」，
+ * 预览表示「用该模式的调色板兜底」）。Zeno 的 `resolveThemeColors` 是同一套顺序。
+ */
+export function resolveSkinColors(skin: ThemeSkin, mode: SkinMode): SkinColorVariant {
+  const variant = skin[mode] ?? emptySkinVariant();
+  return {
+    background: variant.background || skin.background,
+    panel: variant.panel || skin.panel,
+    accent: variant.accent || skin.accent,
+    text: variant.text || skin.text,
+  };
+}
+
+/**
+ * fork:zn-19-variant — 应用当前实际渲染的模式（`<html data-theme>`）。
+ *
+ * 新建皮肤时要把「当前外观」写进**这个模式的变体**，而不是写进共享色：写共享色的话
+ * 明暗两套长得一模一样，编辑器里那个「浅色 / 深色」开关点了就没有任何变化。
+ */
+export function currentSkinMode(): SkinMode {
+  if (typeof document === "undefined") return DEFAULT_THEME_SKIN.mode;
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
 
 /**
  * 新建皮肤的起点：**照抄当前生效的基色**，而不是写死一套色。
@@ -133,6 +200,18 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
 
 function readString(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
+}
+
+/** 解析一套模式变体：坏字段回落空串（= 继承共享值），坏整体当成空变体。 */
+function parseSkinVariant(input: unknown): SkinColorVariant {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return emptySkinVariant();
+  const raw = input as Record<string, unknown>;
+  return {
+    background: readString(raw.background, ""),
+    panel: readString(raw.panel, ""),
+    accent: readString(raw.accent, ""),
+    text: readString(raw.text, ""),
+  };
 }
 
 /**
@@ -159,6 +238,8 @@ export function parseThemeSkin(input: unknown): ThemeSkin | null {
     panel: readString(raw.panel, ""),
     accent: readString(raw.accent, ""),
     text: readString(raw.text, ""),
+    light: parseSkinVariant(raw.light),
+    dark: parseSkinVariant(raw.dark),
     focusX: clampNumber(raw.focusX, SKIN_RANGES.focusX.min, SKIN_RANGES.focusX.max, DEFAULT_THEME_SKIN.focusX),
     focusY: clampNumber(raw.focusY, SKIN_RANGES.focusY.min, SKIN_RANGES.focusY.max, DEFAULT_THEME_SKIN.focusY),
     wallpaperScale: clampNumber(raw.wallpaperScale, SKIN_RANGES.wallpaperScale.min, SKIN_RANGES.wallpaperScale.max, DEFAULT_THEME_SKIN.wallpaperScale),

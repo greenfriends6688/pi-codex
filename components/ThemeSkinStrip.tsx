@@ -23,6 +23,7 @@ import {
   type ThemeSkin,
 } from "@/lib/theme-skins";
 import { ConfigButton } from "./SettingsUi";
+import { BUILTIN_SKIN_LABEL_KEYS } from "@/lib/builtin-skins";
 
 function ChevronIcon({ direction }: { direction: "left" | "right" }) {
   return (
@@ -143,7 +144,10 @@ export function ThemeSkinStrip({
         >
           {[null, ...skins].map((skin) => {
             const id = skin?.id ?? THEME_SKIN_DEFAULT_ID;
-            const label = skin?.name || t("settings.skinDefault");
+            // fork:zn-19-builtin-skins — 内置皮肤没写死名字（跨语言会错），标题按 id 取目录。
+            const label = skin
+              ? (BUILTIN_SKIN_LABEL_KEYS[skin.id] ? t(BUILTIN_SKIN_LABEL_KEYS[skin.id]) : skin.name)
+              : t("settings.skinDefault");
             const selected = activeId === id;
             return (
               <button

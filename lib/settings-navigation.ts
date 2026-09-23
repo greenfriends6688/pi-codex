@@ -13,6 +13,8 @@ export const SETTINGS_SECTION_VALUES = [
   "shortcuts",
   "usage",
   "prompts",
+  // fork:ui-archive-history — 归档历史（Zeno 设置 → 数据 → 归档）。
+  "archived",
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTION_VALUES)[number];

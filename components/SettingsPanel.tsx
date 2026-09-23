@@ -47,7 +47,8 @@ import { AgentsConfig } from "./AgentsConfig";
 import { PluginsConfig } from "./PluginsConfig";
 import { ConfigButton, ConfigSwitch, SettingsBlock, SettingsRow, SettingsSelect, SettingsSlider } from "./SettingsUi";
 import { WallpaperSettings } from "./WallpaperSettings";
-import { THEME_SKIN_DEFAULT_ID } from "@/lib/theme-skins";
+import { THEME_SKIN_DEFAULT_ID, currentSkinMode } from "@/lib/theme-skins";
+import { ArchivedSessionsPanel } from "./ArchivedSessionsPanel";
 import { useBorderDepth } from "@/hooks/useBorderDepth";
 import { useUiDensity } from "@/hooks/useUiDensity";
 // fork:zn-15 — 外观页的四项（Zeno appearance）。
@@ -118,6 +119,8 @@ export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: {
   // fork:zc-04 / fork:zc-03 / fork:zc-16 — glyphs for the three new sections.
   if (section === "shortcuts") return <svg {...common}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" /></svg>;
   if (section === "usage") return <svg {...common}><path d="M4 20V10M10 20V4M16 20v-7M2 20h20" /></svg>;
+  // fork:ui-archive-history — 归档箱
+  if (section === "archived") return <svg {...common}><path d="M3 7h18v3H3zM5 10v10h14V10M9 14h6" /></svg>;
   if (section === "prompts") return <svg {...common}><path d="M4 17l6-6-6-6" /><path d="M12 19h8" /></svg>;
   return <svg {...common}><path d="M9 7V2M15 7V2M6 13V8a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v5a6 6 0 0 1-12 0ZM12 19v3" /></svg>;
 }
@@ -480,11 +483,16 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
               // 得先把当前配色手工填回去。已经有生效的皮肤时用它的值，避免从皮肤
               // 派生出来的 oklch 又被 canvas 往返一次。
               const active = skins.find((item) => item.id === activeId);
+              // fork:zn-19-variant — 起点写进**当前模式的变体**（而不是共享色）：
+              // 这样切到另一套模式时它是空的，会回落到该模式的调色板，开关立刻看得见效果。
+              const mode = currentSkinMode();
               const base = active?.background && active?.panel && active?.accent && active?.text
                 ? { background: active.background, panel: active.panel, accent: active.accent, text: active.text }
                 : readCurrentSkinBase();
               setEditing({
-                skin: createSkinDraft(`skin-${Date.now().toString(36)}`, t("settings.skinNewTitle"), "dark", base),
+                skin: createSkinDraft(`skin-${Date.now().toString(36)}`, t("settings.skinNewTitle"), mode, {
+                  [mode]: { ...base },
+                }),
                 isNew: true,
               });
             }}
@@ -954,6 +962,8 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
     { id: "shortcuts", label: t("settings.shortcuts.title"), requiresProject: false },
     { id: "usage", label: t("usage.title"), requiresProject: false },
     { id: "prompts", label: t("prompts.title"), requiresProject: false },
+    // fork:ui-archive-history
+    { id: "archived", label: t("settings.archivedTitle"), requiresProject: false },
   ];
 
   useEffect(() => setLastSettingsSection(initialSection), [initialSection]);
@@ -1063,6 +1073,13 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
             {sectionHost("shortcuts", <ShortcutsSettings />)}
             {sectionHost("usage", <UsageStatsPanel />)}
             {sectionHost("prompts", <PromptsConfig onOpenFile={onOpenFile} />)}
+            {/* fork:ui-archive-history — 归档历史：恢复 / 彻底删除。 */}
+            {sectionHost("archived", (
+              <ArchivedSessionsPanel
+                onOpenSession={onOpenSession}
+                onSessionsChanged={onSessionReloaded}
+              />
+            ))}
           </main>
         </div>
       </div>
