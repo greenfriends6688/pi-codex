@@ -1081,6 +1081,8 @@ export const zhCNLocale: LocalePlugin = {
     "models.deepSeekThinkingCompat": "DeepSeek 思考兼容",
     "models.developerRole": "使用 developer role 传递系统提示词",
     "models.thinkingLevelMap": "思考等级映射",
+    "models.thinkingSendsNothing": "不发推理参数",
+    "models.thinkingLevelMapHint": "每档后面的等宽文字是该档实际发给 provider 的推理参数，随编辑实时重算。",
     "models.clearAll": "全部清除",
     "i18n.testingModel": "正在测试模型连接...",
     "i18n.connected": "已连接",

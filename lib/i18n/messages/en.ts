@@ -1082,6 +1082,8 @@ export const enLocale: LocalePlugin = {
     "models.deepSeekThinkingCompat": "DeepSeek thinking compatibility",
     "models.developerRole": "Use the developer role for the system prompt",
     "models.thinkingLevelMap": "Thinking level map",
+    "models.thinkingSendsNothing": "No reasoning params sent",
+    "models.thinkingLevelMapHint": "The mono text after each level is the reasoning payload that level actually sends, recomputed as you edit.",
     "models.clearAll": "Clear all",
     "i18n.testingModel": "Testing model connection...",
     "i18n.connected": "Connected",

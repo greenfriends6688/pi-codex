@@ -71,6 +71,8 @@ export interface ThinkingModelFields {
   baseUrl?: string;
   api?: string;
   reasoning?: boolean;
+  /** 模型输出上限。预算类分支会按「至少给答案留 1024 token」再夹一次（见 clampedBudgetForLevel）。 */
+  maxTokens?: number;
   compat?: Record<string, unknown>;
 }
 
@@ -98,9 +100,27 @@ function clampReasoning(level: string): string {
   return level === "xhigh" || level === "max" ? "high" : level;
 }
 
-/** 预算类档位的名义预算；xhigh/max → high。实际请求还会被 max_tokens - 1024 再夹一次。 */
+/** 预算类档位的名义预算；xhigh/max → high。 */
 function thinkingBudgetForLevel(level: string): number | undefined {
   return DEFAULT_THINKING_BUDGETS[clampReasoning(level)];
+}
+
+/** pi-ai `MIN_ANSWER_TOKENS`：思考预算和答案共享输出上限时，至少给答案留这么多。 */
+const MIN_ANSWER_TOKENS = 1024;
+
+/**
+ * 实际发出的预算 = 名义预算按 answer room 夹取后的值（镜像 pi-ai `adjustMaxTokensForThinking`
+ * + `clampThinkingBudgetToAnswerRoom`）。
+ *
+ * pi-ai 只在 `maxTokens <= budget` 时才夹，等价于 `min(budget, max(0, maxTokens - 1024))`；
+ * `maxTokens` 未知（老调用方只传 id/provider）时退回名义值。
+ */
+function clampedBudgetForLevel(level: string, model: ThinkingModelFields): number | undefined {
+  const nominal = thinkingBudgetForLevel(level);
+  if (nominal === undefined) return undefined;
+  const ceiling = model.maxTokens;
+  if (typeof ceiling !== "number" || !Number.isFinite(ceiling)) return nominal;
+  return ceiling <= nominal ? Math.min(nominal, Math.max(0, ceiling - MIN_ANSWER_TOKENS)) : nominal;
 }
 
 function mappedString(
@@ -281,17 +301,18 @@ function describeOpenAiCompletions(
   if (!model.reasoning) return { kind: "off", params: {} };
   const compat = resolveOpenAiThinkingCompat(model);
   const base = describeOpenAiCompletionsFormat(model, level, map, compat);
-  return withOpenAiBudget(base, level === "off" ? undefined : clampLevelFromFields(model, level, map), compat);
+  return withOpenAiBudget(model, base, level === "off" ? undefined : clampLevelFromFields(model, level, map), compat);
 }
 
-/** 追加 0.85.1 的顶层 token budget 字段（与 thinkingFormat 无关，只要 supportsThinkingTokenBudget 就附加）。 */
+/** 追加顶层 token budget 字段（与 thinkingFormat 无关，只要 supportsThinkingTokenBudget 就附加）。 */
 function withOpenAiBudget(
+  model: ThinkingModelFields,
   spec: ThinkingRequestSpec,
   reasoningEffort: string | undefined,
   compat: OpenAiThinkingCompat,
 ): ThinkingRequestSpec {
   if (!reasoningEffort || !compat.supportsThinkingTokenBudget) return spec;
-  const nominalBudget = thinkingBudgetForLevel(reasoningEffort);
+  const nominalBudget = clampedBudgetForLevel(reasoningEffort, model);
   if (nominalBudget === undefined) return spec;
   const field = resolveThinkingTokenBudgetField(compat) ?? "thinking_token_budget";
   const params = { ...spec.params, [field]: nominalBudget };
@@ -570,8 +591,9 @@ function describeAnthropic(
       },
     };
   }
-  // 老模型：预算随等级变化，xhigh/max clamp 到 high；buildParams 里 `thinkingBudgetTokens || 1024`。
-  const budget = thinkingBudgetForLevel(effective) ?? 1024;
+  // 老模型：预算随等级变化，xhigh/max clamp 到 high；buildParams 里 `thinkingBudgetTokens || 1024`，
+  // 再按 answer room 夹一次（`Math.min(adjusted.thinkingBudget, max(0, maxTokens - 1024))`）。
+  const budget = clampedBudgetForLevel(effective, model) ?? 1024;
   return {
     kind: "budget",
     budgetTokens: budget,
@@ -581,15 +603,34 @@ function describeAnthropic(
 
 // ── google-generative-ai / google-vertex ─────────────────────────────────────
 
-/** 镜像 `api/google-generative-ai.js` getDisabledThinkingConfig。 */
-function googleDisabledThinkingConfig(model: ThinkingModelFields, includeGemma: boolean): ThinkingRequestParams {
+/**
+ * 镜像 `api/google-shared.js` `usesGoogleThinkingLevel`：只有这些模型走离散 thinkingLevel，
+ * 其余走 token 预算。0.87 起 vertex 与 generative-ai 用同一个判定（不再区分 Gemma）。
+ */
+function googleUsesThinkingLevel(model: ThinkingModelFields): boolean {
   const id = (model.id ?? "").toLowerCase();
-  if (/gemini-3(?:\.\d+)?-pro/.test(id)) return { thinkingLevel: "LOW" };
-  if (/gemini-3(?:\.\d+)?-flash/.test(id) || id === "gemini-flash-latest" || id === "gemini-flash-lite-latest") {
-    return { thinkingLevel: "MINIMAL" };
-  }
-  if (includeGemma && /gemma-?4/.test(id)) return { thinkingLevel: "MINIMAL" };
-  return { thinkingBudget: 0 };
+  return /gemini-3(?:\.\d+)?-(?:pro|flash)/.test(id)
+    || id === "gemini-flash-latest"
+    || id === "gemini-flash-lite-latest"
+    || /gemma-?4/.test(id);
+}
+
+/**
+ * 镜像 `api/google-shared.js` `getDisabledGoogleThinkingConfig`：
+ * 走预算的模型（含 2.5 系列）off → `thinkingBudget: 0`；走 thinkingLevel 的模型先 clamp 回退档，
+ * 回退仍是 off 才用预算 0，否则发那一档的 thinkingLevel。
+ */
+function googleDisabledThinkingConfig(
+  model: ThinkingModelFields,
+  map: Record<string, string | null>,
+): ThinkingRequestParams {
+  if (!googleUsesThinkingLevel(model)) return { thinkingBudget: 0 };
+  const fallback = clampLevelFromFields(model, "off", map);
+  if (fallback === "off") return { thinkingBudget: 0 };
+  const resolved = resolveGoogleLevel(map, fallback);
+  if ("error" in resolved) return { thinkingBudget: 0 };
+  const level = googleThinkingLevelValue(resolved.level);
+  return level === undefined ? { thinkingBudget: 0 } : { thinkingLevel: level };
 }
 
 /** 镜像 `api/google-shared.js` resolveGoogleThinkingLevel（会抛错的非法映射由调用方捕获）。 */
@@ -606,28 +647,15 @@ function resolveGoogleLevel(
   return { error: `Unsupported Google thinking level mapping for ${level} -> ${String(mapped)}` };
 }
 
-function googleThinkingLevelValue(level: string, model: ThinkingModelFields, includeGemma: boolean): string | undefined {
-  const id = (model.id ?? "").toLowerCase();
-  const isPro = /gemini-3(?:\.\d+)?-pro/.test(id);
-  const isFlash = /gemini-3(?:\.\d+)?-flash/.test(id) || id === "gemini-flash-latest" || id === "gemini-flash-lite-latest";
-  const isGemma = includeGemma && /gemma-?4/.test(id);
-  if (isPro) {
-    if (level === "minimal" || level === "low") return "LOW";
-    if (level === "medium" || level === "high") return "HIGH";
-    return undefined;
-  }
-  if (isGemma) {
-    if (level === "minimal" || level === "low") return "MINIMAL";
-    if (level === "medium" || level === "high") return "HIGH";
-    return undefined;
-  }
-  if (isFlash) {
-    if (level === "minimal") return "MINIMAL";
-    if (level === "low") return "LOW";
-    if (level === "medium") return "MEDIUM";
-    if (level === "high") return "HIGH";
-    return undefined;
-  }
+/**
+ * 镜像 `api/google-shared.js` `toGoogleThinkingLevel`。
+ * 0.87 起四档一一对应（0.85.1 的 Pro/Gemma 折叠映射已不适用）。
+ */
+function googleThinkingLevelValue(level: string): string | undefined {
+  if (level === "minimal") return "MINIMAL";
+  if (level === "low") return "LOW";
+  if (level === "medium") return "MEDIUM";
+  if (level === "high") return "HIGH";
   return undefined;
 }
 
@@ -650,7 +678,6 @@ function describeGoogle(
   model: ThinkingModelFields,
   level: string,
   map: Record<string, string | null>,
-  includeGemma: boolean,
 ): ThinkingRequestSpec {
   if (!model.reasoning) return { kind: "off", params: {} };
   if (level === "off") {
@@ -658,20 +685,14 @@ function describeGoogle(
     return {
       kind: "toggle",
       enabled: false,
-      params: { thinkingConfig: googleDisabledThinkingConfig(model, includeGemma) },
+      params: { thinkingConfig: googleDisabledThinkingConfig(model, map) },
     };
   }
   const effective = clampLevelFromFields(model, level, map);
   const resolved = resolveGoogleLevel(map, effective);
   if ("error" in resolved) return { kind: "invalid", error: resolved.error, params: {} };
-  const id = (model.id ?? "").toLowerCase();
-  const usesLevel = /gemini-3(?:\.\d+)?-pro/.test(id)
-    || /gemini-3(?:\.\d+)?-flash/.test(id)
-    || id === "gemini-flash-latest"
-    || id === "gemini-flash-lite-latest"
-    || (includeGemma && /gemma-?4/.test(id));
-  if (usesLevel) {
-    const thinkingLevel = googleThinkingLevelValue(resolved.level, model, includeGemma);
+  if (googleUsesThinkingLevel(model)) {
+    const thinkingLevel = googleThinkingLevelValue(resolved.level);
     if (thinkingLevel === undefined) {
       return {
         kind: "invalid",
@@ -763,10 +784,9 @@ function describeBedrock(
       },
     };
   }
-  // 预算模式：xhigh/max clamp 到 high，默认表见 bedrock buildAdditionalModelRequestFields。
-  const budget = effective === "xhigh" || effective === "max"
-    ? 16384
-    : ({ minimal: 1024, low: 2048, medium: 8192, high: 16384 }[effective] ?? 16384);
+  // 预算模式：xhigh/max clamp 到 high，默认表见 bedrock buildAdditionalModelRequestFields，
+  // 同样按 answer room 夹取（bedrock 把 adjusted.thinkingBudget 写进 thinkingBudgets）。
+  const budget = clampedBudgetForLevel(effective, model) ?? 16384;
   return {
     kind: "budget",
     budgetTokens: budget,
@@ -803,6 +823,7 @@ function describeMistral(
  * 计算某个等级的实际请求描述（纯函数，不抛错）。
  * 未镜像的 API 家族退回保守的 `reasoning_effort` 透传描述，仅用于展示。
  */
+// fork:upstream-0.9.2-thinking-profile — D2-PR-21 的镜像入口（由 lib/thinking-profile.test.mjs 钉住 SDK 行为）
 export function describeThinkingRequestFromFields(
   model: ThinkingModelFields,
   level: string,
@@ -820,9 +841,8 @@ export function describeThinkingRequestFromFields(
     case "anthropic-messages":
       return describeAnthropic(model, level, map);
     case "google-generative-ai":
-      return describeGoogle(model, level, map, true);
     case "google-vertex":
-      return describeGoogle(model, level, map, false);
+      return describeGoogle(model, level, map);
     case "bedrock-converse-stream":
       return describeBedrock(model, level, map);
     case "mistral-conversations":

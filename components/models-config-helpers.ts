@@ -119,3 +119,25 @@ export function collectModelRenames(
   }
   return renames;
 }
+
+/**
+ * D2-PR-21 — render one level's actual request params as a single compact line.
+ *
+ * The values come from `lib/thinking-request-core.ts`, a read-only mirror of pi-ai's request
+ * construction, so this is what the provider would really receive for that level.
+ * Returns null when the level sends no reasoning params at all.
+ */
+export function formatThinkingRequestParams(params: Record<string, unknown>): string | null {
+  const parts: string[] = [];
+  const walk = (value: unknown, path: string) => {
+    if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+      for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+        walk(nested, path ? `${path}.${key}` : key);
+      }
+      return;
+    }
+    parts.push(`${path}=${Array.isArray(value) ? value.join("|") : String(value)}`);
+  };
+  walk(params, "");
+  return parts.length > 0 ? parts.join(", ") : null;
+}

@@ -1081,6 +1081,8 @@ export const zhTWLocale: LocalePlugin = {
     "models.deepSeekThinkingCompat": "DeepSeek 思考相容性",
     "models.developerRole": "使用 developer role 傳遞系統提示詞",
     "models.thinkingLevelMap": "思考層級對應",
+    "models.thinkingSendsNothing": "不送推理參數",
+    "models.thinkingLevelMapHint": "每檔後面的等寬文字是該檔實際送給 provider 的推理參數，隨編輯即時重算。",
     "models.clearAll": "全部清除",
     "i18n.testingModel": "正在測試模型連線...",
     "i18n.connected": "已連線",

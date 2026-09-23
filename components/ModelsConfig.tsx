@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, useSyncExternalStore } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { useI18n } from "@/hooks/useI18n";
 import { useDialogA11y } from "@/hooks/useDialogA11y";
 import type { ModelCatalogPreset, ModelCatalogRecommendation } from "@/lib/model-catalog";
@@ -70,6 +70,9 @@ import {
   toggleFavoriteModelKey,
 } from "@/lib/favorite-models";
 import { TEXT } from "@/lib/typography";
+import { describeThinkingRequestFromFields, type ThinkingModelFields } from "@/lib/thinking-request-core";
+import type { ThinkingProfileInputs } from "@/lib/models-cache";
+import { formatThinkingRequestParams } from "./models-config-helpers";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -682,10 +685,14 @@ const LEVEL_COLORS: Record<ThinkingLevel, string> = {
 function ThinkingLevelMapEditor({
   value,
   onChange,
+  describeLevel,
 }: {
   value: Record<string, string | null> | undefined;
   onChange: (v: Record<string, string | null> | undefined) => void;
+  /** fork:upstream-0.9.2-thinking-profile — D2-PR-21 — 该档实际会发的请求参数（`lib/thinking-request-core.ts` 的镜像结果）。 */
+  describeLevel?: (level: string) => { text: string | null; invalid?: string } | null;
 }) {
+  const { t } = useI18n();
   const map = value ?? {};
 
   const setLevel = (level: ThinkingLevel, entry: string | null | "omit") => {
@@ -768,6 +775,29 @@ function ThinkingLevelMapEditor({
                 Disabled
               </button>
             </div>
+
+            {describeLevel && (() => {
+              const described = describeLevel(level);
+              if (!described) return null;
+              const invalid = described.invalid !== undefined;
+              return (
+                <span
+                  title={invalid ? described.invalid : described.text ?? undefined}
+                  style={{
+                    minWidth: 0,
+                    flex: 1,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: TEXT["2xs"],
+                    color: invalid ? "var(--danger)" : described.text ? "var(--text-muted)" : "var(--text-dim)",
+                  }}
+                >
+                  {invalid ? described.invalid : described.text ?? t("models.thinkingSendsNothing")}
+                </span>
+              );
+            })()}
 
             <div style={{ display: "flex", borderRadius: "var(--radius-xs)", border: `1px solid ${state === "string" ? "var(--accent)" : "var(--border)"}`, overflow: "hidden", transition: "border-color 0.1s" }}>
               <button
@@ -966,6 +996,8 @@ function ModelDetail({
   const { t } = useI18n();
   // fork:thinking-level-memory — 该模型上次实际生效（SDK clamp 之后）的思考档位。
   const [rememberedThinking, setRememberedThinking] = useState<string | null>(null);
+  // D2-PR-21 — 运行时模型字段；缺失时退回编辑器里的声明（可能不准，所以只在有值时展示预览）。
+  const [thinkingInputs, setThinkingInputs] = useState<ThinkingProfileInputs | null>(null);
   const thinkingMemoryKey = model.id ? `${providerName}/${model.id}` : null;
   useEffect(() => {
     if (!thinkingMemoryKey) {
@@ -975,8 +1007,15 @@ function ModelDetail({
     let cancelled = false;
     void fetch("/api/models")
       .then((res) => res.ok ? res.json() : null)
-      .then((data: { thinkingLevelMemory?: Record<string, string> } | null) => {
-        if (!cancelled) setRememberedThinking(data?.thinkingLevelMemory?.[thinkingMemoryKey] ?? null);
+      .then((data: {
+        thinkingLevelMemory?: Record<string, string>;
+        thinkingInputs?: Record<string, ThinkingProfileInputs>;
+      } | null) => {
+        if (cancelled) return;
+        setRememberedThinking(data?.thinkingLevelMemory?.[thinkingMemoryKey] ?? null);
+        // fork:upstream-0.9.2-thinking-profile — D2-PR-21 — 运行时模型字段（models.json 里可能没写，内置模型尤其如此），
+        // 用来把「每档实际发什么请求」算准；编辑中的 thinkingLevelMap 仍用编辑器里的值。
+        setThinkingInputs(data?.thinkingInputs?.[thinkingMemoryKey] ?? null);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -998,6 +1037,27 @@ function ModelDetail({
   const [costEditing, setCostEditing] = useState(false);
   const [costDraft, setCostDraft] = useState<ModelCostDraft>(() => modelCostToDraft(model.cost));
   const costDraftRef = useRef(costDraft);
+
+  // fork:upstream-0.9.2-thinking-profile — D2-PR-21 — 「这一档实际会发什么」：字段取运行时模型（缺失时退回编辑器声明），
+  // thinkingLevelMap 用**编辑器当前值**，所以改映射时这一列会立刻跟着变。
+  const describeThinkingLevel = useMemo(() => {
+    const fields: ThinkingModelFields = {
+      provider: providerName,
+      id: model.id || undefined,
+      name: model.name,
+      api: model.api ?? provider.api ?? thinkingInputs?.api,
+      baseUrl: provider.baseUrl ?? thinkingInputs?.baseUrl,
+      reasoning: model.reasoning ?? thinkingInputs?.reasoning,
+      maxTokens: model.maxTokens ?? thinkingInputs?.maxTokens,
+      compat: { ...(thinkingInputs?.compat ?? {}), ...effectiveCompat(provider, model) },
+    };
+    const map = model.thinkingLevelMap ?? {};
+    return (level: string) => {
+      const spec = describeThinkingRequestFromFields(fields, level, map);
+      if (spec.kind === "invalid") return { text: null, invalid: spec.error };
+      return { text: formatThinkingRequestParams(spec.params) };
+    };
+  }, [providerName, provider, model, thinkingInputs]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const catalogRequestIdRef = useRef(0);
   const catalogUndoRef = useRef<ModelEntry | null>(null);
@@ -1448,7 +1508,11 @@ function ModelDetail({
                   <ThinkingLevelMapEditor
                     value={model.thinkingLevelMap}
                     onChange={(v) => set("thinkingLevelMap", v)}
+                    describeLevel={describeThinkingLevel}
                   />
+                  <div style={{ marginTop: 6, fontSize: TEXT["2xs"], color: "var(--text-dim)", lineHeight: 1.45 }}>
+                    {t("models.thinkingLevelMapHint")}
+                  </div>
                   {rememberedThinking && (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: TEXT.xs, color: "var(--text-muted)" }}>
                       <span>{t("models.lastUsedThinking")}: <strong style={{ color: "var(--text)", fontWeight: 600 }}>{rememberedThinking}</strong></span>

@@ -7,6 +7,7 @@ import {
   withModelRuntimeError,
   withSafeModelLoadFailure,
   type ModelsData,
+  type ThinkingProfileInputs,
 } from "@/lib/models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "@/lib/model-scope";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
@@ -32,6 +33,10 @@ async function loadModels(cwd: string): Promise<ModelsData> {
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
+  // fork:upstream-0.9.2-thinking-profile — D2-PR-21：配置页要用 `lib/thinking-request-core.ts`（pi-ai 请求构造的只读镜像）
+  // 逐档解释「实际会发什么」。镜像需要这些字段，而 models.json 里未必声明（内置模型就没有），
+  // 所以由运行时模型回填；只传字段不传整包 profile——编辑 thinkingLevelMap 时客户端要实时重算。
+  const thinkingInputs: Record<string, ThinkingProfileInputs> = {};
 
   const agentDir = getAgentDir();
   // Gate untrusted project extensions: enumerating models still imports and
@@ -63,6 +68,14 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     nameMap.set(key, m.name);
     thinkingLevels[key] = getSupportedThinkingLevels(m);
     if (m.thinkingLevelMap) thinkingLevelMaps[key] = m.thinkingLevelMap;
+    // fork:upstream-0.9.2-thinking-profile — D2-PR-21
+    thinkingInputs[key] = {
+      api: m.api,
+      reasoning: m.reasoning,
+      baseUrl: m.baseUrl,
+      ...(typeof m.maxTokens === "number" ? { maxTokens: m.maxTokens } : {}),
+      ...(m.compat ? { compat: m.compat as Record<string, unknown> } : {}),
+    };
   }
 
   const defaultProvider = settings.getDefaultProvider();
@@ -84,6 +97,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
       thinkingLevels,
       thinkingLevelMaps,
       thinkingLevelPins,
+      thinkingInputs, // fork:upstream-0.9.2-thinking-profile
       // D2-PR-18：per-model 推理强度记忆（key `provider/modelId`），前端模型详情可用它
       // 显示「上次使用」；清除走 DELETE /api/thinking-level-memory。
       thinkingLevelMemory: getThinkingLevelMemory(),
@@ -100,6 +114,7 @@ const EMPTY_MODELS: ModelsData = {
   thinkingLevels: {},
   thinkingLevelMaps: {},
   thinkingLevelPins: {},
+  thinkingInputs: {},
 };
 
 export async function GET(req: Request) {

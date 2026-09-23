@@ -1,3 +1,16 @@
+/**
+ * The model fields `lib/thinking-request-core.ts` needs to describe what each thinking level
+ * actually sends (D2-PR-21). Kept next to ModelsData because it travels in the same payload.
+ */
+// fork:upstream-0.9.2-thinking-profile — D2-PR-21
+export interface ThinkingProfileInputs {
+  api?: string;
+  reasoning?: boolean;
+  baseUrl?: string;
+  maxTokens?: number;
+  compat?: Record<string, unknown>;
+}
+
 export interface ModelsData {
   models: Record<string, string>;
   modelList: { id: string; name: string; provider: string; input?: string[] }[];
@@ -6,6 +19,12 @@ export interface ModelsData {
   thinkingLevelMaps: Record<string, Record<string, string | null>>;
   /** `provider/modelId` → thinking level pinned by an `enabledModels` `:level` suffix. */
   thinkingLevelPins: Record<string, string>;
+  /**
+   * `provider:modelId` → the model fields the thinking-request mirror needs. Only fields the
+   * runtime knows; the edited `thinkingLevelMap` stays client-side so the preview follows the
+   * editor live.
+   */
+  thinkingInputs?: Record<string, ThinkingProfileInputs>;
   /** `provider/modelId`（斜杠）→ 上次使用该模型时实际生效的推理强度（见 lib/thinking-level-memory.ts）。 */
   thinkingLevelMemory?: Record<string, string>;
   modelError?: string;
