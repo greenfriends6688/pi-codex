@@ -54,6 +54,71 @@ declare global {
   }
 }
 
+function ToolbarIconButton({
+  onClick,
+  title,
+  disabled,
+  skipHover,
+  color,
+  background = "none",
+  marginRight,
+  ariaPressed,
+  children,
+}: {
+  onClick: () => void;
+  title: string;
+  disabled?: boolean;
+  skipHover?: boolean;
+  color: string;
+  background?: string;
+  marginRight?: number;
+  ariaPressed?: boolean;
+  children: ReactNode;
+}) {
+  const enter = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (disabled || skipHover) return;
+    e.currentTarget.style.color = "var(--text-muted)";
+    e.currentTarget.style.background = "var(--bg-hover)";
+  };
+  const leave = (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (disabled || skipHover) return;
+    e.currentTarget.style.color = color;
+    e.currentTarget.style.background = background;
+  };
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={title}
+      aria-pressed={ariaPressed}
+      style={{
+        position: "relative",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        width: 26, height: 26, padding: 0, marginRight,
+        background,
+        border: "none",
+        color,
+        cursor: disabled ? "default" : "pointer",
+        borderRadius: 5,
+        flexShrink: 0,
+        opacity: disabled ? 0.6 : 1,
+        transition: "color 0.3s, background 0.3s",
+      }}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
+    >
+      {children}
+    </button>
+  );
+}
+
+function sessionListUrl(summary: boolean, force: boolean): string {
+  if (summary) return "/api/sessions?summary=1";
+  if (force) return "/api/sessions?force=1";
+  return "/api/sessions";
+}
+
 interface Props {
   selectedSessionId: string | null;
   onSelectSession: (session: SessionInfo, isRestore?: boolean, entryId?: string, blockIndex?: number) => void;
@@ -117,6 +182,11 @@ interface ValidatedProject {
 const UNREAD_SESSIONS_STORAGE_KEY = "pi-web:unread-session-ids";
 const LAST_CUSTOM_CWD_STORAGE_KEY = "pi-web:last-custom-cwd";
 const RUNNING_SESSIONS_POLL_MS = 2500;
+const SESSION_DETAILS_HYDRATION_DELAY_MS = 750;
+const SESSION_PANE_DEFAULT_HEIGHT = 320;
+const SESSION_PANE_MIN_HEIGHT = 80;
+const EXPLORER_PANE_MIN_HEIGHT = 120;
+const SESSION_PANE_MAX_HEIGHT = 1600;
 
 function loadLastCustomCwd(): string {
   if (typeof window === "undefined") return "";
@@ -501,8 +571,10 @@ function ProjectRow({
 export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange, onToggleSidebar, searchRequestId = 0 }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
-  const [sessionListVersion, setSessionListVersion] = useState<number | null>(null);
+  // Tracked in a ref only: the version is compared against the polled value to
+  // decide whether the list needs reloading, and no render reads it.
   const sessionListVersionRef = useRef<number | null>(null);
+  const [sessionListVersion, setSessionListVersion] = useState<number | null>(null);
   const sessionLoadIdRef = useRef(0);
   // fork:fix-url-session-restore — whether /api/sessions has answered at least once.
   // The `?session=` restore is one-shot, and it must not be spent while the list is
@@ -595,6 +667,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Once polling has delivered a snapshot it is the source of truth for
   // running state; late /api/sessions responses must not overwrite it.
   const runningPollAuthoritativeRef = useRef(false);
+  const detailsHydrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Virtualized session list: only the visible window of rows is mounted.
   const listScrollRef = useRef<HTMLDivElement>(null);
@@ -622,11 +695,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     return () => ro.disconnect();
   }, [sessionSearchActive]);
 
-  const loadSessions = useCallback(async (showLoading = false, force = false) => {
+  const loadSessions = useCallback(async (showLoading = false, force = false, summary = false) => {
     const loadId = ++sessionLoadIdRef.current;
     try {
       if (showLoading) setLoading(true);
-      const res = await fetch(force ? "/api/sessions?force=1" : "/api/sessions", {
+      const res = await fetch(sessionListUrl(summary, force), {
         cache: "no-store",
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -673,7 +746,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   useEffect(() => {
     const isFirst = !initialLoadDone.current;
     initialLoadDone.current = true;
-    loadSessions(isFirst, !isFirst);
+    let active = true;
+
+    if (isFirst) {
+      // Header/stat metadata is enough to select the URL session and paint the
+      // sidebar. Hydrate exact counts, names, and first messages once the
+      // selected chat has had a chance to start loading.
+      void loadSessions(true, false, true).then(() => {
+        if (!active) return;
+        detailsHydrationTimerRef.current = setTimeout(() => {
+          detailsHydrationTimerRef.current = null;
+          if (active) void loadSessions(false, true);
+        }, SESSION_DETAILS_HYDRATION_DELAY_MS);
+      });
+    } else {
+      void loadSessions(false, true);
+    }
+
+    return () => {
+      active = false;
+      if (detailsHydrationTimerRef.current) {
+        clearTimeout(detailsHydrationTimerRef.current);
+        detailsHydrationTimerRef.current = null;
+      }
+    };
   }, [loadSessions, refreshKey]);
 
   // Persist unread markers so they survive a browser refresh before the user
@@ -1913,7 +2009,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       </div>
 
       {/* Projects and their tasks */}
-      <SessionSearch open={sessionSearchOpen} query={sessionSearchQuery} refreshKey={sessionListVersion} selectedSessionId={selectedSessionId} onSelectSession={handleSelectSessionFromList}>
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          flex: "1 1 auto",
+          minHeight: SESSION_PANE_MIN_HEIGHT,
+          overflow: "hidden",
+        }}
+      >
+        <SessionSearch open={sessionSearchOpen} query={sessionSearchQuery} selectedSessionId={selectedSessionId} onSelectSession={handleSelectSessionFromList}>
         <div
           ref={listScrollRef}
           onScroll={handleListScroll}
@@ -2318,6 +2423,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           })()}
         </div>
       </SessionSearch>
+      </div>
 
     </div>
   );

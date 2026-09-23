@@ -111,9 +111,13 @@ test("offers the downstream context-menu hook only on a normal session row", () 
 });
 
 test("lifecycle refreshes bypass the cache while cross-window polling reuses it", () => {
-  assert.match(source, /force \? "\/api\/sessions\?force=1" : "\/api\/sessions"/);
+  assert.match(source, /function sessionListUrl\(summary: boolean, force: boolean\)/);
+  assert.match(source, /if \(summary\) return "\/api\/sessions\?summary=1"/);
+  assert.match(source, /if \(force\) return "\/api\/sessions\?force=1"/);
   assert.match(source, /cache: "no-store"/);
-  assert.match(source, /loadSessions\(isFirst, !isFirst\)/);
+  // First paint uses the cheap summary listing, then hydrates after a delay.
+  assert.match(source, /loadSessions\(true, false, true\)/);
+  assert.match(source, /setTimeout\(\(\) => \{[\s\S]*?void loadSessions\(false, true\)/);
   assert.match(source, /data\.sessionListVersion !== sessionListVersionRef\.current[\s\S]*?await loadSessions\(\)/);
   assert.doesNotMatch(source, /sessionRefreshDone|sessionRefreshTimerRef|title=\{t\("sidebar\.refresh"\)\}/);
   assert.match(source, /loadSessions\(false, true\);[\s\S]*?onBackgroundTaskDone/);
@@ -151,20 +155,20 @@ test("renders projects as primary rows with the selected project's tasks nested 
   assert.doesNotMatch(source, /PROJECTS_COLLAPSED_LIMIT/);
 });
 
-// fork:chat-workspace
-test("keeps a standalone chat section above the projects", () => {
+// fork:chat-workspace / fork:zn-13
+test("keeps a standalone chat section beside the projects", () => {
   assert.match(source, /<ChatWorkspaceRow/);
   assert.match(source, /<NewTaskPicker/);
   assert.match(source, /const visibleProjects = withoutChatProject\(projectChoices, chatProjectKey\)/);
   assert.match(source, /fetch\("\/api\/chat-workspace"/);
-  // 聊天 与 项目 平级：聊天分区排在项目标题行与项目行之前，各自渲染自己的会话。
+  // 聊天 与 项目 平级（侧栏 tab 分 pane）：项目分区在前，聊天分区排在项目行之后。
   assert.ok(
-    source.indexOf("<ChatWorkspaceRow") < source.indexOf('{t("sidebar.projects")}'),
-    "the chat section renders above the projects caption",
+    source.indexOf("<ChatWorkspaceRow") > source.indexOf('{t("sidebar.projects")}'),
+    "the chat section renders after the projects caption",
   );
   assert.ok(
-    source.indexOf("{chatProject && (() => {") < source.indexOf("{visibleProjects.map((project) => {"),
-    "the chat section renders above the project rows",
+    source.indexOf('{sidebarPane === "chat" && chatProject && (() => {') > source.indexOf("{visibleProjects.map((project) => {"),
+    "the chat section renders below the project rows",
   );
   // The default workspace is resolved at click time — never the "" / "/" render value.
   assert.match(source, /const resolveDefaultCwd = useCallback\(async \(\): Promise<string \| null> => \{/);

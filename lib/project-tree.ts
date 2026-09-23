@@ -1,3 +1,4 @@
+// fork:project-tree-summary — upstream-port marker
 import type { BranchPreview } from "@/lib/types";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
@@ -9,6 +10,66 @@ type ProjectableEntry = {
   type: string;
   message?: unknown;
 };
+
+/** Wire format for `tree=summary`: navigation structure without any body. */
+export interface SummaryTreeNode {
+  entry: {
+    id: string;
+    parentId: string | null;
+    type: string;
+    timestamp: string;
+  };
+  children: SummaryTreeNode[];
+  compressedEntryIds?: string[];
+  branchPreview?: BranchPreview;
+}
+
+/** Loose input shape: accepts the SDK tree as well as the projected tree. */
+interface SummaryInputNode {
+  entry: { id: string; type: string; parentId?: string | null; timestamp?: string };
+  children: SummaryInputNode[];
+  compressedEntryIds?: string[];
+  branchPreview?: BranchPreview;
+}
+
+/**
+ * Strip message payloads from a projected tree, keeping only navigation
+ * fields: entry id/parent/type/timestamp, children, compressed ids, and the
+ * bounded preview. Responses with base64 images, tool outputs, or long
+ * thinking blocks never leak through the summary path.
+ *
+ * Iterative with an explicit stack: a linear session's projected tree can be
+ * thousands of levels deep (see MAX_PROJECTED_TREE_DEPTH), and recursion
+ * would overflow the call stack exactly like the TUI bug this module guards
+ * against elsewhere.
+ */
+export function toSummaryTree(nodes: readonly SummaryInputNode[]): SummaryTreeNode[] {
+  const summaryRoots: SummaryTreeNode[] = [];
+  // Frames pair each input node with the summary node under construction.
+  const stack: Array<{ input: SummaryInputNode; into: SummaryTreeNode[] } | { input: SummaryInputNode; summary: SummaryTreeNode }> = [];
+  for (let i = nodes.length - 1; i >= 0; i--) stack.push({ input: nodes[i], into: summaryRoots });
+
+  while (stack.length > 0) {
+    const frame = stack.pop()!;
+    const { input } = frame;
+    const summary: SummaryTreeNode = {
+      entry: {
+        id: input.entry.id,
+        parentId: input.entry.parentId ?? null,
+        type: input.entry.type,
+        timestamp: input.entry.timestamp ?? "",
+      },
+      children: [],
+      ...(input.compressedEntryIds?.length ? { compressedEntryIds: input.compressedEntryIds } : {}),
+      ...(input.branchPreview ? { branchPreview: input.branchPreview } : {}),
+    };
+    (frame as { into?: SummaryTreeNode[] }).into!.push(summary);
+    for (let i = input.children.length - 1; i >= 0; i--) {
+      stack.push({ input: input.children[i], into: summary.children });
+    }
+  }
+  return summaryRoots;
+}
 
 type ProjectableTreeNode<T> = {
   entry: ProjectableEntry;
