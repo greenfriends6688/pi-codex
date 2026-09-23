@@ -125,6 +125,14 @@ export interface ExtensionUiContextLike {
 
 export interface AgentSessionLike {
   readonly sessionId: string;
+  /**
+   * fork:upstream-0.9.2-pi087-transcript — 当前生效的系统提示词（`buildSystemPrompt(...)`）。
+   *
+   * 自 Pi 0.86 起 `agent.state.systemPrompt` 只从**转写里的 system 消息**回放：老会话
+   * （0.86 之前创建、没有 system 条目）读出来是空串。SDK 自己在 AgentSession 上留了这个
+   * getter，它才反映「这一轮真正会发出去的提示词」。
+   */
+  readonly systemPrompt?: string;
   readonly sessionFile: string | undefined;
   readonly isStreaming: boolean;
   readonly isCompacting: boolean;

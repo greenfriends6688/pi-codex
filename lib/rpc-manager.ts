@@ -840,9 +840,14 @@ export class AgentSessionWrapper {
           contextUsage: contextUsage
             ? { percent: contextUsage.percent, contextWindow: contextUsage.contextWindow, tokens: contextUsage.tokens }
             : null,
-          // An exact prompt is projected onto each run by the inline extension;
-          // the SDK state only shows Pi's structured sections.
-          systemPrompt: this.exactSystemPrompt?.() ?? this.inner.agent.state?.systemPrompt ?? "",
+          // fork:upstream-0.9.2-pi087-transcript — 三层回退：
+          // 1. 精确提示词（Chat only / 子代理替换模式，由 inline extension 投影到每轮请求）；
+          // 2. AgentSession.systemPrompt —— SDK 构建的当前生效提示词；
+          // 3. agent.state.systemPrompt —— 只从转写 system 消息回放，老会话为空（仅兜底）。
+          systemPrompt: this.exactSystemPrompt?.()
+            ?? this.inner.systemPrompt
+            ?? this.inner.agent.state?.systemPrompt
+            ?? "",
           thinkingLevel: this.inner.agent.state?.thinkingLevel ?? "off",
           extensionStatuses: this.getExtensionStatuses(),
           extensionWidgets: this.getExtensionWidgets(),
