@@ -2,7 +2,7 @@
 
 import { createContext, memo, useContext, useMemo, useRef, type ComponentProps, type MouseEvent } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
-import { resolveLocalFileHref, shouldOpenLinkInApp, shouldOpenLocalFileInApp } from "@/lib/file-links";
+import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLinkInApp, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { encodeFilePathForApi } from "@/lib/file-paths";
 import { markdownRehypePluginsFor, markdownRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { mentionRehypePlugin, mentionRemarkPlugin, type MentionValidators } from "@/lib/mention-tokens";
@@ -42,7 +42,7 @@ interface MarkdownBodyProps {
   className?: string;
   isStreaming?: boolean;
   cwd?: string;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, page?: number) => void;
   /** D2-PR-12 — 打开消息正文里的 @file / /skill: mention 高亮（需要 validators）。 */
   highlightMentions?: boolean;
   /** D2-PR-12 — 合法性查询；数据未加载时返回 undefined（一律不高亮，不猜）。 */
@@ -83,7 +83,7 @@ function MarkdownImage({
 function buildMarkdownComponents(
   readStreaming: () => boolean,
   cwd: string | undefined,
-  onOpenFile: ((filePath: string) => void) | undefined,
+  onOpenFile: ((filePath: string, page?: number) => void) | undefined,
 ): Components {
   return {
     code({ className, children, ...props }) {
@@ -119,6 +119,8 @@ function buildMarkdownComponents(
       // `node` is react-markdown metadata, not a DOM attribute.
       delete props.node;
       const filePath = onOpenFile ? resolveLocalFileHref(href, cwd) : null;
+      // fork:pdf-page-fragment — resolveLocalFileHref drops `#…`; page lives only on the raw href.
+      const page = onOpenFile ? parsePdfPageFragment(href) : null;
       const openFile = onOpenFile;
       if (!filePath || !openFile) {
         return (
@@ -135,7 +137,7 @@ function buildMarkdownComponents(
         const target = event.currentTarget.getAttribute("target");
         if (target && target !== "_self") return;
         event.preventDefault();
-        openFile(filePath);
+        openFile(filePath, page ?? undefined);
       };
 
       return (
@@ -182,7 +184,7 @@ const MarkdownPart = memo(function MarkdownPart({
   remarkPlugins: ComponentProps<typeof ReactMarkdown>["remarkPlugins"];
   rehypePlugins: ComponentProps<typeof ReactMarkdown>["rehypePlugins"];
   cwd?: string;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, page?: number) => void;
 }) {
   const components = useMemo(
     () => buildMarkdownComponents(() => partStreaming, cwd, onOpenFile),

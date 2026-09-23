@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { visitParents } from "unist-util-visit-parents";
 import { getFileDirectory, encodeFilePathForApi } from "@/lib/file-paths";
-import { resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
+import { parsePdfPageFragment, resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { parseFrontmatter } from "@/lib/frontmatter";
 import { markdownPreviewRehypePlugins, markdownPreviewRemarkPlugins, markdownUrlTransform, normalizeDisplayMath } from "@/lib/markdown";
 import { CodeBlock, MermaidBlock } from "./MermaidBlock";
@@ -14,7 +14,7 @@ export interface MarkdownFileContext {
   filePath: string;
   cwd?: string;
   sourceSessionId?: string | null;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, page?: number) => void;
 }
 
 type MarkdownNodePosition = {
@@ -138,10 +138,11 @@ export function MarkdownFilePreview({ content, filePath, cwd, sourceSessionId, o
     a({ href, children, ...props }) {
       delete props.node;
       const linkedFile = onOpenFile ? resolveLocalFileHref(href, directory, cwd ?? directory) : null;
+      const page = onOpenFile ? parsePdfPageFragment(href) : null;
       return <a href={href} {...props} onClick={linkedFile && onOpenFile ? (event) => {
         if (!shouldOpenLocalFileInApp(event)) return;
         event.preventDefault();
-        onOpenFile(linkedFile);
+        onOpenFile(linkedFile, page ?? undefined);
       } : undefined}>{children}</a>;
     },
     img({ src, alt, ...props }) {

@@ -28,10 +28,11 @@ interface AnnotateSkillOptions {
   projectLockPath?: string;
 }
 
-export function getGlobalSkillsLockPath({
-  homeDir = homedir(),
-  xdgStateHome = process.env.XDG_STATE_HOME,
-}: GlobalLockPathOptions = {}): string {
+export function getGlobalSkillsLockPath(options: GlobalLockPathOptions = {}): string {
+  const homeDir = options.homeDir ?? homedir();
+  // Destructuring defaults cannot distinguish "key omitted" from "key present
+  // with undefined"; tests pin the home path by passing explicit undefined.
+  const xdgStateHome = "xdgStateHome" in options ? options.xdgStateHome : process.env.XDG_STATE_HOME;
   return xdgStateHome
     ? join(xdgStateHome, "skills", ".skill-lock.json")
     : join(homeDir, ".agents", ".skill-lock.json");

@@ -51,8 +51,13 @@ export function formatZoomPercent(value: number): string {
  * 给 PDF 的 iframe URL 贴上缩放 fragment。
  * Chromium 内置 PDF 阅读器认 `#zoom=<percent>`，所以不需要自建 viewer。
  * 容器 URL 里可能已经带 query（`?type=read`），fragment 必须追加在最后。
+ * 已有的 `page=` fragment 会保留，与 zoom 并存（PDF Open Parameters 允许）。
  */
 export function withPdfZoom(url: string, zoom: number): string {
-  const base = url.split("#")[0];
-  return `${base}#zoom=${Math.round(clampZoom(zoom) * 100)}`;
+  const hashIndex = url.indexOf("#");
+  const base = hashIndex === -1 ? url : url.slice(0, hashIndex);
+  const existing = hashIndex === -1 ? "" : url.slice(hashIndex + 1);
+  const pageMatch = existing.match(/page=\d+/i);
+  const pagePart = pageMatch ? `${pageMatch[0]}&` : "";
+  return `${base}#${pagePart}zoom=${Math.round(clampZoom(zoom) * 100)}`;
 }

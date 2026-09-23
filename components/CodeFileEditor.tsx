@@ -218,7 +218,7 @@ export default function CodeFileEditor({
       const requestedEnd = Number.isInteger(target.endLine) ? target.endLine! : requestedStart;
       let startLine = requestedStart;
       let endLine = requestedEnd;
-      const snapshot = target.text.trim();
+      const snapshot = (target.text ?? "").trim();
       if (startLine < 1 || endLine < startLine || startLine > doc.lines) {
         const match = snapshot ? doc.toString().indexOf(snapshot) : -1;
         if (match < 0) return [];

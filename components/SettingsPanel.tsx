@@ -22,7 +22,6 @@ import { sendAgentCommand } from "@/lib/agent-client";
 import type { ShellToolSettingsResponse } from "@/lib/api-types";
 import { setLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
 import { getDesktopBridge } from "@/lib/desktop-shell";
-import { TEXT } from "@/lib/typography";
 import {
   isThinkingExpandedByDefault,
   setThinkingExpandedByDefault,
@@ -608,7 +607,7 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
             last
           />
         </SettingsBlock>
-        <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <div className="settings-notify-actions">
           <ConfigButton
             variant="secondary"
             disabled={!notificationPrefs.enabled}
@@ -620,7 +619,7 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
             {t("settings.notifyOpenSystem")}
           </ConfigButton>
           {notificationNote ? (
-            <span role="status" style={{ fontSize: TEXT.sm, color: "var(--text-muted)" }}>{notificationNote}</span>
+            <span role="status" className="settings-notify-note">{notificationNote}</span>
           ) : null}
         </div>
       </section>
@@ -1037,7 +1036,7 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
 
           <main className="settings-dialog-main">
             {sectionHost("general", <GeneralSettings cwd={cwd} sessionId={sessionId} onSessionReloaded={onSessionReloaded} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={onQuoteSelectionChange} sidebarWidth={sidebarWidth} onSidebarWidthChange={onSidebarWidthChange} soundEnabled={soundEnabled} onSoundToggle={onSoundToggle} />)}
-            {sectionHost("models", <ModelsConfig embedded onClose={onClose} />)}
+            {sectionHost("models", <ModelsConfig embedded cwd={cwd} onClose={onClose} />)}
             {cwd && sectionHost("skills", <SkillsConfig embedded key={cwd} cwd={cwd} onClose={onClose} />)}
             {cwd && sectionHost("agents", <AgentsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}
             {cwd && sectionHost("plugins", <PluginsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}

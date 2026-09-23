@@ -1,7 +1,9 @@
+// fork:usage-relative-time — upstream-port marker
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/hooks/useI18n";
+import { formatUpdatedTime } from "@/lib/i18n/format";
 import { isProviderUsageId } from "@/lib/provider-usage-ids";
 import { TEXT } from "@/lib/typography";
 
@@ -36,7 +38,7 @@ function ProviderUsageContent({ providerId, enabled }: { providerId: string; ena
   const [error, setError] = useState<string | null>(null);
   const [refreshDone, setRefreshDone] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
 
   useEffect(() => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -110,7 +112,11 @@ function ProviderUsageContent({ providerId, enabled }: { providerId: string; ena
             </svg>
           )}
         </button>
-        {report && <span style={{ fontSize: TEXT.xs, color: "var(--text-dim)", whiteSpace: "nowrap" }}>{t("providerUsage.updated", { time: formatUpdated(report.capturedAt) })}</span>}
+        {report && (
+          <span title={new Date(report.capturedAt).toLocaleString(locale)} style={{ fontSize: TEXT.xs, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
+            {t("providerUsage.updated", { time: formatUpdatedTime(report.capturedAt, locale) })}
+          </span>
+        )}
       </div>
 
       {!report && !error && <span style={{ fontSize: TEXT.sm, color: "var(--text-dim)" }}>{t("providerUsage.notQueried")}</span>}
@@ -156,8 +162,4 @@ function formatAmount(value: number | undefined): string {
 
 function formatReset(seconds: number): string {
   return new Date(seconds * 1_000).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
-function formatUpdated(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }

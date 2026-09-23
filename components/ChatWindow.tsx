@@ -107,7 +107,7 @@ interface Props {
   onSessionStatsChange?: (stats: SessionStatsInfo | null) => void;
   onSessionStatsPanelOpen?: () => void;
   onContextUsageChange?: (usage: { percent: number | null; contextWindow: number; tokens: number | null } | null) => void;
-  onOpenFile?: (filePath: string, locationTarget?: Omit<FileLocationTarget, "filePath">) => void;
+  onOpenFile?: (filePath: string, hint?: number | Omit<FileLocationTarget, "filePath">) => void;
   onOpenSession?: (sessionId: string) => void;
   onAskInNewChat?: (prompt: string, sourceSessionId: string, sourceEntryId: string) => Promise<void>;
   quoteSelectionEnabled?: boolean;
@@ -2244,7 +2244,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                             blocks={liveBlocks}
                             isStreaming={streamState.isStreaming}
                             toolResults={toolResultsMap}
-                            onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
+                            onOpenFile={onOpenFile ? (filePath: string) => onOpenFile(filePath) : undefined}
                             onOpenSession={onOpenSession}
                           />
                         </ProcessDetailsGroup>
@@ -2337,7 +2337,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                           blocks={groupedProcessBlocks}
                           isStreaming={streamState.isStreaming && finalAssistantIdx === messages.length - 1}
                           toolResults={toolResultsMap}
-                          onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
+                          onOpenFile={onOpenFile ? (filePath: string) => onOpenFile(filePath) : undefined}
                           onOpenSession={onOpenSession}
                           reveal={revealProcess}
                           revealToolCallId={findRevealToolCallId}
@@ -2432,7 +2432,7 @@ export function ChatWindow({ session, searchTarget, onSearchTargetHandled, initi
                           blocks={streamingProcess.blocks}
                           isStreaming
                           toolResults={toolResultsMap}
-                          onOpenFile={onOpenFile ? (filePath) => onOpenFile(filePath) : undefined}
+                          onOpenFile={onOpenFile ? (filePath: string) => onOpenFile(filePath) : undefined}
                           onOpenSession={onOpenSession}
                         />
                       </ProcessDetailsGroup>

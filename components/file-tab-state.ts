@@ -1,3 +1,4 @@
+// fork:pdf-page-fragment — upstream-port marker
 import type { FileViewerState } from "@/lib/file-viewer-state";
 import type { Tab } from "./TabBar";
 
@@ -5,6 +6,7 @@ interface OpenFileTabInput {
   fileName: string;
   filePath: string;
   modeHint?: "preview" | "diff";
+  page?: number;
   sourceSessionId?: string | null;
   tabId: string;
 }
@@ -18,6 +20,7 @@ export function openFileTab(tabs: Tab[], input: OpenFileTabInput): Tab[] {
       filePath: input.filePath,
       sourceSessionId: input.sourceSessionId,
       initialDisplayMode: input.modeHint,
+      page: input.page,
       viewerState: input.modeHint ? {
         displayMode: input.modeHint,
         wrapLines: false,
@@ -34,12 +37,21 @@ export function openFileTab(tabs: Tab[], input: OpenFileTabInput): Tab[] {
   const sourceUnchanged = !sourceChanged;
   const previewAlreadyActive = input.modeHint === "preview"
     && (existing.viewerState?.displayMode === "preview" || existing.initialDisplayMode === "preview");
-  if (sourceUnchanged && (!input.modeHint || previewAlreadyActive)) return tabs;
+  const pageChanged = existing.page !== input.page;
+  if (sourceUnchanged && (!input.modeHint || previewAlreadyActive) && !pageChanged) return tabs;
 
   return tabs.map((tab) => {
     if (tab.id !== input.tabId) return tab;
     const next: Tab = { ...tab };
-    if (sourceChanged) next.sourceSessionId = input.sourceSessionId;
+    let bumpRevision = false;
+    if (sourceChanged) {
+      // Source swap alone keeps the mounted viewer (only identity metadata moves).
+      next.sourceSessionId = input.sourceSessionId;
+    }
+    if (pageChanged) {
+      next.page = input.page;
+      bumpRevision = true;
+    }
     const modeAlreadyActive = input.modeHint === "preview" && previewAlreadyActive;
     if (input.modeHint && !modeAlreadyActive) {
       next.initialDisplayMode = input.modeHint;
@@ -49,8 +61,9 @@ export function openFileTab(tabs: Tab[], input: OpenFileTabInput): Tab[] {
         scrollTop: 0,
         scrollLeft: 0,
       };
-      next.viewerRevision = (tab.viewerRevision ?? 0) + 1;
+      bumpRevision = true;
     }
+    if (bumpRevision) next.viewerRevision = (tab.viewerRevision ?? 0) + 1;
     return next;
   });
 }

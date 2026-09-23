@@ -11,7 +11,7 @@ import { InputRule, inputRules, textblockTypeInputRule, wrappingInputRule } from
 import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { MarkdownCodec, markdownSchema, markdownBlockLineRange, markdownChanges, safeUrl } from "@/lib/markdown-editor";
 import { getFileDirectory, getFileName, encodeFilePathForApi } from "@/lib/file-paths";
-import { resolveLocalFileHref, shouldOpenLocalFileInApp } from "@/lib/file-links";
+import { resolveLocalFileHref, parsePdfPageFragment, shouldOpenLocalFileInApp } from "@/lib/file-links";
 import { useMarkdownFile } from "@/hooks/useMarkdownFile";
 import { useI18n } from "@/hooks/useI18n";
 import { MarkdownFilePreview, type MarkdownFileContext } from "./MarkdownFilePreview";
@@ -295,8 +295,10 @@ export default function MarkdownFileEditor({ content, watchEnabled = true, ...co
           if (!link || !shouldOpenLocalFileInApp(event)) return false;
           const ctx = contextRef.current;
           const directory = getFileDirectory(ctx.filePath);
-          const file = resolveLocalFileHref(link.getAttribute("href") ?? undefined, directory, ctx.cwd ?? directory);
-          if (file && ctx.onOpenFile) { event.preventDefault(); ctx.onOpenFile(file); return true; }
+          const href = link.getAttribute("href") ?? undefined;
+          const file = resolveLocalFileHref(href, directory, ctx.cwd ?? directory);
+          const page = parsePdfPageFragment(href);
+          if (file && ctx.onOpenFile) { event.preventDefault(); ctx.onOpenFile(file, page ?? undefined); return true; }
           return false;
         },
       },
@@ -408,7 +410,7 @@ export default function MarkdownFileEditor({ content, watchEnabled = true, ...co
         const source = codec.current.serialize(view.state.doc);
         const requestedStart = Number.isInteger(target.startLine) ? target.startLine! : 0;
         const requestedEnd = Number.isInteger(target.endLine) ? target.endLine! : requestedStart;
-        const snapshot = target.text.trim();
+        const snapshot = (target.text ?? "").trim();
         const normalizedSnapshot = snapshot.replace(/\s+/g, " ").trim();
         const blocksForLines: HTMLElement[] = [];
         const blockRanges = new Map<HTMLElement, LocationDecorationRange>();

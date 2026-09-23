@@ -55,7 +55,10 @@ export interface FileLocationTarget {
   sourceSessionId?: string | null;
   startLine?: number;
   endLine?: number;
-  text: string;
+  /** Quote for highlight; optional so a pure `#page=` jump needs no text. */
+  text?: string;
+  /** PDF Open Parameters page (`#page=N`) from the link that opened the file. */
+  page?: number;
 }
 
 const MarkdownFileEditor = dynamic(() => import("./MarkdownFileEditor"), {
@@ -76,7 +79,7 @@ interface Props {
   filePath: string;
   cwd?: string;
   sourceSessionId?: string | null;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, page?: number) => void;
   locationTarget?: FileLocationTarget | null;
   onLocationHandled?: (target: FileLocationTarget) => void;
   onLocationFailed?: (target: FileLocationTarget) => void;
@@ -86,6 +89,8 @@ interface Props {
   onAtMention?: (relativePath: string, isDir: boolean) => void;
   gitRefreshKey?: number;
   initialDisplayMode?: DisplayMode;
+  /** PDF page to open on first render (`#page=N` from a markdown link). */
+  initialPage?: number;
   initialState?: FileViewerState;
   onStateChange?: (state: FileViewerState) => void;
   watchEnabled?: boolean;
@@ -1270,7 +1275,7 @@ function FileSelectionQuotePopover({
   );
 }
 
-function DocumentViewer({ filePath, cwd, sourceSessionId, onMentionLines, onAskInNewChat, watchEnabled = true }: Props) {
+function DocumentViewer({ filePath, cwd, sourceSessionId, initialPage, onMentionLines, onAskInNewChat, watchEnabled = true }: Props) {
   const { t } = useI18n();
   const [watching, setWatching] = useState(false);
   const [bust, setBust] = useState(0);
@@ -1290,8 +1295,9 @@ function DocumentViewer({ filePath, cwd, sourceSessionId, onMentionLines, onAskI
   // 这里仍然是浏览器内置的 PDF 阅读器（不引 pdfjs），但通过 `#zoom=<percent>`
   // fragment 给它一个缩放档位，于是至少有了和图片一致的 −/+/100% 控件。
   const [pdfZoom, setPdfZoom] = useState(1);
+  const pageFragment = isPdf && initialPage && initialPage > 0 ? `#page=${initialPage}` : "";
   const rawPreviewUrl = isPdf
-    ? getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined)
+    ? `${getFileApiUrl(filePath, "read", sourceSessionId, bust ? { v: bust } : undefined)}${pageFragment}`
     : getFileApiUrl(filePath, "preview", sourceSessionId, bust ? { v: bust } : undefined);
   const previewUrl = isPdf ? withPdfZoom(rawPreviewUrl, pdfZoom) : rawPreviewUrl;
 
@@ -1620,6 +1626,7 @@ export function FileViewer({
   onAtMention,
   gitRefreshKey,
   initialDisplayMode,
+  initialPage,
   initialState,
   onStateChange,
   watchEnabled = true,
@@ -1640,6 +1647,7 @@ export function FileViewer({
         filePath={filePath}
         cwd={cwd}
         sourceSessionId={sourceSessionId}
+        initialPage={initialPage}
         onMentionLines={onMentionLines}
         onAskInNewChat={onAskInNewChat}
         watchEnabled={watchEnabled}
@@ -2071,7 +2079,7 @@ function TextFileViewer({
       const requestedEnd = Number.isInteger(locationTarget.endLine) ? locationTarget.endLine! : requestedStart;
       let startLine = requestedStart;
       let endLine = requestedEnd;
-      const snapshot = locationTarget.text.trim();
+      const snapshot = (locationTarget.text ?? "").trim();
       // The snapshot comes from rendered Preview text, while `data.content`
       // still contains Markdown syntax (and may have different soft-breaks).
       // A valid line hint must therefore not be rejected just because the raw

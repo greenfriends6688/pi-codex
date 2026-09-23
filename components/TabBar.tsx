@@ -18,6 +18,8 @@ export interface Tab {
   closing?: boolean;
   sourceSessionId?: string | null;
   initialDisplayMode?: FileViewerDisplayMode;
+  /** PDF page requested by the link that opened this tab (`#page=N`). */
+  page?: number;
   viewerState?: FileViewerState;
   viewerRevision?: number;
 }
