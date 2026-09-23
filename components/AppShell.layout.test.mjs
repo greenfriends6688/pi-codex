@@ -18,7 +18,9 @@ test("switching changes surface roles without reversing the fixed layout tracks"
 test("fixed controls target roles instead of moving with chat or editor content", () => {
   assert.match(source, /className=\{mobile \? undefined : "desktop-sidebar-toggle"\}/);
   assert.match(source, /cssVariableMirrorRef: appShellRef/);
-  assert.match(source, /sidebarOpen \? "var\(--sidebar-width\)" : "0px"/);
+  // Zeno shell: the sidebar toggle lives in the header lane (leading inset
+  // below), so it no longer rides `var(--sidebar-width)`; the secondary
+  // workspace control still tracks the live right-panel CSS variable.
   assert.match(source, /className=\{mobile \? undefined : "desktop-secondary-workspace-toggle"\}/);
   assert.match(source, /aria-controls=\{mobile \? "file-panel" : secondaryWorkspaceId\}/);
   assert.match(source, /rightPanelOpen[\s\S]*?\? "var\(--right-panel-width\)"[\s\S]*?: "0px"/);
@@ -37,7 +39,12 @@ test("resizing updates live without layout-transition lag", () => {
 });
 
 test("the main workspace header reserves the independent sidebar control lane", () => {
-  assert.match(source, /"--main-workspace-header-leading-inset": `\$\{TOP_BAR_ICON_BUTTON_SIZE\}px`/);
+  // Mobile keeps the in-flow toolbar size; desktop opens the 92px collapsed
+  // rail lane (3×28 + gaps) when the sidebar is closed.
+  assert.match(
+    source,
+    /"--main-workspace-header-leading-inset": isMobile\s*\?\s*`\$\{TOP_BAR_ICON_BUTTON_SIZE\}px`\s*:\s*sidebarOpen \? "0px" : "92px"/,
+  );
   assert.match(source, /"--main-workspace-header-trailing-inset": `\$\{TOP_BAR_ICON_BUTTON_SIZE\}px`/);
   assert.equal(source.match(/className="main-workspace-header"/g)?.length, 2);
   assert.match(css, /\.main-panels > \.main-workspace \.main-workspace-header[\s\S]*?padding-inline-start: var\(--main-workspace-header-leading-inset, 36px\)/);
