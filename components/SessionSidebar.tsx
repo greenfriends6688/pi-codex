@@ -1448,6 +1448,11 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           }}
         >
           <PiWebTitle />
+          {/* fork:zn-22 — 搜索与折叠打包成一组靠右。
+              之前两个按钮是 `space-between` 的独立子元素，搜索被顶到了正中间，
+              跟右边的折叠按钮隔着一大片空 —— 行内只有「品牌 + 两个动作」时，
+              动作应当成组，而不是各占一条边。 */}
+          <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
           <button
             type="button"
             onClick={() => {
@@ -1482,6 +1487,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               </svg>
             </button>
           )}
+          </div>
         </div>
 
         {/* fork:zn-13 — 导轨内缩 10px（Zeno `.sidebar-chrome{p-2.5}`）。此前导航块
