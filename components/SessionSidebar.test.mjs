@@ -158,8 +158,13 @@ test("renders projects as primary rows with the selected project's tasks nested 
 // fork:chat-workspace / fork:zn-13
 test("keeps a standalone chat section beside the projects", () => {
   assert.match(source, /<ChatWorkspaceRow/);
-  assert.match(source, /<NewTaskPicker/);
-  assert.match(source, /const visibleProjects = withoutChatProject\(projectChoices, chatProjectKey\)/);
+  // fork:ui-project-actions — 「新建任务」右侧的项目下拉已移除（用户要求）；项目相关动作
+  // 现在挂在每个项目行的「⋯」上，「添加项目」在项目列表底部一行。
+  assert.doesNotMatch(source, /<NewTaskPicker/);
+  assert.match(source, /filterHiddenProjects\(/);
+  assert.match(source, /projectDisplayName\(project\.root, projectPrefs\)/);
+  // fork:ui-project-actions — 项目列表再经本地偏好（别名 / 从列表移除）过滤。
+  assert.match(source, /filterHiddenProjects\(\s*withoutChatProject\(projectChoices, chatProjectKey\),/);
   assert.match(source, /fetch\("\/api\/chat-workspace"/);
   // 聊天 与 项目 平级（侧栏 tab 分 pane）：项目分区在前，聊天分区排在项目行之后。
   assert.ok(

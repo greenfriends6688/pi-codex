@@ -1569,7 +1569,31 @@ html[data-rail-translucent="true"] .sidebar-container {
 
 /* 内联形态没有固定高度：两列都不再各自滚动，交给设置面板自己的滚动条。 */
 .fork-skin-studio .fork-skin-dialog-preview-column,
-.fork-skin-studio /* fork:ui-history-panel — 顶栏的「完整历史」面板：与系统提示词/工具面板同高同底色，
+.fork-skin-studio /* fork:ui-project-actions — 项目行「⋯」菜单（打开文件夹 / 重命名 / 从列表中移除）。 */
+.fork-project-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.fork-project-menu-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.fork-project-menu-item.is-danger:hover {
+  color: var(--danger);
+}
+
+/* fork:ui-history-panel — 顶栏的「完整历史」面板：与系统提示词/工具面板同高同底色，
    内部按聊天区的排版渲染完整转写。 */
 .session-history-panel {
   display: flex;

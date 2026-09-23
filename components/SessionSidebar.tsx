@@ -10,6 +10,7 @@ import type { RecentProject } from "@/lib/project-groups";
 import { SESSION_TAG_TONES, applySessionFlags, archivedSessions, useSessionFlags, type SessionTag } from "@/lib/session-flags";
 // fork:zc-11 — 用户自定义项目分组 + 拖拽排序（localStorage 展示层偏好）。
 import { useSessionGroups } from "@/lib/session-groups";
+import { filterHiddenProjects, projectDisplayName, useProjectPrefs } from "@/lib/project-prefs";
 import { bucketOf, groupByTimeBucket, timeBucketKey, type TimeBucket, type TimeGroupEntry } from "@/lib/time-groups";
 import { loadCollapsedTimeGroups, saveCollapsedTimeGroups, type CollapsedTimeGroups } from "@/lib/time-group-state";
 import { desktopTrafficLightInset } from "@/lib/desktop-shell";
@@ -23,7 +24,6 @@ import { DirectoryPicker } from "./DirectoryPicker";
 import { GroupedProjectList, useProjectDrag } from "./fork/GroupedProjectList";
 // fork:chat-workspace — standalone chat section (docs/patches/0001-chat-workspace.md)
 import { ChatWorkspaceRow } from "./ChatWorkspaceRow";
-import { NewTaskPicker } from "./NewTaskPicker";
 import { SessionSearch } from "./SessionSearch";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { TEXT } from "@/lib/typography";
@@ -470,6 +470,12 @@ function ProjectRow({
   onToggle,
   activity,
   onClick,
+  onOpenFolder,
+  onRename,
+  onRemove,
+  renaming = false,
+  onRenameCommit,
+  onRenameCancel,
 }: {
   projectKey: string;
   label: string;
@@ -480,12 +486,90 @@ function ProjectRow({
   onToggle?: () => void;
   activity?: { running: number; unread: number };
   onClick: () => void;
+  /** fork:ui-project-actions — 项目行右侧「⋯」里的三个动作（照 workbuddy）。 */
+  onOpenFolder?: () => void;
+  onRename?: () => void;
+  onRemove?: () => void;
+  renaming?: boolean;
+  onRenameCommit?: (name: string) => void;
+  onRenameCancel?: () => void;
 }) {
   const { t } = useI18n();
   const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(label);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!renaming) return;
+    setRenameDraft(label);
+    const id = requestAnimationFrame(() => renameInputRef.current?.select());
+    return () => cancelAnimationFrame(id);
+  }, [renaming, label]);
+
   // fork:zc-11 — 拖拽句柄由 GroupedProjectList 的 context 注入；
   // 不在分组列表里（或 context 缺失）时是禁用态，点击/展开行为不变。
   const drag = useProjectDrag(projectKey);
+
+  // 重命名时这一行换成输入框：`<input>` 不能嵌在 `<button>` 里，所以整行换元素。
+  if (renaming) {
+    return (
+      <div
+        style={{
+          width: "100%",
+          height: SESSION_LIST_ITEM_HEIGHT,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "0 10px",
+          background: "var(--bg-selected)",
+          borderRadius: "var(--zn-radius-row)",
+        }}
+      >
+        <input
+          ref={renameInputRef}
+          value={renameDraft}
+          onChange={(event) => setRenameDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") { event.preventDefault(); onRenameCommit?.(renameDraft); }
+            if (event.key === "Escape") { event.preventDefault(); onRenameCancel?.(); }
+          }}
+          onBlur={() => onRenameCommit?.(renameDraft)}
+          aria-label={t("sidebar.renameProject")}
+          maxLength={60}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            background: "var(--bg)",
+            border: "1px solid var(--accent)",
+            borderRadius: "var(--radius-md)",
+            color: "var(--text)",
+            fontFamily: "inherit",
+            fontSize: TEXT.md,
+            padding: "3px 6px",
+            outline: "none",
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <button
@@ -541,6 +625,84 @@ function ProjectRow({
         <span style={{ fontSize: TEXT.sm, color: "var(--text-dim)", flexShrink: 0, minWidth: 14, textAlign: "right" }}>{count}</span>
       )}
       {showProjectActivity(activity, t)}
+      {/* fork:ui-project-actions — hover 才出现的「⋯」：打开文件夹 / 重命名 / 从列表中移除。 */}
+      {(onOpenFolder || onRename || onRemove) && (
+        <div ref={menuRef} style={{ position: "relative", flexShrink: 0 }}>
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={t("sidebar.projectActions")}
+            aria-expanded={menuOpen}
+            title={t("sidebar.projectActions")}
+            onClick={(event) => {
+              event.stopPropagation();
+              setMenuOpen((open) => !open);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" && event.key !== " ") return;
+              event.preventDefault();
+              event.stopPropagation();
+              setMenuOpen((open) => !open);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: 20,
+              height: 20,
+              borderRadius: "var(--radius-md)",
+              background: menuOpen ? "var(--bg-selected)" : "transparent",
+              color: "var(--text-muted)",
+              opacity: hovered || menuOpen ? 1 : 0,
+              cursor: "pointer",
+              transition: "opacity 0.12s, background 0.12s",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <circle cx="5" cy="12" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="19" cy="12" r="1.6" />
+            </svg>
+          </span>
+          {menuOpen && (
+            <div
+              role="menu"
+              className="fork-project-menu"
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                zIndex: 120,
+                minWidth: 168,
+                padding: "4px 0",
+                background: "var(--bg-elev)",
+                border: "1px solid var(--border)",
+                borderRadius: "var(--radius-lg)",
+                boxShadow: "var(--shadow-lg)",
+              }}
+            >
+              {onOpenFolder && (
+                <button type="button" role="menuitem" className="fork-project-menu-item" onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onOpenFolder(); }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
+                  {t("sidebar.openProjectFolder")}
+                </button>
+              )}
+              {onRename && (
+                <button type="button" role="menuitem" className="fork-project-menu-item" onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onRename(); }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 4 5 5L7 22l-5-5Z" /><path d="m14 5 5 5" /></svg>
+                  {t("sidebar.renameProject")}
+                </button>
+              )}
+              {onRemove && (
+                <button type="button" role="menuitem" className="fork-project-menu-item is-danger" onClick={(event) => { event.stopPropagation(); setMenuOpen(false); onRemove(); }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" /></svg>
+                  {t("sidebar.removeProject")}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       {onToggle && (
         <span
           role="button"
@@ -592,7 +754,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const [nativePicking, setNativePicking] = useState(false);
   const isMobile = useIsMobile();
   const [validatedProject, setValidatedProject] = useState<ValidatedProject | null>(null);
-  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   // fork:chat-workspace — standalone chat workspace, identified by the server key.
   const [chatWorkspace, setChatWorkspace] = useState<{ cwd: string; key: string } | null>(null);
   const [chatWorkspaceBusy, setChatWorkspaceBusy] = useState(false);
@@ -623,7 +784,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       return next;
     });
   }, []);
-  const projectMenuRef = useRef<HTMLDivElement>(null);
   const sessionListRef = useRef<HTMLDivElement>(null);
   const [sessionListOffsetTop, setSessionListOffsetTop] = useState(0);
   // Worktree switcher state
@@ -1105,7 +1265,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       setCustomPathValue(data.cwd);
       setSelectedCwd(data.cwd);
       setCustomPathOpen(false);
-      setProjectMenuOpen(false);
     } catch (e) {
       setCustomPathError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -1116,7 +1275,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const handleCustomPathClick = useCallback(() => {
     setCustomPathOpen(true);
     setCustomPathError(null);
-    setProjectMenuOpen(false);
   }, []);
   // ponytail: 桌面走服务端原生选框，手机直走弹窗；服务端失败再试浏览器，最后回退
   const handleAddProjectClick = useCallback(async () => {
@@ -1127,7 +1285,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     if (nativePicking || customPathValidating) return;
     setNativePicking(true);
     setCustomPathError(null);
-    setProjectMenuOpen(false);
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 65000);
@@ -1162,20 +1319,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
     }
     handleCustomPathClick();
   }, [isMobile, nativePicking, customPathValidating, customPathValue, selectedCwd, commitCustomPath, handleCustomPathClick]);
-  const handleDefaultCwd = useCallback(async () => {
-    try {
-      const res = await fetch("/api/default-cwd", { method: "POST" });
-      const data = await res.json() as { cwd?: string; error?: string };
-      if (data.cwd) {
-        setSelectedCwd(data.cwd);
-        setCustomPathOpen(false);
-        setCustomPathError(null);
-        setProjectMenuOpen(false);
-      }
-    } catch {
-      // ignore
-    }
-  }, []);
+
   const handleCreateWorktree = useCallback(async () => {
     const branch = wtNewBranch.trim();
     if (!branch || wtBusy || !worktreeState) return;
@@ -1246,9 +1390,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (projectMenuRef.current && !projectMenuRef.current.contains(e.target as Node)) {
-        setProjectMenuOpen(false);
-      }
       if (wtDropdownRef.current && !wtDropdownRef.current.contains(e.target as Node)) {
         setWtDropdownOpen(false);
         setWtNewOpen(false);
@@ -1310,7 +1451,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
     setSelectedCwd(cwd);
     setCustomPathError(null);
-    setProjectMenuOpen(false);
     onNewSession?.(tempId, cwd);
   }, [onNewSession]);
 
@@ -1369,7 +1509,15 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   // （和工作区下拉）里剔除；两者靠各自的标题行区分，标题下各自渲染自己的会话。
   const chatProjectKey = chatWorkspace?.key ?? null;
   // 项目全部展示，靠外层滚动查看，不再截断
-  const visibleProjects = withoutChatProject(projectChoices, chatProjectKey);
+  // fork:ui-project-actions — 本地偏好：显示名 + 「从列表中移除」。当前选中的项目永远保留，
+  // 否则移除后连自己在哪都看不出来。
+  const { prefs: projectPrefs, setAlias: setProjectAlias, hideProject } = useProjectPrefs();
+  const [renamingProjectKey, setRenamingProjectKey] = useState<string | null>(null);
+  const visibleProjects = filterHiddenProjects(
+    withoutChatProject(projectChoices, chatProjectKey),
+    projectPrefs,
+    selectedProject?.root ?? null,
+  );
   const chatProject: RecentProject | null = chatWorkspace
     ? chatProjectOf(projectChoices, chatProjectKey) ?? { key: chatWorkspace.key, root: chatWorkspace.cwd }
     : null;
@@ -1605,13 +1753,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.newTask")}
               />
             </div>
-            <NewTaskPicker
-              projects={visibleProjects.map((project) => ({ key: project.key, root: project.root, name: getFileName(project.root) || project.root }))}
-              activeKey={selectedProject?.key ?? null}
-              chatPath={chatProject?.root ?? null}
-              onNewIn={startSessionIn}
-              onAddProject={() => void handleAddProjectClick()}
-            />
           </div>
           {/* fork:zn-13 — 这里曾有「插件 / 技能」两行导航，按用户要求删掉了：
               设置面板里已经有这两个分区，导轨上再来一份是重复入口。
@@ -2070,7 +2211,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               paddingLeft: 10,
               position: "relative",
             }}
-            ref={projectMenuRef}
           >
             <span style={{ fontSize: TEXT.lg, fontWeight: 500, color: "var(--text-dim)" }}>
               {t("sidebar.projects")}
@@ -2106,117 +2246,8 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                   <path d="m8 9 4-4 4 4M8 15l4 4 4-4" />
                 </svg>
               </button>
-              <button
-                type="button"
-                onClick={() => setProjectMenuOpen((open) => !open)}
-                title={t("sidebar.projectActions")}
-                aria-label={t("sidebar.projectActions")}
-                aria-expanded={projectMenuOpen}
-                style={{
-                  width: 28,
-                  height: 28,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 0,
-                  background: projectMenuOpen ? "var(--bg-selected)" : "transparent",
-                  border: "none",
-                  borderRadius: "var(--radius-md)",
-                  color: projectMenuOpen ? "var(--text)" : "var(--text-dim)",
-                  cursor: "pointer",
-                }}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <circle cx="5" cy="12" r="1.5" />
-                  <circle cx="12" cy="12" r="1.5" />
-                  <circle cx="19" cy="12" r="1.5" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                onClick={handleAddProjectClick}
-                disabled={nativePicking || customPathValidating}
-                title={nativePicking ? t("sidebar.checking") : t("sidebar.addProject")}
-                aria-label={t("sidebar.addProject")}
-                aria-busy={nativePicking}
-                style={{
-                  width: 28,
-                  height: 28,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  padding: 0,
-                  background: "transparent",
-                  border: "none",
-                  borderRadius: "var(--radius-md)",
-                  color: "var(--text-dim)",
-                  cursor: nativePicking ? "wait" : "pointer",
-                  opacity: nativePicking ? 0.6 : 1,
-                }}
-              >
-                {nativePicking ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ animation: "spin 0.8s linear infinite" }}>
-                    <path d="M21 12a9 9 0 1 1-6.219-8.56" />
-                  </svg>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                )}
-              </button>
             </div>
-            <AnimatedDropdown
-              open={projectMenuOpen}
-              style={{
-                position: "absolute",
-                top: "calc(100% + 2px)",
-                left: 0,
-                right: 0,
-                zIndex: 100,
-                background: "var(--bg-elev)",
-                border: "1px solid var(--border)",
-                borderRadius: "var(--radius-lg)",
-                boxShadow: "var(--shadow-lg)",
-                overflow: "hidden",
-                padding: "6px 0",
-              }}
-            >
-              {selectedProject && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", color: "var(--text)", fontWeight: 600, fontSize: TEXT.md }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, color: "var(--accent)" }} aria-hidden="true">
-                    <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-                  </svg>
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(selectedProject.root) || selectedProject.root}</span>
-                  <span style={{ color: "var(--success)", flexShrink: 0 }}>✓</span>
-              </div>
-            )}
-              {/* fork:ui-project-wording — same vocabulary as the new-task picker and the
-              sidebar sections: 在项目中 / 不在项目中. */}
-              <div style={{ padding: "4px 12px 2px", fontSize: TEXT.xs, color: "var(--text-dim)", fontWeight: 500 }}>{t("sidebar.projects")}</div>
-              {visibleProjects.slice(0, 8).map((project) => (
-                <button
-                  key={project.key}
-                  type="button"
-                  onClick={() => {
-                    setSelectedCwd(project.root);
-                    setCustomPathError(null);
-                    setProjectMenuOpen(false);
-                  }}
-                  title={project.root}
-                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: project.key === selectedProject?.key ? "var(--bg-selected)" : "transparent", border: "none", color: project.key === selectedProject?.key ? "var(--text)" : "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: TEXT.sm }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }} aria-hidden="true">
-                    <path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
-                  </svg>
-                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{getFileName(project.root) || project.root}</span>
-                </button>
-              ))}
-              <div style={{ height: 1, background: "var(--border)", margin: "6px 0" }} />
-              <button type="button" onClick={() => void handleDefaultCwd()} style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", background: "transparent", border: "none", color: "var(--text-muted)", cursor: "pointer", textAlign: "left", fontSize: TEXT.sm }}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></svg>
-                {t("sidebar.useDefaultDirectory")}
-              </button>
-            </AnimatedDropdown>
+
           </div>
 
           {visibleProjects.map((project) => {
@@ -2227,8 +2258,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               <div key={project.key}>
                 <ProjectRow
                   projectKey={project.key}
-                  label={getFileName(project.root) || project.root}
+                  label={projectDisplayName(project.root, projectPrefs)}
                   title={project.root}
+                  renaming={renamingProjectKey === project.key}
+                  onRenameCommit={(name) => { setProjectAlias(project.root, name); setRenamingProjectKey(null); }}
+                  onRenameCancel={() => setRenamingProjectKey(null)}
+                  onRename={() => setRenamingProjectKey(project.key)}
+                  onRemove={() => {
+                    hideProject(project.root);
+                    // 移除的是列表条目，不是磁盘目录：只把它从侧栏藏起来（可再次添加回来）。
+                    if (selectedProject?.key === project.key) setSelectedCwd(null);
+                  }}
+                  onOpenFolder={() => {
+                    void fetch("/api/open-in-explorer", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ cwd: project.root }),
+                    });
+                  }}
                   selected={isSelectedProject}
                   count={count}
                   expanded={isExpanded}
@@ -2254,7 +2301,6 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     }
                     setSelectedCwd(project.root);
                     setCustomPathError(null);
-                    setProjectMenuOpen(false);
                   }}
                 />
                 {isExpanded &&
@@ -2328,6 +2374,43 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             store={sessionGroups}
             renderProject={(project) => projectRowNodes.get(project.key) ?? null}
           />
+          {/* fork:ui-project-actions — 「添加项目」从项目栏标题的 + 按钮搬到这里：
+              标题行只留展开/折叠，项目自己的动作（打开文件夹/重命名/移除）挂在每个项目行上。 */}
+          <button
+            type="button"
+            onClick={() => void handleAddProjectClick()}
+            disabled={nativePicking || customPathValidating}
+            title={t("sidebar.addProject")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              width: "100%",
+              padding: "6px 10px",
+              marginTop: 2,
+              background: "transparent",
+              border: "none",
+              borderRadius: "var(--radius-md)",
+              color: "var(--text-dim)",
+              cursor: nativePicking ? "wait" : "pointer",
+              fontSize: TEXT.sm,
+              textAlign: "left",
+              opacity: nativePicking ? 0.6 : 1,
+            }}
+            onMouseEnter={(event) => {
+              event.currentTarget.style.background = "var(--bg-hover)";
+              event.currentTarget.style.color = "var(--text)";
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.background = "transparent";
+              event.currentTarget.style.color = "var(--text-dim)";
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            {t("sidebar.addProject")}
+          </button>
           </>
           )}
 
@@ -2394,8 +2477,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                     }
                     setSelectedCwd(chatProject.root);
                     setCustomPathError(null);
-                    setProjectMenuOpen(false);
-                  }}
+                    }}
                 />
                 {isChatExpanded && (chatFamilies.length === 0 && chatArchivedFamilies.length === 0 ? (
                   <div style={{ padding: "6px 0 6px 24px", color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("sidebar.noTasks")}</div>
