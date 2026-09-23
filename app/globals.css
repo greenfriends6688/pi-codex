@@ -387,9 +387,11 @@ html, body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-ui-base, var(--font-inter)), -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   font-feature-settings: "tnum" 1;
-  font-size: var(--text-lg);
+  /* fork:zn-15 — 「UI 字号」的旋钮（Zeno `--ui-font-size`）。默认等于 body 原本的
+     `--text-lg`，所以不设这项时行为与之前完全一致。 */
+  font-size: var(--ui-font-size, var(--text-lg));
   overscroll-behavior: none;
 }
 

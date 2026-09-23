@@ -102,6 +102,12 @@ function syncDom(next: WallpaperState): void {
   if (active) el.setAttribute("data-wallpaper", "on");
   else el.removeAttribute("data-wallpaper");
   el.style.setProperty("--wallpaper-scrim", `${next.scrim}%`);
+  /* 推导值在 JS 里算成**纯百分比**，不要留在 CSS 用 `max(35%, calc(...))`：
+     Chrome 不接受数学函数当 `color-mix()` 的百分比 → 整条 background 在
+     computed-value 阶段失效 → 回落成 transparent。症状是侧栏（和副区）在开着
+     壁纸时**整块全透明**，文字糊在图上，而不是「稍微透一点」。
+     两个候选值：scrim - 5%，地板 35%（保证面板上的文字有底）。 */
+  el.style.setProperty("--wp-panel-alpha", `${Math.max(35, next.scrim - 5)}%`);
   el.setAttribute("data-wallpaper-input", next.inputMode);
   el.setAttribute("data-wallpaper-panel", next.panelMode);
   el.setAttribute("data-wallpaper-message", next.messageMode);
@@ -141,6 +147,22 @@ function subscribe(cb: () => void): () => void {
 /** Apply the persisted wallpaper once, on first client render. */
 export function initWallpaper(): void {
   syncDom(ensure());
+}
+
+/**
+ * fork:zn-19 — 给主题皮肤用的命令式入口。
+ *
+ * 皮肤在非 React 模块里落地（`useThemeSkins` 的 `writeSkin`），拿不到 hook，
+ * 但**必须走同一个 store**：直接写 DOM 属性会让 `useWallpaper` 下次「选壁纸」时
+ * 用一个过期的 state 覆盖回来。所以这里只把 `write` 暴露出去，不另写一套。
+ */
+export function applyWallpaperState(partial: Partial<WallpaperState>): void {
+  write(partial);
+}
+
+/** 当前生效的壁纸快照，皮肤接管前要先备份。 */
+export function readWallpaperState(): WallpaperState {
+  return ensure();
 }
 
 export function useWallpaper() {

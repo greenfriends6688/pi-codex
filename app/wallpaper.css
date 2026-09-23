@@ -68,9 +68,15 @@ html:not([data-wallpaper="on"]) .chat-wallpaper {
    wallpaper does not show through that area at all. */
 /* One knob for the whole UI: the scrim slider also decides how much image the
    panels let through (5% less than the message area, with a 35% floor so text
-   stays readable over a busy photo). Wegent/desktop fork use fixed 62-72%. */
+   stays readable over a busy photo). Wegent/desktop fork use fixed 62-72%.
+
+   fork:zn-19 — 值由 `hooks/useWallpaper.ts` 的 `syncDom()` 在 JS 里算好写成**纯百分比**。
+   留在这里写成 `max(35%, calc(var(--wallpaper-scrim) - 5%))` 曾经是个真实故障：
+   Chrome 不接受数学函数当 `color-mix()` 的百分比，于是整条 `background` 在
+   computed-value 阶段失效、回落成 `transparent` —— 开着壁纸时侧栏与副区**整块全透明**。
+   这个 bug 被「透过去看到壁纸」的表象盖住了很久，直到皮肤把壁纸铺满全窗才暴露。 */
 html[data-wallpaper="on"] {
-  --wp-panel-alpha: max(35%, calc(var(--wallpaper-scrim, 70%) - 5%));
+  --wp-panel-alpha: 65%;
 }
 
 html[data-wallpaper="on"][data-wallpaper-input="blur"] { --wp-blur-input: 12px; }
@@ -87,16 +93,18 @@ html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-m
    fixed-position descendant in this app (the composer's dropdowns are anchored
    to the chat column, not to a panel), so the stacking context that
    `backdrop-filter` creates is harmless here. */
-html[data-wallpaper="on"][data-wallpaper-panel="blur"] .sidebar-container,
-html[data-wallpaper="on"][data-wallpaper-panel="blur"] .right-panel-container {
+html[data-wallpaper="on"]:not([data-theme-skin="true"])[data-wallpaper-panel="blur"] .sidebar-container,
+html[data-wallpaper="on"]:not([data-theme-skin="true"])[data-wallpaper-panel="blur"] .right-panel-container {
   backdrop-filter: blur(var(--wp-blur-panel));
 }
 
-html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .sidebar-container {
+/* `:not([data-theme-skin])`：装了主题皮肤时，面的填充由皮肤按「基色 × 各自透明度」
+   决定（一层 alpha），这里的 scrim 派生值不该插手。 */
+html[data-wallpaper="on"]:not([data-theme-skin="true"]):is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .sidebar-container {
   background: color-mix(in srgb, var(--bg-panel) var(--wp-panel-alpha), transparent) !important;
 }
 
-html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .right-panel-container {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]):is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .right-panel-container {
   background: color-mix(in srgb, var(--bg-panel) var(--wp-panel-alpha), transparent) !important;
 }
 
@@ -110,11 +118,11 @@ html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-pan
    1px inside the 1px border, so its inherited corner radius would be centred one
    pixel further out than the border's inner curve and leave an unfilled wedge at
    each corner where the raw wallpaper shows through unfrosted. */
-html[data-wallpaper="on"] .chat-input-shell {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]) .chat-input-shell {
   position: relative;
 }
 
-html[data-wallpaper="on"] .chat-input-shell::before {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]) .chat-input-shell::before {
   content: "";
   position: absolute;
   inset: -1px;
@@ -123,15 +131,15 @@ html[data-wallpaper="on"] .chat-input-shell::before {
   pointer-events: none;
 }
 
-html[data-wallpaper="on"][data-wallpaper-input="blur"] .chat-input-shell::before {
+html[data-wallpaper="on"]:not([data-theme-skin="true"])[data-wallpaper-input="blur"] .chat-input-shell::before {
   backdrop-filter: blur(var(--wp-blur-input));
 }
 
-html[data-wallpaper="on"]:is([data-wallpaper-input="trans"], [data-wallpaper-input="blur"]) .chat-input-shell {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]):is([data-wallpaper-input="trans"], [data-wallpaper-input="blur"]) .chat-input-shell {
   background: transparent !important;
 }
 
-html[data-wallpaper="on"]:is([data-wallpaper-input="trans"], [data-wallpaper-input="blur"]) .chat-input-shell::before {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]):is([data-wallpaper-input="trans"], [data-wallpaper-input="blur"]) .chat-input-shell::before {
   background: color-mix(in srgb, var(--bg-elev) 68%, transparent);
 }
 
@@ -181,7 +189,7 @@ html[data-wallpaper="on"] .app-shell-layout {
 
 /* Top bar and composer join the panel surfaces instead of punching white
    holes into the image. */
-html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .main-workspace-header {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]):is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) .main-workspace-header {
   background: color-mix(in srgb, var(--bg-panel) var(--wp-panel-alpha), transparent) !important;
 }
 
@@ -189,7 +197,7 @@ html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-pan
    viewer shell, the body row). Without these the panel stayed a solid slab even
    though its container was translucent — which read as "the wallpaper only
    covers the middle". */
-html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) :is(.explorer-column, .file-panel-body, .file-panel-main, .file-viewer-shell) {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]):is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) :is(.explorer-column, .file-panel-body, .file-panel-main, .file-viewer-shell) {
   background: transparent !important;
 }
 
@@ -207,24 +215,24 @@ html[data-wallpaper="on"]:is([data-wallpaper-message="trans"], [data-wallpaper-m
  * preview, and the settings dialog. `:has()` keeps this CSS-only — no extra
  * class needs to travel through React.
  * ------------------------------------------------------------------------- */
-html[data-wallpaper="on"] .chat-slot > div:has(> .main-workspace-header),
-html[data-wallpaper="on"] .right-panel-container > div:has(> .main-workspace-header) {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]) .chat-slot > div:has(> .main-workspace-header),
+html[data-wallpaper="on"]:not([data-theme-skin="true"]) .right-panel-container > div:has(> .main-workspace-header) {
   background: transparent !important;
 }
 
 /* "透明" now means what it says: the panel takes no surface of its own, so the
    tree sits on the same scrim as the transcript. "毛玻璃" keeps a translucent
    surface (the alpha knob) plus a backdrop blur; "不透明" stays solid. */
-html[data-wallpaper="on"][data-wallpaper-panel="trans"] :is(.sidebar-container, .right-panel-container) {
+html[data-wallpaper="on"]:not([data-theme-skin="true"])[data-wallpaper-panel="trans"] :is(.sidebar-container, .right-panel-container) {
   background: transparent !important;
 }
 
-html[data-wallpaper="on"][data-wallpaper-panel="blur"] :is(.sidebar-container, .right-panel-container) {
+html[data-wallpaper="on"]:not([data-theme-skin="true"])[data-wallpaper-panel="blur"] :is(.sidebar-container, .right-panel-container) {
   background: color-mix(in srgb, var(--bg-panel) var(--wp-panel-alpha), transparent) !important;
   backdrop-filter: blur(var(--wp-blur-panel));
 }
 
-html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) :is(
+html[data-wallpaper="on"]:not([data-theme-skin="true"]):is([data-wallpaper-panel="trans"], [data-wallpaper-panel="blur"]) :is(
   .file-explorer-section,
   .file-explorer-body,
   .file-panel-main,
@@ -237,6 +245,6 @@ html[data-wallpaper="on"]:is([data-wallpaper-panel="trans"], [data-wallpaper-pan
 
 /* Surfaces that float above the layout keep a light scrim instead of a solid
    fill, so the image stays continuous behind them. */
-html[data-wallpaper="on"] .settings-dialog-surface {
+html[data-wallpaper="on"]:not([data-theme-skin="true"]) .settings-dialog-surface {
   background: color-mix(in srgb, var(--bg) 88%, transparent) !important;
 }

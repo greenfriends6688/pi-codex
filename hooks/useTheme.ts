@@ -4,6 +4,11 @@ import { useCallback, useSyncExternalStore } from "react";
 import { isDarkTheme, isThemePreference, type ThemePreference, type ResolvedTheme } from "@/lib/theme";
 import { applyStoredBorderDepth, clearDepthOverrides, resetBorderDepthSnapshot } from "@/hooks/useBorderDepth";
 import { applyStoredUiDensity } from "@/hooks/useUiDensity";
+// fork:zn-15 — 侧边栏半透明也随主题生效（主题切换会重算这一层）。
+import { applyStoredRailTranslucent } from "@/hooks/useRailTranslucent";
+import { applyStoredUiFont } from "@/hooks/useUiFont";
+// fork:zn-19 — 皮肤也是「启动时要落地一次」的一层（改动面板/卡片/画布的变量）。
+import { applyStoredThemeSkins } from "@/hooks/useThemeSkins";
 
 export type { ThemePreference, ResolvedTheme } from "@/lib/theme";
 
@@ -56,6 +61,9 @@ function applyDomTheme(theme: ResolvedTheme): void {
   resetBorderDepthSnapshot();
   applyStoredBorderDepth();
   applyStoredUiDensity();
+  applyStoredRailTranslucent();
+  applyStoredUiFont();
+  applyStoredThemeSkins();
 }
 
 function ensureState(): ThemeState {

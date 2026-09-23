@@ -17,6 +17,7 @@ import { workspaceKeyOf } from "@/lib/workspace-memory";
 import { formatRelativeTime } from "@/lib/i18n/format";
 import { getFileName } from "@/lib/file-paths";
 import { useI18n } from "@/hooks/useI18n";
+import { readStoredSidebarPane, writeStoredSidebarPane, type SidebarPane } from "@/lib/sidebar-pane";
 import { DirectoryPicker } from "./DirectoryPicker";
 // fork:zc-11 + fork:zm-06 — 分组/排序列表渲染（含 FLIP 重排）。
 import { GroupedProjectList, useProjectDrag } from "./fork/GroupedProjectList";
@@ -73,6 +74,12 @@ interface Props {
   onBackgroundTaskDone?: () => void;
   onRunningSessionIdsChange?: (ids: Set<string>) => void;
   onSessionsChange?: (sessions: SessionInfo[]) => void;
+  /** fork:zn-21 — 折叠按钮搬进导轨品牌行（原来它浮在导轨右边界上，压在主区顶栏里）。
+   *  未折叠时由导轨自己渲染，所以由 AppShell 注入回调。 */
+  onToggleSidebar?: () => void;
+  /** fork:zn-21 — 折叠态的图标条点「搜索」时，把这里的计数 +1；
+   *  SessionSidebar 借此在被展开的那一刻把搜索框打开。 */
+  searchRequestId?: number;
 }
 
 interface WorktreeEntry {
@@ -321,33 +328,44 @@ function PiWebTitle() {
   );
 }
 
-function SidebarNavIcon() {
+/* fork:zn-13 — 导轨行图标。Zeno 用 lucide（新建会话 SquarePen / 项目 Folder /
+   插件 Box / 资源 Layers），这里手绘同形状，不引图标库。 */
+function SidebarNavGlyph({ name }: { name: "newSession" }) {
   const common = {
-    width: 15,
-    height: 15,
+    width: 16,
+    height: 16,
     viewBox: "0 0 24 24",
     fill: "none",
     stroke: "currentColor",
-    strokeWidth: 1.8,
+    strokeWidth: 1.75,
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
     "aria-hidden": true,
   };
   return (
     <svg {...common}>
-      <path d="M12 5v14M5 12h14" />
+      <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.375 2.625a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4Z" />
     </svg>
   );
 }
 
-function SidebarNavButton({
+/* fork:zn-13 — 导轨行（Zeno `.nav-item` + `.nav-badge`）。规格搬到了
+   `app/fork-ui.css` 的 `.fork-nav-item` / `.fork-nav-badge`，因为这里要表达的
+   是三件样式规矩（hover 与选中同填充、选中不加字重、计数右对齐），写进 CSS 才
+   能和会话行 / 项目行共用同一套值。 */
+function SidebarNavRow({
+  icon,
   label,
+  badge,
   onClick,
   active,
   disabled,
   title,
 }: {
+  icon: "newSession";
   label: string;
+  badge?: number | null;
   onClick?: () => void;
   active?: boolean;
   disabled?: boolean;
@@ -360,36 +378,14 @@ function SidebarNavButton({
       disabled={disabled}
       title={title ?? label}
       aria-label={label}
-      style={{
-        width: "100%",
-        // fork:zn-02 — 32px rail row (Zeno .nav-item h-8), 6px radius.
-        height: "var(--zn-row)",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "0 10px",
-        background: active ? "var(--bg-selected)" : "transparent",
-        border: "none",
-        borderRadius: "var(--zn-radius-row)",
-        color: disabled ? "var(--text-dim)" : "var(--text)",
-        cursor: disabled ? "not-allowed" : "pointer",
-        textAlign: "left",
-        fontSize: TEXT.md,
-        fontWeight: active ? 500 : 400,
-        opacity: disabled ? 0.42 : 1,
-        transition: "background 0.12s, color 0.12s",
-      }}
-      onMouseEnter={(event) => {
-        if (!disabled && !active) event.currentTarget.style.background = "var(--bg-hover)";
-      }}
-      onMouseLeave={(event) => {
-        if (!active) event.currentTarget.style.background = "transparent";
-      }}
+      data-active={active ? "true" : undefined}
+      className="fork-nav-item"
     >
-      <span style={{ display: "flex", flexShrink: 0, color: active ? "var(--text)" : "var(--text-muted)" }}>
-        <SidebarNavIcon />
+      <span className="fork-nav-icon">
+        <SidebarNavGlyph name={icon} />
       </span>
-      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      <span className="fork-nav-label">{label}</span>
+      {badge != null && badge > 0 ? <span className="fork-nav-badge">{badge}</span> : null}
     </button>
   );
 }
@@ -502,7 +498,7 @@ function ProjectRow({
   );
 }
 
-export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange }: Props) {
+export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSession, initialSessionId, skipInitialProjectSelection, onInitialRestoreDone, refreshKey, onSessionDeleted, selectedCwd: selectedCwdProp, onCwdChange, onBackgroundTaskDone, onRunningSessionIdsChange, onSessionsChange, onToggleSidebar, searchRequestId = 0 }: Props) {
   const { t } = useI18n();
   const [allSessions, setAllSessions] = useState<SessionInfo[]>([]);
   const [sessionListVersion, setSessionListVersion] = useState<number | null>(null);
@@ -570,6 +566,24 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const wtDropdownRef = useRef<HTMLDivElement>(null);
   const wtNewInputRef = useRef<HTMLInputElement>(null);
   const [sessionSearchOpen, setSessionSearchOpen] = useState(false);
+  /* fork:zn-20 — 导轨当前看哪一列。项目在前、聊天在后（用户要求，也是 Zeno 的顺序）。 */
+  /* fork:zn-21 — 折叠态图标条点「搜索」→ AppShell 把 `searchRequestId` +1 并展开导轨，
+     这里收到就打开搜索框。用计数而不是布尔：连点两次要各生效一次。 */
+  useEffect(() => {
+    if (searchRequestId > 0) setSessionSearchOpen(true);
+  }, [searchRequestId]);
+
+  const [sidebarPane, setSidebarPane] = useState<SidebarPane>(readStoredSidebarPane);
+  const selectPane = (next: SidebarPane) => {
+    setSidebarPane(next);
+    writeStoredSidebarPane(next);
+    /* 切到「聊天」时顺手把它展开：用户点这一下就是想看会话，结果给一行收起的
+       标题（还要再点一次）等于没切。只在没展开时加，所以再点标题仍能收起。
+       `chatProject` 在上面之后才声明，但闭包在点击时才求值 —— 那时已初始化。 */
+    if (next === "chat" && chatProject) {
+      setExpandedProjects((prev) => (prev.has(chatProject.key) ? prev : new Set(prev).add(chatProject.key)));
+    }
+  };
   const [sessionSearchQuery, setSessionSearchQuery] = useState("");
   const sessionSearchActive = sessionSearchOpen && Boolean(sessionSearchQuery.trim());
   const [runningSessionIds, setRunningSessionIds] = useState<Set<string>>(() => new Set());
@@ -1450,18 +1464,38 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
             </svg>
           </button>
+          {/* fork:zn-21 — 折叠按钮。搬进品牌行（原来浮在导轨右边界，一半压在主区顶栏上，
+              和顶栏那排图标抢同一条线）。放在品牌行末尾意味着它在 `-webkit-app-region: drag`
+              的区域里，靠 fork-ui.css 的 `.sidebar-brand-row button` 规则挖洞。 */}
+          {onToggleSidebar && (
+            <button
+              type="button"
+              onClick={onToggleSidebar}
+              title={t("sidebar.hide")}
+              aria-label={t("sidebar.hide")}
+              aria-controls="session-sidebar"
+              aria-expanded
+              className={`flex h-[30px] w-[30px] shrink-0 cursor-pointer items-center justify-center rounded-[8px] border-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-accent bg-transparent text-text-muted`}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
+              </svg>
+            </button>
+          )}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+        {/* fork:zn-13 — 导轨内缩 10px（Zeno `.sidebar-chrome{p-2.5}`）。此前导航块
+            与下方列表的左右内缩不一致（0 / 6 / 10 三种），行填充因此对不齐。 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "0 10px" }}>
           {/* fork:chat-workspace — the primary action stays upstream's SidebarNavButton;
               the picker beside it chooses a project or "not in a project". */}
           <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <SidebarNavButton
+              <SidebarNavRow
+                icon="newSession"
                 label={t("sidebar.newTask")}
                 onClick={handleNewSession}
                 active={!selectedSessionId}
-                disabled={false}
                 title={selectedCwd ? t("sidebar.newSessionTitle", { path: selectedCwd }) : t("sidebar.newTask")}
               />
             </div>
@@ -1473,6 +1507,31 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               onAddProject={() => void handleAddProjectClick()}
             />
           </div>
+          {/* fork:zn-13 — 这里曾有「插件 / 技能」两行导航，按用户要求删掉了：
+              设置面板里已经有这两个分区，导轨上再来一份是重复入口。
+              导轨保留「新建任务」一行 + 下面的项目/聊天切换。 */}
+        </div>
+
+        {/* fork:zn-20 — 项目 / 聊天 左右切换。项目在前、聊天在后。 */}
+        <div className="fork-segmented" role="tablist" aria-label={t("sidebar.paneSwitch")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarPane === "projects"}
+            data-active={sidebarPane === "projects" ? "true" : undefined}
+            onClick={() => selectPane("projects")}
+          >
+            {t("sidebar.projects")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={sidebarPane === "chat"}
+            data-active={sidebarPane === "chat" ? "true" : undefined}
+            onClick={() => selectPane("chat")}
+          >
+            {t("sidebar.chatWorkspace")}
+          </button>
         </div>
 
         {sessionSearchOpen && (
@@ -1852,7 +1911,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
         <div
           ref={listScrollRef}
           onScroll={handleListScroll}
-          style={{ flex: "1 1 auto", overflowY: "auto", padding: "0 6px 8px", minHeight: 80 }}
+          style={{ flex: "1 1 auto", overflowY: "auto", padding: "0 10px 8px", minHeight: 80 }}
         >
           {loading && projectChoices.length === 0 && (
             <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: TEXT.sm }}>
@@ -1869,103 +1928,19 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               {t("sidebar.noSessions")}
             </div>
           )}
-          {/* fork:chat-workspace — 聊天分区：固定在最上面，自带标题行（新建 / 设置目录 /
-              折叠），会话列表沿用项目那套高亮与虚拟窗口逻辑。 */}
-          {chatProject && (() => {
-            const isSelectedChat = chatProject.key === selectedProject?.key;
-            const isChatExpanded = expandedProjects.has(chatProject.key);
-            const chatFamilies = listSessionFamilies(orderedProjectSessions(chatProject.key));
-            const chatArchivedFamilies = listSessionFamilies(archivedSessions(sessionsForProject(allSessions, chatProject.key), sessionFlags));
-            // 聊天列表复用同一套时间分组与折叠状态；窗口单独计算，避免与项目
-            // 列表的 entries 长度耦合，index 永远落在 chatEntries 范围内。
-            const chatEntries = groupByTimeBucket(chatFamilies, bucketOfFamily, collapsedGroups);
-            const chatVirtualIndices = getSessionListIndices(
-              chatEntries.length,
-              Math.max(0, listScrollTop - sessionListOffsetTop),
-              listViewportH,
-              chatEntries.findIndex((entry) => entry.type === "item" && entry.item.root.id === focusedSessionId),
-            );
-            const chatArchivedSection = (
-              <ArchivedSessionsSection
-                families={chatArchivedFamilies}
-                expanded={expandedArchivedProjects.has(chatProject.key)}
-                onToggle={() => toggleArchivedSection(chatProject.key)}
-                selectedSessionId={selectedSessionId}
-                runningSessionIds={runningSessionIds}
-                unreadSessionIds={unreadSessionIds}
-                sessionFlags={sessionFlags}
-                onSelectSession={handleSelectSessionFromList}
-                onRenamed={loadSessions}
-                onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
-              />
-            );
-            const toggleChatExpanded = () => {
-              setExpandedProjects((prev) => {
-                const next = new Set(prev);
-                if (next.has(chatProject.key)) next.delete(chatProject.key);
-                else next.add(chatProject.key);
-                return next;
-              });
-            };
-            return (
-              <div>
-                <ChatWorkspaceRow
-                  label={t("sidebar.chatWorkspace")}
-                  title={chatProject.root}
-                  selected={isSelectedChat}
-                  expanded={isChatExpanded}
-                  busy={chatWorkspaceBusy}
-                  activity={projectActivity.get(chatProject.key)}
-                  onToggle={toggleChatExpanded}
-                  onConfigure={() => {
-                    setChatPathError(null);
-                    setChatPathOpen(true);
-                  }}
-                  onNewChat={() => startSessionIn(chatProject.root)}
-                  onSelect={() => {
-                    if (isSelectedChat) {
-                      toggleChatExpanded();
-                      return;
-                    }
-                    setSelectedCwd(chatProject.root);
-                    setCustomPathError(null);
-                    setProjectMenuOpen(false);
-                  }}
-                />
-                {isChatExpanded && (chatFamilies.length === 0 && chatArchivedFamilies.length === 0 ? (
-                  <div style={{ padding: "6px 0 6px 24px", color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("sidebar.noTasks")}</div>
-                ) : isSelectedChat ? (
-                  <div ref={sessionListRef} style={{ minHeight: chatEntries.length > 0 ? chatEntries.length * SESSION_LIST_ITEM_HEIGHT : 34 }}>
-                    {chatEntries.length > 0 && (
-                      <div style={{ position: "relative", height: chatEntries.length * SESSION_LIST_ITEM_HEIGHT }}>
-                        {chatVirtualIndices.map((index) => {
-                          const entry = chatEntries[index];
-                          if (!entry) return null;
-                          const isItem = entry.type === "item";
-                          return (
-                            <div key={sessionEntryKey(entry)} data-session-id={isItem ? entry.item.root.id : undefined} onFocus={isItem ? () => setFocusedSessionId(entry.item.root.id) : undefined} onBlur={isItem ? () => setFocusedSessionId(null) : undefined} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
-                              {isItem ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {chatArchivedSection}
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                    {chatEntries.map((entry) => (
-                      <div key={sessionEntryKey(entry)}>
-                        {entry.type === "item" ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
-                      </div>
-                    ))}
-                    {chatArchivedSection}
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
+          {/* fork:zn-20 — 切到「聊天」但还没建过聊天工作区时，说清楚该怎么建，
+              否则整列是空的，看着像坏了。 */}
+          {sidebarPane === "chat" && !chatProject && !loading && !error && (
+            <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: TEXT.sm, lineHeight: 1.5 }}>
+              {t("sidebar.noChatWorkspace")}
+            </div>
+          )}
 
+          {/* fork:zn-20 — 两段各自只在被选中时渲染：项目段（分区头 + 项目树 + 分组）
+              与聊天段（下面那个 IIFE）互斥。不用 hidden 保活：两段加起来可能上百行，
+              留一半在 DOM 里只为了切换快 20ms 不值得。 */}
+          {sidebarPane === "projects" && (
+          <>
           {/* fork:zn-02 — 14px medium section head (Zeno .sidebar-section-head
               h-8); actions hide until hover/focus via .fork-section-actions. */}
           <div
@@ -2233,6 +2208,108 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             store={sessionGroups}
             renderProject={(project) => projectRowNodes.get(project.key) ?? null}
           />
+          </>
+          )}
+
+          {/* fork:chat-workspace / fork:zn-13 — 聊天分区（Zeno 里「对话」分区的位置：
+              排在项目分区之后、导轨底部之前）。自带标题行（新建 / 设置目录 / 折叠），
+              会话列表沿用项目那套高亮与虚拟窗口逻辑。 */}
+          {sidebarPane === "chat" && chatProject && (() => {
+            const isSelectedChat = chatProject.key === selectedProject?.key;
+            const isChatExpanded = expandedProjects.has(chatProject.key);
+            const chatFamilies = listSessionFamilies(orderedProjectSessions(chatProject.key));
+            const chatArchivedFamilies = listSessionFamilies(archivedSessions(sessionsForProject(allSessions, chatProject.key), sessionFlags));
+            // 聊天列表复用同一套时间分组与折叠状态；窗口单独计算，避免与项目
+            // 列表的 entries 长度耦合，index 永远落在 chatEntries 范围内。
+            const chatEntries = groupByTimeBucket(chatFamilies, bucketOfFamily, collapsedGroups);
+            const chatVirtualIndices = getSessionListIndices(
+              chatEntries.length,
+              Math.max(0, listScrollTop - sessionListOffsetTop),
+              listViewportH,
+              chatEntries.findIndex((entry) => entry.type === "item" && entry.item.root.id === focusedSessionId),
+            );
+            const chatArchivedSection = (
+              <ArchivedSessionsSection
+                families={chatArchivedFamilies}
+                expanded={expandedArchivedProjects.has(chatProject.key)}
+                onToggle={() => toggleArchivedSection(chatProject.key)}
+                selectedSessionId={selectedSessionId}
+                runningSessionIds={runningSessionIds}
+                unreadSessionIds={unreadSessionIds}
+                sessionFlags={sessionFlags}
+                onSelectSession={handleSelectSessionFromList}
+                onRenamed={loadSessions}
+                onDeleted={(id) => { onSessionDeleted?.(id); loadSessions(); }}
+              />
+            );
+            const toggleChatExpanded = () => {
+              setExpandedProjects((prev) => {
+                const next = new Set(prev);
+                if (next.has(chatProject.key)) next.delete(chatProject.key);
+                else next.add(chatProject.key);
+                return next;
+              });
+            };
+            return (
+              // fork:zn-13 — 分区之间靠 marginTop 分开（与项目分区头同一个 18px
+              // 节奏），不用分隔线；Zeno 的导轨同样是不划线、只用间距。
+              <div style={{ marginTop: 18 }}>
+                <ChatWorkspaceRow
+                  label={t("sidebar.chatWorkspace")}
+                  title={chatProject.root}
+                  selected={isSelectedChat}
+                  expanded={isChatExpanded}
+                  busy={chatWorkspaceBusy}
+                  activity={projectActivity.get(chatProject.key)}
+                  onToggle={toggleChatExpanded}
+                  onConfigure={() => {
+                    setChatPathError(null);
+                    setChatPathOpen(true);
+                  }}
+                  onNewChat={() => startSessionIn(chatProject.root)}
+                  onSelect={() => {
+                    if (isSelectedChat) {
+                      toggleChatExpanded();
+                      return;
+                    }
+                    setSelectedCwd(chatProject.root);
+                    setCustomPathError(null);
+                    setProjectMenuOpen(false);
+                  }}
+                />
+                {isChatExpanded && (chatFamilies.length === 0 && chatArchivedFamilies.length === 0 ? (
+                  <div style={{ padding: "6px 0 6px 24px", color: "var(--text-dim)", fontSize: TEXT.sm }}>{t("sidebar.noTasks")}</div>
+                ) : isSelectedChat ? (
+                  <div ref={sessionListRef} style={{ minHeight: chatEntries.length > 0 ? chatEntries.length * SESSION_LIST_ITEM_HEIGHT : 34 }}>
+                    {chatEntries.length > 0 && (
+                      <div style={{ position: "relative", height: chatEntries.length * SESSION_LIST_ITEM_HEIGHT }}>
+                        {chatVirtualIndices.map((index) => {
+                          const entry = chatEntries[index];
+                          if (!entry) return null;
+                          const isItem = entry.type === "item";
+                          return (
+                            <div key={sessionEntryKey(entry)} data-session-id={isItem ? entry.item.root.id : undefined} onFocus={isItem ? () => setFocusedSessionId(entry.item.root.id) : undefined} onBlur={isItem ? () => setFocusedSessionId(null) : undefined} style={{ position: "absolute", top: index * SESSION_LIST_ITEM_HEIGHT, left: 0, right: 0, height: SESSION_LIST_ITEM_HEIGHT }}>
+                              {isItem ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {chatArchivedSection}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    {chatEntries.map((entry) => (
+                      <div key={sessionEntryKey(entry)}>
+                        {entry.type === "item" ? renderFamilyRow(entry.item) : renderGroupHeader(entry.bucket, entry.count)}
+                      </div>
+                    ))}
+                    {chatArchivedSection}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       </SessionSearch>
 

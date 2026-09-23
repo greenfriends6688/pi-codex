@@ -906,3 +906,1074 @@ html.keyboard-open .extension-status-shelf {
   }
 }
 
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-13 — 侧栏导轨行规格（Zeno `.nav-item` / `.nav-badge` / `.sidebar-footer`）。
+ *
+ * 三处照 Zeno 对齐（styles.css:882-898, 978-986, 1113-1117）：
+ *
+ *   1. **hover 与选中同填充**。Zeno 里 `.nav-item:hover` 和
+ *      `.nav-item[data-active="true"]` 是同一条声明，都取 `--hover-fill`；
+ *      本仓此前 hover 走 `--bg-hover`(#383838)、选中走 `--bg-selected`(#3f3f3f)，
+ *      同一条导轨上会看到两种灰。
+ *   2. **选中不加字重**。Zeno 的 `.nav-item-primary` 是 `font-weight: 400`，
+ *      层级靠填充表达而不是靠加粗。
+ *   3. **计数徽标** `.nav-badge`：`margin-left:auto`、11px、`--text-subtle`
+ *      （本仓用 `--text-dim`，因为 `--text-subtle` 这个槽位本仓没有）。
+ *
+ * 行高 / 圆角沿用既有的 `--zn-row`(32px) 与 `--zn-radius-row`(6px)，已经等于
+ * Zeno 的 `h-8` 与 `--radius-control`，不重复定义。
+ * ------------------------------------------------------------------------- */
+.fork-nav-item {
+  display: flex;
+  width: 100%;
+  height: var(--zn-row);
+  flex-shrink: 0;
+  cursor: pointer;
+  align-items: center;
+  gap: 10px; /* Zeno gap-2.5 */
+  padding: 0 10px; /* Zeno px-2.5 */
+  border: none;
+  border-radius: var(--zn-radius-row);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--ui-font-size);
+  font-weight: 400;
+  text-align: left;
+  transition:
+    background var(--motion-fast) var(--ease-out),
+    color var(--motion-fast) var(--ease-out);
+}
+
+.fork-nav-item:hover:not(:disabled),
+.fork-nav-item[data-active="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.fork-nav-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.fork-nav-item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.fork-nav-icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.fork-nav-item[data-active="true"] .fork-nav-icon {
+  color: var(--text);
+}
+
+.fork-nav-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fork-nav-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  color: var(--text-dim);
+}
+
+/* Zeno `.sidebar-footer`：`mt-auto` 把底部行钉在导轨下沿，用一条 hairline 与
+   上方列表分开。左右 10px 外距是为了让分隔线与导轨内缩（Zeno 的 `p-2.5`）
+   对齐 —— 本仓此前是一个裸的 `padding: 8px` 包裹层，没有分隔线。 */
+.fork-rail-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: auto 10px 0;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-faint);
+  padding-top: 8px;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-15 — 设置分组卡与设置行（Zeno `.settings-card` / `.settings-row*`）。
+ *
+ * 规格原文：styles.css:4654-4665（卡片）、5849-5920（行）。
+ * 三处是这套东西的识别特征，缺一个就不像：
+ *
+ *   1. **卡片是独立面板**：1px `--border` + `--radius-panel` + `--surface-panel`
+ *      实底，行不画自己的边框 —— 分隔线是行内缩 16px 的 `::after`，不是
+ *      `border-bottom`。所以分隔线两头都不碰卡片边缘。
+ *   2. **标题 400 字重、描述小一号**：Zeno 明确写了
+ *      `font-size: var(--ui-font-size)` + `font-weight: normal`，描述是
+ *      `calc(var(--ui-font-size) * 0.86)`。层级靠字号与颜色，不靠加粗。
+ *   3. **末行不画线**（`.settings-row-last`），否则卡片底边会出现双线。
+ * ------------------------------------------------------------------------- */
+.fork-settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Zeno `.settings-section-label`：与导轨分组标签同一套字（group-label）。 */
+.fork-settings-block-label {
+  margin: 0;
+  padding: 0 2px;
+  font-size: var(--group-label-size, var(--text-md));
+  font-weight: var(--group-label-weight, 500);
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+
+.fork-settings-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+}
+
+.fork-settings-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 14px 16px;
+}
+
+.fork-settings-row:not(.is-last)::after {
+  content: "";
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 0;
+  height: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+/* 只有标题没有描述的行：竖直居中，上下内距收窄。 */
+.fork-settings-row.is-compact {
+  align-items: center;
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.fork-settings-row-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.fork-settings-row-title {
+  font-size: var(--ui-font-size);
+  font-weight: 400;
+  line-height: 1.375;
+  color: var(--text);
+}
+
+.fork-settings-row-desc {
+  margin-top: 4px;
+  font-size: calc(var(--ui-font-size) * 0.86);
+  font-weight: 400;
+  line-height: 1.625;
+  color: var(--text-muted);
+}
+
+.fork-settings-row-control {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+
+.fork-settings-row-control.is-multiline {
+  padding-top: 2px;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-15 — 设置里的滑块（Zeno `.theme-skin-slider`）。
+ *
+ * 规格原文：styles.css:5598-5654。滑块是「标签 + 数值」在上、轨道在下的一列，
+ * 数值右对齐且等宽（tabular-nums，拖动时数字不会左右跳）。
+ *
+ * track 4px / thumb 14px：「细轨道 + 大圆点」是 Zeno 的滑杆形状；thumb 的
+ * 2px 描边取面板底色（`--surface-panel`），所以在卡片里看起来是「挖空」的一圈。
+ * ------------------------------------------------------------------------- */
+.fork-settings-slider {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* 内联形态（Zeno 设置页里的宽度滑块）：轨道占满，数值右对齐。 */
+.fork-settings-slider.is-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+}
+
+.fork-settings-slider.is-inline input[type="range"] {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.fork-settings-slider.is-inline output {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.fork-settings-slider > .fork-settings-slider-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.fork-settings-slider output {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.fork-settings-slider input[type="range"] {
+  width: 100%;
+  height: 14px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+.fork-settings-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-muted) 24%, transparent);
+}
+
+.fork-settings-slider input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--bg-elev);
+  border-radius: 999px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.fork-settings-slider input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+.fork-settings-slider input[type="range"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.34;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-15 — 设置行右侧的下拉（Zeno 用 shadcn Select；本仓不引 radix，
+ * 用原生 `<select>` 做同样的壳）。
+ * 规格：h-9 / `--radius-field`(10px) / 1px `--input` / focus 时 ring-[3px]。
+ * ------------------------------------------------------------------------- */
+.fork-settings-select {
+  height: 36px;
+  max-width: 15rem;
+  padding: 0 34px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  /* Zeno 的原生下拉箭头是自绘的；系统箭头形状随平台变，所以换成 inline SVG。 */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23888b91' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  color: var(--text);
+  font-size: var(--ui-font-size);
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.fork-settings-select:hover {
+  border-color: var(--border-strong);
+}
+
+.fork-settings-select:focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 65%, transparent);
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-15 — 侧边栏半透明（Zeno 设置 → 外观 →「侧边栏半透明」）。
+ *
+ * Zeno 接的是 Electron 原生磨砂；Web 没有那层，所以落到 `backdrop-filter`。
+ * 侧栏底色是内联样式（`background: var(--bg-panel)`），必须 `!important` 才能压过
+ * —— 这是 fork-ui.css 允许用 `!important` 的两种情形之一（对内联样式）。
+ *
+ * 74%/24px 的选择：低于 70% 时侧栏上的 12px 文字会跟着背景一起花；24px 的模糊半径
+ * 刚好把壁纸压成色块而不吃掉侧栏自身的内容对比度。
+ * ------------------------------------------------------------------------- */
+html[data-rail-translucent="true"] .sidebar-container {
+  background: color-mix(in srgb, var(--bg-panel) 74%, transparent) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(130%);
+  backdrop-filter: blur(24px) saturate(130%);
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-15 — `--ui-font-size`（Zeno 的单一界面字号）。
+ *
+ * Zeno 只有一处 UI 字号，导轨行、设置行、分组标签全部取它（styles.css:98-108），
+ * 主题块禁止重声明它。本仓原本把这些散在 `--text-md` 与内联 `TEXT.*` 里，设置里
+ * 也没有「界面字号」这个旋钮。这里补一个默认值：不改任何既有规则的行为
+ * （默认等于 `--text-md`），只让新写的 `.fork-*` 规则与会话正文字号有同一个入口。
+ * ------------------------------------------------------------------------- */
+:root {
+  --ui-font-size: var(--text-md);
+}
+
+/* 「系统默认」= 不设 `--font-ui-base`，body 回落到 `--font-inter` + 平台栈。
+ * 具体字体栈由 hooks/useUiFont.ts 内联写到 `<html>` 上：可选项是运行时枚举出来的
+ * 任意系统族名（lib/font-discovery.ts），不可能预先在 CSS 里列出来。
+ * 枚举出的每条栈都自带回退，所以选了不存在的字体不会让整页变成衬线。 */
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-15 — 卡片里的开关要能看见。
+ *
+ * `.config-switch` 的 off 底色是 `--bg-selected`，而 Zeno 设置卡片的底是
+ * `--bg-elev`。在本仓当前的颜色桥接下这两个槽位是**同一个值**，所以开关放进卡片
+ * 后只剩一个浮空的圆点（轨道完全隐进卡片）。这在 Zeno 里不是问题：它的 off 底是
+ * `--input`(#3c3c3c)，卡片是 `--surface-panel`(#2d2d2d)，差一档。
+ * 这里只改卡片内部：轨道取 `--border-strong`，与卡片底差一档，跟 Zeno 的观感一致。
+ * ------------------------------------------------------------------------- */
+.fork-settings-card .config-switch {
+  border-color: var(--border-strong);
+  background: var(--border-strong);
+}
+
+.fork-settings-card .config-switch:not(:disabled):hover {
+  border-color: var(--text-dim);
+  background: var(--text-dim);
+}
+
+.fork-settings-card .config-switch[aria-checked="true"],
+.fork-settings-card .config-switch[aria-checked="true"]:not(:disabled):hover {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-17 — 小地图 dash 的悬停 tooltip（Zeno `.minimap-popover`，styles.css:1388-1417）。
+ *
+ * 规格逐项对齐：left 34px（让开 26px 宽的 dash、留 8px 间隙）、宽 248px、
+ * `--radius-md`(10px)、1px `--border`、`--bg-elev` 实底、`--shadow-md`、
+ * 正文 `line-clamp: 5` + `overflow-wrap: anywhere` + `pre-wrap`。
+ *
+ * `pointer-events: none` 是必需的：气泡挂在轨道坐标系里，如果它可命中，鼠标移到
+ * 气泡上就会离开 dash，触发 mouseleave → 气泡消失 → 鼠标又落回 dash，形成闪烁。
+ * 角色行用 muted 色而不是主色：Zeno 把它当元信息，正文才是内容。
+ * ------------------------------------------------------------------------- */
+.fork-minimap-popover {
+  position: absolute;
+  left: 34px;
+  z-index: 3;
+  width: 248px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.fork-minimap-popover-role {
+  margin-bottom: 4px;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.fork-minimap-popover-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  font-size: var(--text-lg);
+  line-height: 1.5;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-19 — 主题皮肤卡片条（Zeno `.theme-skin-library` / `.theme-skin-*`，
+ * styles.css:4667-4815）。
+ *
+ * 三列 grid 是这套东西的关键：`2rem / 1fr / 2rem` —— 左右两列是滚动按钮，
+ * 中间才是轨道。这样按钮**永远占位**，有没有更多卡片都不会让轨道跳动
+ * （换成绝对定位的悬浮按钮，滚动到两端时内容会左右晃一下）。
+ *
+ * 卡片是 160×矩形（断点下 148），不是正方形：缩略图要装下一个侧栏 + 一段会话，
+ * 正方形塞不下，两侧会各裁掉一半。
+ * ------------------------------------------------------------------------- */
+.fork-skin-library {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+}
+
+.fork-skin-rail {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) 2rem;
+  align-items: stretch;
+  padding: 13px 8px;
+}
+
+.fork-skin-grid {
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 0 5px 4px;
+  scroll-behavior: smooth;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+
+.fork-skin-grid::-webkit-scrollbar { display: none; }
+
+.fork-skin-scroll-button {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 1.75rem;
+  min-height: 100%;
+  place-items: center;
+  align-self: center;
+  border: 1px solid color-mix(in srgb, var(--border) 86%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elev) 90%, transparent);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+  transition: opacity var(--motion-base) var(--ease-out),
+    border-color var(--motion-base) var(--ease-out),
+    background var(--motion-base) var(--ease-out);
+}
+
+.fork-skin-scroll-button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--bg-hover);
+}
+
+.fork-skin-scroll-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.fork-skin-scroll-button:disabled { opacity: 0.24; cursor: default; }
+
+.fork-skin-card {
+  display: flex;
+  width: 160px;
+  min-width: 160px;
+  flex: 0 0 160px;
+  flex-direction: column;
+  gap: 7px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-elev) 86%, transparent);
+  padding: 9px;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.fork-skin-card:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 58%, var(--border));
+}
+
+/* 选中：`--accent` 描边 + 1px 内阴影。Zeno 用 ring 色，本仓的 ring 即 accent。 */
+.fork-skin-card[data-active="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent);
+}
+
+.fork-skin-card:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 60%, transparent);
+}
+
+.fork-skin-card-art {
+  position: relative;
+  display: block;
+  height: 82px;
+  overflow: hidden;
+  border-radius: 8px;
+  background-position: center;
+  background-size: cover;
+  background-repeat: no-repeat;
+}
+
+/* 右下角那块「玻璃」：皮肤的面板透明度 + 圆角 + 模糊都体现在它身上，
+   所以它不能只是个装饰色块。 */
+.fork-skin-card-glass {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  z-index: 1;
+  display: flex;
+  width: 66%;
+  height: 45%;
+  align-items: flex-end;
+  border: 1px solid rgb(255 255 255 / 0.46);
+  box-shadow: 0 8px 16px rgb(0 0 0 / 0.16);
+  opacity: 0.84;
+}
+
+.fork-skin-card-accent {
+  display: block;
+  width: 38%;
+  height: 5px;
+  margin: 0 0 7px 7px;
+  border-radius: 999px;
+}
+
+.fork-skin-card-name {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 动作栏：与卡片之间一条 hairline，按钮本身用既有的 config-button。 */
+.fork-skin-library-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  padding: 12px;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-19 — 编辑主题对话框（Zeno `.theme-skin-dialog*`，styles.css:4816-4970）。
+ *
+ * 布局：头部 / 两个 tab / 1100×820 的双列体（预览列 | 控件列）/ 底部。预览列有自己的
+ * 底色（比控件列暗一档），因为它是「另一块屏幕」而不是本对话框的一部分。
+ *
+ * 预览盒子里的颜色全部由 `ThemeSkinStudio` 内联给（走 `--preview-*` 变量），
+ * 不写 `<html>` —— 编辑中的皮肤不能当场改掉整个应用，否则「取消」没法回滚。
+ * ------------------------------------------------------------------------- */
+.fork-skin-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+}
+
+.fork-skin-dialog {
+  display: flex;
+  width: min(1100px, calc(100vw - 2rem));
+  max-height: min(820px, calc(100vh - 2rem));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-xl);
+}
+
+.fork-skin-dialog-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  padding: 18px 20px 16px;
+  font-size: var(--text-xl);
+}
+
+.fork-skin-dialog-close {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fork-skin-dialog-close:hover { color: var(--text); }
+
+.fork-skin-dialog-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  padding: 6px 18px 0;
+}
+
+/* Zeno 的 tab 是「上圆角 + 与面板同底」而不是整块 pill：这样激活态与下方的
+   内容区连成一片，读起来是「切页」而不是「切按钮」。 */
+.fork-skin-dialog-tab {
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 7px 7px 0 0;
+  background: transparent;
+  padding: 0 12px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.fork-skin-dialog-tab[data-active="true"] {
+  border-color: color-mix(in srgb, var(--border) 90%, transparent);
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+.fork-skin-dialog-body {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(340px, 0.9fr) minmax(440px, 1.1fr);
+}
+
+.fork-skin-dialog-preview-column {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 13px;
+  border-right: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 55%, var(--bg-elev));
+  padding: 17px;
+  overflow-y: auto;
+}
+
+.fork-skin-dialog-controls {
+  min-width: 0;
+  padding: 18px;
+  overflow-y: auto;
+}
+
+.fork-skin-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: var(--text-md);
+}
+
+.fork-skin-preview-mode {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+}
+
+.fork-skin-preview-mode button {
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  padding: 3px 10px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.fork-skin-preview-mode button[data-active="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* 迷你外壳：绝对定位的壁纸 + 压暗层在下，chrome 在上。 */
+.fork-skin-preview {
+  position: relative;
+  display: block;
+  min-height: 260px;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border: 1px solid var(--preview-border);
+  border-radius: var(--preview-radius);
+  background: var(--preview-page);
+}
+
+.fork-skin-preview-wallpaper {
+  position: absolute;
+  inset: 0;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.fork-skin-preview-mask { position: absolute; inset: 0; }
+
+.fork-skin-preview-shell {
+  position: relative;
+  display: grid;
+  height: 100%;
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
+.fork-skin-preview-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  border-right: 1px solid var(--preview-border);
+  background: var(--preview-sidebar);
+  padding: 12px 8px;
+  -webkit-backdrop-filter: blur(var(--preview-blur));
+  backdrop-filter: blur(var(--preview-blur));
+}
+
+.fork-skin-preview-brand {
+  display: block;
+  width: 46px;
+  height: 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--preview-accent) 85%, transparent);
+}
+
+.fork-skin-preview-nav {
+  display: block;
+  height: 16px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--preview-text-muted) 16%, transparent);
+}
+
+.fork-skin-preview-nav[data-active="true"] {
+  background: color-mix(in srgb, var(--preview-text-muted) 30%, transparent);
+}
+
+.fork-skin-preview-main {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 12px 12px;
+}
+
+.fork-skin-preview-thread { display: flex; flex-direction: column; gap: 9px; }
+
+.fork-skin-preview-line {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--preview-text-muted) 42%, transparent);
+}
+
+.fork-skin-preview-composer {
+  height: 46px;
+  border: 1px solid var(--preview-border);
+  border-radius: var(--preview-radius);
+  background: var(--preview-panel);
+  -webkit-backdrop-filter: blur(var(--preview-blur));
+  backdrop-filter: blur(var(--preview-blur));
+}
+
+.fork-skin-dialog-asset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.fork-skin-fit { margin-left: auto; }
+
+.fork-skin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-md);
+}
+
+.fork-skin-text-input {
+  height: 38px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: 0 12px;
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+.fork-skin-text-input:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.fork-skin-color-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin-top: 16px;
+}
+
+.fork-skin-color-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 54px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 14px;
+  font-size: var(--text-md);
+}
+
+.fork-skin-color-field input[type="color"] {
+  width: 30px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* 双列滑块：Zeno `.theme-skin-slider-grid`（`repeat(2, 1fr)`，间距 10/14）。 */
+.fork-skin-slider-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+  margin-top: 16px;
+}
+
+.fork-skin-dialog-css {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+}
+
+.fork-skin-dialog-css-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.fork-skin-css-input {
+  min-height: 320px;
+  flex: 1 1 auto;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: 12px;
+  color: var(--text);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-sm);
+  line-height: 1.6;
+}
+
+.fork-skin-dialog-message {
+  margin: 0;
+  padding: 0 18px 10px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.fork-skin-dialog-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  padding: 14px 18px;
+}
+
+.fork-skin-dialog-footer-right { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 900px) {
+  .fork-skin-dialog-body { grid-template-columns: minmax(0, 1fr); }
+  .fork-skin-dialog-preview-column { border-right: none; border-bottom: 1px solid var(--border); }
+  .fork-skin-card { width: 148px; min-width: 148px; flex-basis: 148px; }
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-19 — 皮肤与壁纸的融合（Zeno `.skin-wallpaper` + `[data-theme-skin-active]` 那一组）。
+ *
+ * 原来的问题是**壁纸根本没露出来**：`.chat-wallpaper` 是 `fixed inset-0` 铺满全窗的，
+ * 但 `.app-shell-layout` 的内联 `background: var(--bg)` 是它在 DOM 里的**后继兄弟**，
+ * 按绘制顺序把它整块盖住。于是「皮肤把面板做半透明」这一步做了也没意义 ——
+ * 半透明后面是一块不透明的画布，不是壁纸。
+ *
+ * Zeno 的解法是三层：
+ *   1. 壁纸铺满全窗（`fixed inset-0 z-0`，我们已有）；
+ *   2. **壳本身透明**，让壁纸透上来（`.app-shell { z-index: 1; isolation: isolate }`）；
+ *   3. **每个面各自半透明 + 模糊**，并且在会话列上再叠一层**方向性阅读遮罩**
+ *      （`styles.css:588-620` 的 `linear-gradient(102deg, …)`）：正文一侧最实、
+ *      主体一侧最透。这一层是「壁纸与主题融合」而不是「壁纸与文字打架」的关键。
+ *
+ * 只在选中非默认皮肤时生效（`data-theme-skin`），默认皮肤走主题原样。
+ * ------------------------------------------------------------------------- */
+
+/* 1. 壳透明：把不透明的画布让开，壁纸才看得见。
+     内联样式，必须 `!important`（fork-ui.css 允许用它的两种情形之一）。 */
+html[data-theme-skin="true"] .app-shell-layout {
+  background: transparent !important;
+  /* 自己的层叠上下文：`::before` 的 -1 要停在这一层里，不能漏到 body 后面。 */
+  isolation: isolate;
+}
+
+/* 2. 会话列：半透明页面底 + 模糊 + 方向性阅读遮罩。 */
+html[data-theme-skin="true"] .chat-slot {
+  position: relative;
+  isolation: isolate;
+  background: color-mix(in srgb, var(--skin-bg-base, var(--bg)) var(--skin-page-alpha, 35%), transparent) !important;
+  -webkit-backdrop-filter: blur(var(--skin-blur, 0px));
+  backdrop-filter: blur(var(--skin-blur, 0px));
+}
+
+html[data-theme-skin="true"] .chat-slot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  /* 102deg 与 Zeno 同角度：正文在左，所以左侧最实。两端的比例也照抄
+     （0% / 52% / 100% 分别是 100% / 86% / 42% 的遮罩强度）。 */
+  background: linear-gradient(
+    102deg,
+    color-mix(in srgb, var(--bg) var(--skin-reading-mask, 78%), transparent) 0%,
+    color-mix(in srgb, var(--bg) calc(var(--skin-reading-mask, 78%) * 0.86), transparent) 52%,
+    color-mix(in srgb, var(--bg) calc(var(--skin-reading-mask, 78%) * 0.42), transparent) 100%
+  );
+}
+
+/* 3. 侧栏 / 副区：各自的面板透明度 + 模糊。两个容器都是内联底色。 */
+html[data-theme-skin="true"] .sidebar-container {
+  /* 一层 alpha：基色 × 侧栏透明度。**不要**用 `--bg-elev`（它已经含卡片透明度）。 */
+  background: color-mix(in srgb, var(--skin-panel-base, var(--bg-elev)) var(--skin-sidebar-alpha, 64%), transparent) !important;
+  -webkit-backdrop-filter: blur(var(--skin-blur, 0px)) saturate(130%);
+  backdrop-filter: blur(var(--skin-blur, 0px)) saturate(130%);
+}
+
+html[data-theme-skin="true"] .right-panel-container {
+  background: color-mix(in srgb, var(--skin-panel-base, var(--bg-elev)) var(--skin-panel-alpha, 74%), transparent) !important;
+  -webkit-backdrop-filter: blur(var(--skin-blur, 0px)) saturate(130%);
+  backdrop-filter: blur(var(--skin-blur, 0px)) saturate(130%);
+}
+
+/* 4. 卡片 / 作曲器 / 浮层：`--bg-elev` 已经被皮肤写成半透明了，这里补模糊 + 让作曲器
+      的容器（dock）透明 —— 否则卡片是半透明的，它下面那层不透明的 dock 又把壁纸挡回去。 */
+html[data-theme-skin="true"] .chat-content > div,
+html[data-theme-skin="true"] .chat-input-shell,
+html[data-theme-skin="true"] .fork-settings-card,
+html[data-theme-skin="true"] .context-menu,
+html[data-theme-skin="true"] .config-panel-surface,
+html[data-theme-skin="true"] .settings-dialog-surface,
+html[data-theme-skin="true"] .fork-skin-dialog {
+  -webkit-backdrop-filter: blur(var(--skin-blur, 0px)) saturate(120%);
+  backdrop-filter: blur(var(--skin-blur, 0px)) saturate(120%);
+}
+
+/* 5. 顶栏与状态条：它们横跨整宽，不透明的话会在壁纸上切出一条硬边。 */
+html[data-theme-skin="true"] .main-workspace-header,
+html[data-theme-skin="true"] .extension-status-shelf {
+  background: color-mix(in srgb, var(--bg) var(--skin-page-alpha, 35%), transparent) !important;
+  -webkit-backdrop-filter: blur(var(--skin-blur, 0px));
+  backdrop-filter: blur(var(--skin-blur, 0px));
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-20 — 导轨里的「项目 / 聊天」左右切换（分段控件）。
+ *
+ * 两段各占一半宽度（`flex: 1 1 0`），整体一条胶囊：这样「左 / 右」在视觉上就是
+ * 「两半」，而不是两个各自成形的按钮并排 —— 后者的命中区不连续，鼠标从中间掠过
+ * 会掉进两段之间的缝里。
+ *
+ * 选中态用 `--bg-hover` 而不是 accent：导轨里已经有一个 accent（品牌色）在承担
+ * 「当前所在的地方」，分段控件只是「看哪一列」，让它保持中性。
+ * ------------------------------------------------------------------------- */
+.fork-segmented {
+  display: flex;
+  gap: 2px;
+  margin: 0 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+}
+
+.fork-segmented > button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 26px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 400;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+}
+
+.fork-segmented > button:hover {
+  color: var(--text);
+}
+
+.fork-segmented > button[data-active="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.fork-segmented > button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* ---------------------------------------------------------------------------
+ * fork:zn-21 — 折叠态的紧凑图标条（展开 / 搜索 / 新建会话）。
+ *
+ * 折叠按钮本身搬进了导轨品牌行，所以这里只服务「导轨归零」这一种状态：
+ * 三个 28px 图标平铺在顶栏左端，让最常用的三条动作不至于因为折叠而消失。
+ *
+ * 命中区是 28px（`--control-md`），比顶栏那排图标一致 —— 折叠态不该是一个
+ * 「更小的 UI」，只是「更少的东西」。
+ * ------------------------------------------------------------------------- */
+.fork-collapsed-rail-button {
+  display: flex;
+  width: var(--control-md, 28px);
+  height: var(--control-md, 28px);
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out), color var(--motion-fast) var(--ease-out);
+}
+
+.fork-collapsed-rail-button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.fork-collapsed-rail-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}

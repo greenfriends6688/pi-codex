@@ -21,6 +21,8 @@ import {
 import { sendAgentCommand } from "@/lib/agent-client";
 import type { ShellToolSettingsResponse } from "@/lib/api-types";
 import { setLastSettingsSection, type SettingsSection } from "@/lib/settings-navigation";
+import { getDesktopBridge } from "@/lib/desktop-shell";
+import { TEXT } from "@/lib/typography";
 import {
   isThinkingExpandedByDefault,
   setThinkingExpandedByDefault,
@@ -44,10 +46,23 @@ import { setupPushSubscription } from "@/lib/push-client";
 import { SkillsConfig } from "./SkillsConfig";
 import { AgentsConfig } from "./AgentsConfig";
 import { PluginsConfig } from "./PluginsConfig";
-import { ConfigButton, ConfigSwitch } from "./SettingsUi";
+import { ConfigButton, ConfigSwitch, SettingsBlock, SettingsRow, SettingsSelect, SettingsSlider } from "./SettingsUi";
 import { WallpaperSettings } from "./WallpaperSettings";
 import { useBorderDepth } from "@/hooks/useBorderDepth";
 import { useUiDensity } from "@/hooks/useUiDensity";
+// fork:zn-15 — 外观页的四项（Zeno appearance）。
+import { useRailTranslucent } from "@/hooks/useRailTranslucent";
+import { useNotificationPrefs } from "@/hooks/useNotificationPrefs";
+// fork:zn-19 — 主题皮肤（卡片条 + 编辑主题对话框）。
+import { useThemeSkins } from "@/hooks/useThemeSkins";
+import { ThemeSkinStrip } from "./ThemeSkinStrip";
+import { ThemeSkinStudio } from "./ThemeSkinStudio";
+import { createSkinDraft, readCurrentSkinBase, serializeSkinForExport, type ThemeSkin } from "@/lib/theme-skins";
+import { useUiFont } from "@/hooks/useUiFont";
+import { UI_FONT_SIZE_OPTIONS } from "@/lib/ui-font";
+// fork:zn-18 — 系统字体枚举（Local Font Access → canvas 探测）。
+import { SYSTEM_FONT_ID, listInstalledUiFonts, type FontChoice } from "@/lib/font-discovery";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH } from "@/lib/panel-layout";
 import type { UiDensity } from "@/lib/ui-density";
 import {
   loadStepExpansion,
@@ -68,6 +83,14 @@ interface Props {
   onOpenSession?: (sessionId: string) => void;
   /** fork:memory-panel — open a memory markdown file in the main viewer. */
   onOpenFile?: (filePath: string) => void;
+  /** fork:zn-15 — 外观页的「侧边栏宽度」滑块要直接驱动轨宽，所以由 AppShell 注入
+   *  （宽度由 `useResizablePanel` 拥有，重开一份 state 会两边打架）。 */
+  sidebarWidth?: number;
+  onSidebarWidthChange?: (px: number) => void;
+  /** fork:zn-16 — 通知声音与 composer 的声音按钮是同一个开关，所以从 AppShell 注入
+   *  （`useAudio` 持有 AudioContext，开第二份会让两个按钮各说各话）。 */
+  soundEnabled?: boolean;
+  onSoundToggle?: (enabled: boolean) => void;
 }
 
 export function SettingsSectionIcon({ section, size = 16, strokeWidth = 1.8 }: { section: SettingsSection; size?: number; strokeWidth?: number }) {
@@ -199,11 +222,22 @@ function TitleSettingsControls({ cwd }: { cwd: string | null }) {
   );
 }
 
-function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange }: Pick<Props, "cwd" | "sessionId" | "onSessionReloaded" | "quoteSelectionEnabled" | "onQuoteSelectionChange">) {
+function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange, sidebarWidth, onSidebarWidthChange, soundEnabled = true, onSoundToggle }: Pick<Props, "cwd" | "sessionId" | "onSessionReloaded" | "quoteSelectionEnabled" | "onQuoteSelectionChange" | "sidebarWidth" | "onSidebarWidthChange" | "soundEnabled" | "onSoundToggle">) {
   const { locale, setLocale, supportedLocales, t } = useI18n();
   const { preference, setThemePreference } = useTheme();
   const { borderDepth, setBorderDepth } = useBorderDepth();
   const { uiDensity, setUiDensity } = useUiDensity();
+  // fork:zn-15 — Zeno 外观页的四项：侧边栏半透明 / 侧边栏宽度 / UI 字体 / UI 字号。
+  const { railTranslucent, setRailTranslucent } = useRailTranslucent();
+  // fork:zn-16 — Zeno 通知页的开关矩阵。
+  const { notificationPrefs, setNotificationPref } = useNotificationPrefs();
+  /* fork:zn-19 — 皮肤：列表 + 当前选中 + 正在编辑的草稿。
+     编辑器状态放这里而不是放 Studio 里：Studio 是纯受控的，只负责「编」，保存/删除
+     由设置页决定谁被改。
+     `editing` 为 `{ skin, isNew }`，null 表示对话框关着。 */
+  const { skins, activeId, setActive, upsertSkin, removeSkin } = useThemeSkins();
+  const [editing, setEditing] = useState<{ skin: ThemeSkin; isNew: boolean } | null>(null);
+  const { fontStack, fontSize: uiFontSize, setFontStack, setFontSize: setUiFontSize } = useUiFont();
   const [stepExpansion, setStepExpansion] = useState<StepExpansion>(loadStepExpansion);
   const { width: chatContentWidth, setWidth: setChatContentWidth, fontSize, setFontSize, extensionWidgetFontSize, setExtensionWidgetFontSize } = useChatAppearance();
   const [shellSettings, setShellSettings] = useState<ShellToolSettingsResponse | null>(null);
@@ -215,6 +249,67 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
   const [webAuthEnabled, setWebAuthEnabled] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
+
+  /* fork:zn-15 — 「UI 字号」下拉的档位。逐 px 列会让 12–16 有五个选项，
+     这是 Zeno 的粒度（它的字体设置也是逐 px）。 */
+  const [notificationNote, setNotificationNote] = useState("");
+
+  /* fork:zn-16 — 两个动作按钮。
+     「发送测试通知」发一条真的系统通知（走 `Notification`，桌面外壳则由
+     `lib/browser-notifications.ts` 优先走原生通道）。 */
+  const sendTestNotification = async (): Promise<void> => {
+    setNotificationNote("");
+    if (!("Notification" in window)) {
+      setNotificationNote(t("settings.notifyOpenSystemUnavailable"));
+      return;
+    }
+    let permission = Notification.permission;
+    if (permission === "default") {
+      permission = await Notification.requestPermission();
+    }
+    if (permission !== "granted") {
+      setNotificationNote(t("settings.notifyOpenSystemUnavailable"));
+      return;
+    }
+    new Notification(t("settings.notifyTestTitle"), {
+      body: t("settings.notifyTestBody"),
+      tag: "pi-notification-test",
+    });
+  };
+
+  /* fork:zn-16 — 「打开系统通知设置」。
+     桌面外壳里可以直接把系统面板拉起来（`openExternal` 认这两个 URI）；
+     浏览器里没有这个页面 —— 说清楚去哪调，比给一个点了没反应的按钮好。 */
+  const openSystemNotificationSettings = async (): Promise<void> => {
+    setNotificationNote("");
+    const bridge = getDesktopBridge();
+    if (!bridge) {
+      setNotificationNote(t("settings.notifyOpenSystemUnavailable"));
+      return;
+    }
+    const target = bridge.platform === "win32"
+      ? "ms-settings:notifications"
+      : "x-apple.systempreferences:com.apple.preference.notifications";
+    bridge.openExternal(target);
+  };
+
+  /* fork:zn-18 — 本机字体清单。枚举是异步的（Local Font Access 要 await），
+     所以先只放「系统默认」，拿到清单再补 —— 下拉不会空窗。 */
+  const [fontChoices, setFontChoices] = useState<FontChoice[]>([
+    { id: SYSTEM_FONT_ID, stack: "", label: t("settings.uiFontSystem") },
+  ]);
+  const [fontsLoading, setFontsLoading] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    void listInstalledUiFonts(t("settings.uiFontSystem"))
+      .then((choices) => {
+        if (!cancelled) setFontChoices(choices);
+      })
+      .finally(() => {
+        if (!cancelled) setFontsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [t]);
 
   useEffect(() => {
     setThinkingExpanded(isThinkingExpandedByDefault());
@@ -365,6 +460,208 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
           </div>
           <p className="settings-chat-range-hint">{t("settings.borderDepthDescription")}</p>
         </div>
+      </section>
+
+      {/* fork:zn-19 — 主题皮肤：先选一套，再编辑/新建/导入/导出。
+          label 用 `.fork-settings-block` 的样式，卡片本体由 ThemeSkinStrip 自己画
+          （它有左右滚动按钮，塞进通用的 `.fork-settings-card` 会被裁掉）。 */}
+      <section className="settings-general-section">
+        <section className="fork-settings-block">
+          <h3 className="fork-settings-block-label">{t("settings.skinLibrary")}</h3>
+          <ThemeSkinStrip
+            skins={skins}
+            activeId={activeId}
+            onSelect={setActive}
+            onCreate={() => {
+              // 新皮肤的起点 = **当前实际渲染的基色**（读 computed 再转 hex），
+              // 而不是一套写死的色，也不是空值：空值会让四个色板全白，用户第一步
+              // 得先把当前配色手工填回去。已经有生效的皮肤时用它的值，避免从皮肤
+              // 派生出来的 oklch 又被 canvas 往返一次。
+              const active = skins.find((item) => item.id === activeId);
+              const base = active?.background && active?.panel && active?.accent && active?.text
+                ? { background: active.background, panel: active.panel, accent: active.accent, text: active.text }
+                : readCurrentSkinBase();
+              setEditing({
+                skin: createSkinDraft(`skin-${Date.now().toString(36)}`, t("settings.skinNewTitle"), "dark", base),
+                isNew: true,
+              });
+            }}
+            onEdit={(id) => {
+              const skin = skins.find((item) => item.id === id);
+              if (skin) setEditing({ skin, isNew: false });
+            }}
+            onImport={(skin) => {
+              // 导入的皮肤换一个 id：否则同 id 会把别人的皮肤覆盖掉。
+              upsertSkin({ ...skin, id: `skin-${Date.now().toString(36)}` });
+            }}
+            onExport={(skin) => {
+              const blob = new Blob([serializeSkinForExport(skin)], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const link = document.createElement("a");
+              link.href = url;
+              link.download = `${skin.name || skin.id}.json`;
+              link.click();
+              URL.revokeObjectURL(url);
+            }}
+          />
+        </section>
+      </section>
+
+      {/* fork:zn-15 — 外观 → 侧边栏 / 界面字体（Zeno appearance 页的四行，
+          用 Zeno 的卡片 + 设置行形状：标签与说明在左、控件在右上、行间内缩分隔线）。 */}
+      <section className="settings-general-section">
+        <SettingsBlock label={t("settings.railBlock")}>
+          <SettingsRow
+            title={t("settings.sidebarTranslucent")}
+            description={t("settings.sidebarTranslucentHint")}
+            control={
+              <ConfigSwitch
+                checked={railTranslucent}
+                label={t("settings.sidebarTranslucent")}
+                onChange={setRailTranslucent}
+              />
+            }
+          />
+          <SettingsRow
+            title={t("settings.sidebarWidth")}
+            description={
+              sidebarWidth == null || onSidebarWidthChange == null ? (
+                t("settings.sidebarWidthHint")
+              ) : (
+                <SettingsSlider
+                  ariaLabel={t("settings.sidebarWidth")}
+                  value={sidebarWidth}
+                  displayValue={`${sidebarWidth}px`}
+                  min={SIDEBAR_MIN_WIDTH}
+                  max={SIDEBAR_MAX_WIDTH}
+                  step={4}
+                  onChange={onSidebarWidthChange}
+                />
+              )
+            }
+            control={<span className="sr-only">{sidebarWidth ?? ""}</span>}
+            last
+          />
+        </SettingsBlock>
+      </section>
+
+      {/* fork:zn-16 — 通知（Zeno 通知页）：一张开关矩阵卡 + 卡外两个动作按钮。 */}
+      <section className="settings-general-section">
+        <SettingsBlock label={t("settings.notificationBlock")}>
+          <SettingsRow
+            title={t("settings.notifyMaster")}
+            description={t("settings.notifyMasterHint")}
+            control={
+              <ConfigSwitch
+                checked={notificationPrefs.enabled}
+                label={t("settings.notifyMaster")}
+                onChange={(next) => setNotificationPref("enabled", next)}
+              />
+            }
+          />
+          <SettingsRow
+            title={t("settings.notifyOnComplete")}
+            description={t("settings.notifyOnCompleteHint")}
+            control={
+              <ConfigSwitch
+                checked={notificationPrefs.onComplete}
+                disabled={!notificationPrefs.enabled}
+                label={t("settings.notifyOnComplete")}
+                onChange={(next) => setNotificationPref("onComplete", next)}
+              />
+            }
+          />
+          <SettingsRow
+            title={t("settings.notifyOnError")}
+            description={t("settings.notifyOnErrorHint")}
+            control={
+              <ConfigSwitch
+                checked={notificationPrefs.onError}
+                disabled={!notificationPrefs.enabled}
+                label={t("settings.notifyOnError")}
+                onChange={(next) => setNotificationPref("onError", next)}
+              />
+            }
+          />
+          <SettingsRow
+            title={t("settings.notifyOnlyUnfocused")}
+            description={t("settings.notifyOnlyUnfocusedHint")}
+            control={
+              <ConfigSwitch
+                checked={notificationPrefs.onlyWhenUnfocused}
+                disabled={!notificationPrefs.enabled}
+                label={t("settings.notifyOnlyUnfocused")}
+                onChange={(next) => setNotificationPref("onlyWhenUnfocused", next)}
+              />
+            }
+          />
+          <SettingsRow
+            title={t("settings.notifySound")}
+            description={t("settings.notifySoundHint")}
+            control={
+              <ConfigSwitch
+                checked={soundEnabled}
+                label={t("settings.notifySound")}
+                onChange={(next) => onSoundToggle?.(next)}
+              />
+            }
+            last
+          />
+        </SettingsBlock>
+        <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          <ConfigButton
+            variant="secondary"
+            disabled={!notificationPrefs.enabled}
+            onClick={() => void sendTestNotification()}
+          >
+            {t("settings.notifyTest")}
+          </ConfigButton>
+          <ConfigButton variant="secondary" onClick={() => void openSystemNotificationSettings()}>
+            {t("settings.notifyOpenSystem")}
+          </ConfigButton>
+          {notificationNote ? (
+            <span role="status" style={{ fontSize: TEXT.sm, color: "var(--text-muted)" }}>{notificationNote}</span>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="settings-general-section">
+        <SettingsBlock label={t("settings.typographyBlock")}>
+          <SettingsRow
+            title={t("settings.uiFont")}
+            description={fontsLoading ? t("settings.uiFontLoading") : t("settings.uiFontHint")}
+            control={
+              <SettingsSelect
+                // value 是**字体栈**：空栈即系统默认。栈里含逗号与引号，直接当 option
+                // 的 value 没问题（它是普通字符串），比较也走全等。
+                value={fontStack}
+                ariaLabel={t("settings.uiFont")}
+                disabled={fontsLoading && fontChoices.length <= 1}
+                options={fontChoices.map((choice) => ({
+                  value: choice.stack,
+                  label: choice.label,
+                }))}
+                onChange={(next) => setFontStack(next)}
+              />
+            }
+          />
+          <SettingsRow
+            title={t("settings.uiFontSize")}
+            description={t("settings.uiFontSizeHint")}
+            control={
+              <SettingsSelect
+                value={String(uiFontSize)}
+                ariaLabel={t("settings.uiFontSize")}
+                options={UI_FONT_SIZE_OPTIONS.map((size) => ({
+                  value: String(size),
+                  label: `${size}px`,
+                }))}
+                onChange={(next) => setUiFontSize(Number(next))}
+              />
+            }
+            last
+          />
+        </SettingsBlock>
       </section>
 
       <section className="settings-general-section">
@@ -603,12 +900,28 @@ function GeneralSettings({ cwd, sessionId, onSessionReloaded, quoteSelectionEnab
           {logoutError && <p role="alert" className="settings-general-error">{logoutError}</p>}
         </section>
       )}
+      {editing ? (
+        <ThemeSkinStudio
+          skin={editing.skin}
+          isNew={editing.isNew}
+          onCancel={() => setEditing(null)}
+          onSave={(skin) => {
+            upsertSkin(skin);
+            setActive(skin.id);
+            setEditing(null);
+          }}
+          onDelete={(id) => {
+            removeSkin(id);
+            setEditing(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
 
 // fork:zc-15 — the section keyword table moved into `lib/settings-navigation.ts`
-export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange, onOpenSession, onOpenFile }: Props) {
+export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessionReloaded, quoteSelectionEnabled, onQuoteSelectionChange, onOpenSession, onOpenFile, sidebarWidth, onSidebarWidthChange, soundEnabled, onSoundToggle }: Props) {
   const { t } = useI18n();
   const [section, setSection] = useState<SettingsSection>(initialSection);
   const [mountedSections, setMountedSections] = useState<ReadonlySet<SettingsSection>>(
@@ -723,7 +1036,7 @@ export function SettingsPanel({ cwd, sessionId, initialSection, onClose, onSessi
           </nav>
 
           <main className="settings-dialog-main">
-            {sectionHost("general", <GeneralSettings cwd={cwd} sessionId={sessionId} onSessionReloaded={onSessionReloaded} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={onQuoteSelectionChange} />)}
+            {sectionHost("general", <GeneralSettings cwd={cwd} sessionId={sessionId} onSessionReloaded={onSessionReloaded} quoteSelectionEnabled={quoteSelectionEnabled} onQuoteSelectionChange={onQuoteSelectionChange} sidebarWidth={sidebarWidth} onSidebarWidthChange={onSidebarWidthChange} soundEnabled={soundEnabled} onSoundToggle={onSoundToggle} />)}
             {sectionHost("models", <ModelsConfig embedded onClose={onClose} />)}
             {cwd && sectionHost("skills", <SkillsConfig embedded key={cwd} cwd={cwd} onClose={onClose} />)}
             {cwd && sectionHost("agents", <AgentsConfig embedded key={cwd} cwd={cwd} sessionId={sessionId} onClose={onClose} onReloaded={onSessionReloaded} />)}

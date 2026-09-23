@@ -1,13 +1,13 @@
 export const MOBILE_MAX_WIDTH = 640;
 export const SPLIT_PANEL_MIN_WIDTH = 960;
 
-// Zeno rail sizing: 272px, matching zeno-main's `--sidebar-width`. The previous
-// 244 left the rail narrower than the reference and made 14px row text wrap in
-// nested session titles; at 272 the rail owns its own column and the chat column
-// still keeps its full 800px beside it on a 1440 display.
-export const SIDEBAR_DEFAULT_WIDTH = 272;
-export const SIDEBAR_MIN_WIDTH = 216;
-export const SIDEBAR_MAX_WIDTH = 520;
+// Zeno rail sizing (`SHELL_SIDEBAR` in zeno-main's apps/desktop/src/renderer/lib/layout.ts):
+// default 300px inside a 232–360 drag band. The previous 272/216/520 came from Zeno's
+// legacy `--sidebar-width` CSS fallback, which is not the width its rail actually
+// renders at — the real rail width is JS-computed and clamped to that band.
+export const SIDEBAR_DEFAULT_WIDTH = 300;
+export const SIDEBAR_MIN_WIDTH = 232;
+export const SIDEBAR_MAX_WIDTH = 360;
 
 export const RIGHT_PANEL_FALLBACK_WIDTH = 384;
 export const RIGHT_PANEL_MIN_WIDTH = 300;

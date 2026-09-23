@@ -251,6 +251,9 @@ export function ChatMinimap({
   const [minimapHeight, setMinimapHeight] = useState(600);
   const [minimapHovered, setMinimapHovered] = useState(false);
   const [previewPinned, setPreviewPinned] = useState(false);
+  /* fork:zn-17 — 单根 dash 的悬停 tooltip（Zeno `.minimap-popover`）。
+     与既有的 outline 预览面板（hover 整条轨道才出、可钉住）并存：tooltip 回答
+     「这一根是什么」，预览面板回答「整段结构长什么样」。 */
   const [mouseYRatio, setMouseYRatio] = useState<number | null>(null);
   const draggingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -614,6 +617,18 @@ export function ChatMinimap({
 
   const nearestNode = mouseYRatio === null ? null : findNearestNode(mouseYRatio);
   const nearestNodeIndex = nearestNode?.index ?? null;
+  /* fork:zn-17 — tooltip 瞄准的是「离指针最近的那根 dash」。
+     不能给 dash 挂 onMouseEnter：标记层整体 `pointer-events: none`，悬停位置由
+     整条轨道的 mousemove + `findNearestNode` 算出来（见上面 onMouseMove）。
+     所以复用同一个 `nearestNode`，不另开一套命中逻辑。
+
+     只在**预览面板已钉住**时显示：面板没钉住时，悬停轨道本身就会弹出大纲面板，
+     那种情况下再叠一个 tooltip 是两块内容互相盖。钉住后指针落在面板上，
+     `minimapHovered` 仍为真，这时 tooltip 才回答「这几根 dash 分别是哪一回合」。 */
+  const tooltipTurn = previewPinned && minimapHovered && nearestNode
+    ? nearestNode.targetTurn
+    : null;
+
 
   useEffect(() => {
     if (!minimapHovered || nearestNodeIndex === null) return;
@@ -681,6 +696,35 @@ export function ChatMinimap({
           zIndex: 0,
         }}
       />
+
+      {/* fork:zn-17 — 悬停 tooltip。规格搬自 Zeno `.minimap-popover`
+          （styles.css:1388-1417）：left 34px、宽 248px、radius 10px、
+          1px `--border`、`--bg-elev` 实底、正文 5 行截断。
+          与 dash 同一个绝对定位坐标系：`top: topRatio%` 让气泡跟住那一根，
+          `translateY(-50%)` 让它竖直居中。 */}
+      {tooltipTurn && nearestNode && (() => {
+        const node = nearestNode;
+        const userText = getUserPreview(tooltipTurn.userMessage);
+        const assistantText = tooltipTurn.assistantPreviews
+          .map((preview) => preview.markdown)
+          .join("\n\n")
+          .trim();
+        const isUser = userText.length > 0;
+        const body = isUser ? userText : assistantText;
+        if (!body) return null;
+        return (
+          <div
+            className="fork-minimap-popover"
+            data-minimap-tooltip=""
+            style={{ top: `calc(${node.topRatio * 100}% + ${MINIMAP_PADDING}px)` }}
+          >
+            <div className="fork-minimap-popover-role">
+              {t(isUser ? "chatMinimap.userMessage" : "chatMinimap.assistantReply")}
+            </div>
+            <div className="fork-minimap-popover-text">{body}</div>
+          </div>
+        );
+      })()}
 
       {positionedNodes.map((node) => {
         const isNearest = minimapHovered && nearestNode?.index === node.index;

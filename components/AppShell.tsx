@@ -58,6 +58,9 @@ import { useI18n } from "@/hooks/useI18n";
 import { useIsMobile, useIsNarrowMobile } from "@/hooks/useIsMobile";
 import { useViewportHeight } from "@/hooks/useViewportHeight";
 import { useResizablePanel } from "@/hooks/useResizablePanel";
+// fork:zn-16 — 通知开关矩阵（Zeno 通知页）：取值走 getNotificationPrefs()，
+// hook 只用来订阅「设置里改了开关」。
+import { getNotificationPrefs, useNotificationPrefs } from "@/hooks/useNotificationPrefs";
 import { useAudio } from "@/hooks/useAudio";
 import { copyText } from "@/lib/clipboard";
 import { sendAgentCommand } from "@/lib/agent-client";
@@ -232,6 +235,10 @@ export function AppShell() {
   );
   const [initialCwdError, setInitialCwdError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  /* fork:zn-21 — 折叠态图标条点「搜索」时 +1，导轨展开后据此打开搜索框。 */
+  const [searchRequestId, setSearchRequestId] = useState(0);
+  // fork:zn-16 — 订阅一次让设置里改开关后主区立刻生效（回调里走 getNotificationPrefs()）。
+  useNotificationPrefs();
   const [sessionKey, setSessionKey] = useState(0);
   const sessionScrollPositionsRef = useRef(new Map<string, ChatScrollPosition>());
   const handleSessionScrollPositionChange = useCallback((sessionId: string, position: ChatScrollPosition) => {
@@ -1099,7 +1106,9 @@ export function AppShell() {
     if (selectedSession) hydrateSelectedSession(selectedSession.id);
 
     if (selectedSession?.relation?.kind === "subagent") return;
-    if (!shouldShowBrowserNotification()) return;
+    const prefs = getNotificationPrefs();
+    if (!prefs.enabled || !prefs.onComplete) return;
+    if (prefs.onlyWhenUnfocused && !shouldShowBrowserNotification()) return;
     const targetSession = selectedSession;
     deliverSessionNotification({
       targetSession,
@@ -1109,9 +1118,27 @@ export function AppShell() {
     });
   }, [deliverSessionNotification, hydrateSelectedSession, selectedSession, translate]);
 
+  /* fork:zn-16 — 失败通知（Zeno 通知页的「任务失败时通知」）。与完成通知分开，
+     因为两者的开关独立，而且失败时用户更希望知道是**哪一句**话里的什么错。 */
+  const handleAgentError = useCallback((message: string) => {
+    if (selectedSession?.relation?.kind === "subagent") return;
+    const prefs = getNotificationPrefs();
+    if (!prefs.enabled || !prefs.onError) return;
+    if (prefs.onlyWhenUnfocused && !shouldShowBrowserNotification()) return;
+    const targetSession = selectedSession;
+    deliverSessionNotification({
+      targetSession,
+      title: targetSession?.name ?? translate("i18n.taskFailed"),
+      body: message,
+      tag: targetSession ? `pi-session-failed:${targetSession.id}` : "pi-session-failed",
+    });
+  }, [deliverSessionNotification, selectedSession, translate]);
+
   const handleAttentionNeeded = useCallback((request: BlockingExtensionUiRequest) => {
     if (selectedSession?.relation?.kind === "subagent") return;
-    if (!shouldShowBrowserNotification()) return;
+    const prefs = getNotificationPrefs();
+    if (!prefs.enabled) return;
+    if (prefs.onlyWhenUnfocused && !shouldShowBrowserNotification()) return;
     if (!claimExtensionAttentionNotification(request, notifiedAttentionRequestIdsRef.current)) return;
 
     deliverSessionNotification({
@@ -1749,30 +1776,27 @@ export function AppShell() {
         onBackgroundTaskDone={handleBackgroundTaskDone}
         onRunningSessionIdsChange={handleRunningSessionIdsChange}
         onSessionsChange={handleSessionsChange}
+        onToggleSidebar={handleSidebarToggle}
+        searchRequestId={searchRequestId}
       />
-      {/* fork:ui-03b — 底栏收敛成一个齿轮设置入口。模型/技能本来就在设置里，
-          三个图标各占 1/3 宽度反而看不出哪个是哪个。 */}
-      <div style={{ padding: "8px", flexShrink: 0 }}>
+      {/* fork:zn-13 — 导轨底栏（Zeno `.sidebar-footer`）：`mt-auto` 钉底 +
+          一条与导轨内缩对齐的 hairline。此前是一个裸的 `padding: 8px` 包裹层，
+          没有分隔线，设置入口也贴着左边。 */}
+      <div className="fork-rail-footer">
         <button
           type="button"
           onClick={() => setSettingsSection(getLastSettingsSection(projectTrustCwd))}
           title={translate("common.settings")}
           aria-label={translate("common.settings")}
-          style={{
-            width: "100%", display: "flex", alignItems: "center", gap: 8,
-            height: TOP_BAR_ICON_BUTTON_SIZE, padding: "0 10px",
-            background: "none", border: "none",
-            borderRadius: "var(--radius-md)", color: "var(--text-muted)", cursor: "pointer",
-            fontSize: TEXT.sm, transition: "background 0.12s, color 0.12s",
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.background = "var(--bg-hover)"; event.currentTarget.style.color = "var(--text)"; }}
-          onMouseLeave={(event) => { event.currentTarget.style.background = "none"; event.currentTarget.style.color = "var(--text-muted)"; }}
+          className="fork-nav-item"
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
-            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-          <span>{translate("common.settings")}</span>
+          <span className="fork-nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          </span>
+          <span className="fork-nav-label">{translate("common.settings")}</span>
         </button>
       </div>
     </>
@@ -2169,6 +2193,72 @@ export function AppShell() {
   };
 
 
+  /* fork:zn-21 — 折叠态的紧凑图标条。
+     折叠按钮本身搬进了导轨品牌行（见 `SessionSidebar`），所以这里不再有「边界按钮」
+     —— 但导轨归零后用户仍然需要三条最常用的动作，于是折叠态留一条 3 图标的条：
+     展开 / 搜索 / 新建会话。位置仍是主区顶栏左端，`--main-workspace-header-leading-inset`
+     会让出它的宽度，顶栏第一个动作不会被压住。 */
+  const renderCollapsedRail = () => (
+    <div
+      className="desktop-sidebar-toggle fork-collapsed-rail"
+      style={{
+        position: "absolute",
+        top: "calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2)",
+        left: 4,
+        zIndex: 230,
+        display: "flex",
+        alignItems: "center",
+        gap: 2,
+      }}
+    >
+      <button
+        type="button"
+        onClick={handleSidebarToggle}
+        aria-controls="session-sidebar"
+        aria-expanded={false}
+        title={translate("sidebar.show")}
+        aria-label={translate("sidebar.show")}
+        className="fork-collapsed-rail-button"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          setSidebarOpen(true);
+          setSearchRequestId((id) => id + 1);
+        }}
+        title={translate("sidebar.toggleSessionSearch")}
+        aria-label={translate("sidebar.toggleSessionSearch")}
+        className="fork-collapsed-rail-button"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          // 与导轨里的「新建任务」同义：在当前目录开一条新会话。`startSessionIn`
+          // 已经是 AppShell 里「切目录 + 起新会话」的既有入口，不另写一份。
+          setSidebarOpen(true);
+          const cwd = selectedSession?.cwd ?? newSessionCwd ?? activeCwd ?? null;
+          if (cwd) startSessionIn(cwd, projectTrustCwd, null);
+        }}
+        title={translate("sidebar.newTask")}
+        aria-label={translate("sidebar.newTask")}
+        className="fork-collapsed-rail-button"
+      >
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8Z" />
+          <path d="M12 8v7M8.5 11.5h7" />
+        </svg>
+      </button>
+    </div>
+  );
+
   const renderSidebarToggle = (mobile: boolean) => (
     <button
       type="button"
@@ -2179,33 +2269,18 @@ export function AppShell() {
       title={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
       aria-label={sidebarOpen ? translate("sidebar.hide") : translate("sidebar.show")}
       style={{
-        // fork:ui-topbar-align — pinned to `top: 0` these controls sat 9px above
-        // the header's own centre (28px button in a 46px bar), so the boundary
-        // toggle looked out of line with every icon in the bar.
-        position: mobile ? "relative" : "absolute",
-        top: mobile ? undefined : "calc(env(safe-area-inset-top, 0px) + (var(--height-toolbar, 46px) - var(--control-md, 28px)) / 2)",
-        // The sidebar resizer writes this inherited variable on every pointer
-        // move. Reading it here keeps the boundary button in lockstep instead
-        // of waiting for React to commit the final width on pointer-up.
-        left: mobile ? undefined : sidebarOpen ? "var(--sidebar-width)" : "0px",
-        zIndex: mobile ? undefined : 230,
+        position: "relative",
         display: "flex", alignItems: "center", justifyContent: "center",
         width: TOP_BAR_ICON_BUTTON_SIZE, height: TOP_BAR_ICON_BUTTON_SIZE, padding: 0,
-        background: "var(--bg-panel)", border: "none", borderRight: "1px solid var(--border)",
+        background: "transparent", border: "none",
         color: "var(--text-muted)", cursor: "pointer", flexShrink: 0, transition: "color 0.12s",
       }}
       onMouseEnter={(event) => { event.currentTarget.style.color = "var(--text)"; }}
       onMouseLeave={(event) => { event.currentTarget.style.color = "var(--text-muted)"; }}
     >
-      {sidebarOpen ? (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="9" y1="3" x2="9" y2="21" />
-        </svg>
-      ) : (
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
-        </svg>
-      )}
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
+      </svg>
     </button>
   );
 
@@ -2431,7 +2506,8 @@ export function AppShell() {
           title={`${translate("layout.resizeSidebar")}: ${translate("layout.resizeHint")}`}
         />
       )}
-      {!isMobile && renderSidebarToggle(false)}
+      {/* fork:zn-21 — 桌面：折叠时才在这条线上出现图标条；展开时折叠按钮在导轨品牌行里。 */}
+      {!isMobile && !sidebarOpen && renderCollapsedRail()}
 
        <div
          ref={rightPanelResizer.panelRef}
@@ -2441,7 +2517,13 @@ export function AppShell() {
            // The sidebar control is deliberately outside the workspace header.
            // Reserve its hit-target width inside whichever surface is currently
            // in the main region, so the control never covers its first action.
-           "--main-workspace-header-leading-inset": `${TOP_BAR_ICON_BUTTON_SIZE}px`,
+           // fork:zn-21 — 折叠态图标条是 3 个 28px 按钮 + 2 个 2px 间隙 + 左偏 4px。
+           // 展开时那个位置没有浮层，顶栏第一个动作可以贴边。
+           // 手机保留原值：移动端的开合按钮是表头里的**流内**元素，不靠这条 inset 让位，
+           // 顺手把这里改成 92px 只会把标题顶到 92px 处。
+           "--main-workspace-header-leading-inset": isMobile
+             ? `${TOP_BAR_ICON_BUTTON_SIZE}px`
+             : sidebarOpen ? "0px" : "92px",
            // The right-edge role control is independent of both content
            // surfaces, so keep it out of the last header action as well.
            "--main-workspace-header-trailing-inset": `${TOP_BAR_ICON_BUTTON_SIZE}px`,
@@ -2771,6 +2853,7 @@ export function AppShell() {
               newSessionCwd={effectiveNewSessionCwd}
               newSessionDraftKey={newSessionDraftKey}
               onAgentEnd={handleAgentEnd}
+              onAgentError={handleAgentError}
               onAttentionNeeded={handleAttentionNeeded}
               onSessionCreated={handleSessionCreated}
               // fork:zn-03 — empty-chat signal (setChatEmpty is stable, so the
@@ -3058,6 +3141,10 @@ export function AppShell() {
         onOpenFile={(filePath) => handleOpenFile(filePath, getFileName(filePath))}
         sessionId={selectedSession?.id ?? null}
         initialSection={settingsSection}
+        sidebarWidth={sidebarResizer.width}
+        onSidebarWidthChange={sidebarResizer.setWidth}
+        soundEnabled={soundEnabled}
+        onSoundToggle={onSoundToggle}
         quoteSelectionEnabled={quoteSelectionEnabled}
         onQuoteSelectionChange={handleQuoteSelectionChange}
         onClose={() => {
